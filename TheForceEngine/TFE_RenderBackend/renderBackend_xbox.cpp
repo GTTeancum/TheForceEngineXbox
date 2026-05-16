@@ -433,6 +433,91 @@ namespace TFE_RenderBackend
                         D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL,
                         clearColor, 1.0f, 0);
 
+        // -----------------------------------------------------------------
+        // Phase 1 of the RClassic_GPU/D3D8 port: hello-triangle in world
+        // space. Uses a fixed pose (camera at origin looking down +Z) and a
+        // triangle at z=100 so visibility is independent of game camera
+        // state. This proves the D3D8 fixed-function transform pipeline +
+        // matrix conventions are working before we wire the actual JEDI
+        // camera into the view matrix (Phase 2).
+        //
+        // Drawn from swap() rather than from TFE_Sectors_GPU::draw because
+        // the clear above otherwise wipes any geometry that the stub drew
+        // earlier in the frame. Phase 2 fixes this properly by moving the
+        // clear into clearVirtualDisplay() and BeginScene/EndScene into
+        // bind/unbindVirtualDisplay().
+        // -----------------------------------------------------------------
+        if (s_vdispGpuMode)
+        {
+            // D3D8 left-handed perspective projection. FOV ~90 deg horiz on
+            // 4:3, znear 1, zfar 4096. yScale = cot(fovY/2), xScale =
+            // yScale / aspect. For aspect=4/3 and fovY chosen so fovX=90:
+            // tan(fovX/2)=1 -> tan(fovY/2)=aspect_inv=0.75 -> yScale=4/3.
+            const f32 yScale = 4.0f / 3.0f;
+            const f32 xScale = 1.0f;            // = yScale / (4/3)
+            const f32 zn = 1.0f, zf = 4096.0f;
+            D3DMATRIX proj; memset(&proj, 0, sizeof(proj));
+            proj._11 = xScale;
+            proj._22 = yScale;
+            proj._33 = zf / (zf - zn);
+            proj._34 = 1.0f;
+            proj._43 = -zn * zf / (zf - zn);
+
+            // View = identity (camera at origin, looking down +Z LH).
+            D3DMATRIX view; memset(&view, 0, sizeof(view));
+            view._11 = view._22 = view._33 = view._44 = 1.0f;
+
+            // World = identity.
+            D3DMATRIX world; memset(&world, 0, sizeof(world));
+            world._11 = world._22 = world._33 = world._44 = 1.0f;
+
+            s_device->SetTransform(D3DTS_PROJECTION, &proj);
+            s_device->SetTransform(D3DTS_VIEW,       &view);
+            s_device->SetTransform(D3DTS_WORLD,      &world);
+
+            // Fixed-function: lighting off (vertex color is final), depth
+            // off (only thing on screen so order doesn't matter), no cull
+            // (so triangle is visible regardless of winding), no texture.
+            s_device->SetRenderState(D3DRS_LIGHTING,         FALSE);
+            s_device->SetRenderState(D3DRS_ZENABLE,          FALSE);
+            s_device->SetRenderState(D3DRS_ZWRITEENABLE,     FALSE);
+            s_device->SetRenderState(D3DRS_CULLMODE,         D3DCULL_NONE);
+            s_device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+            s_device->SetRenderState(D3DRS_ALPHATESTENABLE,  FALSE);
+            s_device->SetRenderState(D3DRS_FOGENABLE,        FALSE);
+
+            // Stage 0: take color from the diffuse vertex attribute only.
+            s_device->SetTextureStageState(0, D3DTSS_COLOROP,   D3DTOP_SELECTARG1);
+            s_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+            s_device->SetTextureStageState(0, D3DTSS_ALPHAOP,   D3DTOP_SELECTARG1);
+            s_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+            s_device->SetTexture(0, NULL);
+            s_device->SetTextureStageState(1, D3DTSS_COLOROP,   D3DTOP_DISABLE);
+            s_device->SetTextureStageState(1, D3DTSS_ALPHAOP,   D3DTOP_DISABLE);
+
+            struct HelloVert { f32 x, y, z; D3DCOLOR c; };
+            const DWORD HELLO_FVF = D3DFVF_XYZ | D3DFVF_DIFFUSE;
+
+            // World coords. Triangle in front of camera (at z=100, well
+            // within [zn,zf]). Y up. Big enough to be unmissable.
+            HelloVert v[3] =
+            {
+                { -40.0f, -30.0f, 100.0f, D3DCOLOR_XRGB(255,   0,   0) }, // bottom-left  red
+                {   0.0f,  40.0f, 100.0f, D3DCOLOR_XRGB(  0, 255,   0) }, // top          green
+                {  40.0f, -30.0f, 100.0f, D3DCOLOR_XRGB(  0,   0, 255) }, // bottom-right blue
+            };
+
+            s_device->SetVertexShader(HELLO_FVF);
+            HRESULT hr = s_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, v, sizeof(HelloVert));
+
+            static bool s_loggedFirstHello = false;
+            if (!s_loggedFirstHello)
+            {
+                s_loggedFirstHello = true;
+                TFE_XboxLogf("GPU", "Phase 1 hello-triangle drawn (hr=0x%08x)", hr);
+            }
+        }
+
         if (blitVirtualDisplay && s_vdispTex && !s_vdispGpuMode)
         {
             // Fixed-function pipeline: just sample the texture, no lighting,
