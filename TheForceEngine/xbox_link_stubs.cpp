@@ -247,6 +247,21 @@ namespace TFE_Jedi
 
 	static inline bool isPow2(u32 v) { return v != 0 && (v & (v - 1)) == 0; }
 
+	// Phase 6: convert sector->ambient (fixed16_16 in [0, MAX_LIGHT_LEVEL=31])
+	// into a 0xFFRRGGBB grayscale diffuse colour that MODULATEs the texel
+	// at stage 0. Pure linear mapping for the first cut - DF's actual
+	// light ramp is non-linear (colormap-based) but per-sector flat is
+	// good enough to restore the moody dim/bright contrast.
+	static inline u32 ambientToColor(fixed16_16 ambientFx)
+	{
+		s32 level = ambientFx >> 16;       // integer light level
+		if (level < 0)  level = 0;
+		if (level > 31) level = 31;
+		// 31 * 8 = 248, close enough to 255 to read as fullbright at max.
+		const u32 g = (u32)(level * 8);
+		return 0xFF000000u | (g << 16) | (g << 8) | g;
+	}
+
 	// Phase 5: floor + ceiling polygons.
 	//
 	// Each sector is a closed 2D polygon in XZ (vertices defined by
@@ -282,6 +297,7 @@ namespace TFE_Jedi
 		const f32 oz    = fixedToF(offset.z);
 		const f32 uMul  = 8.0f / (f32)tex->width;
 		const f32 vMul  = 8.0f / (f32)tex->height;
+		const u32 col   = ambientToColor(sector->ambient);
 
 		// Pin vertex of the fan = walls[0].w0.
 		vec2_fixed* v0 = sector->walls[0].w0;
@@ -297,11 +313,11 @@ namespace TFE_Jedi
 			const f32 xa = fixedToF(vA->x), za = fixedToF(vA->z);
 			const f32 xb = fixedToF(vB->x), zb = fixedToF(vB->z);
 
-			out[0].x = x0; out[0].y = y; out[0].z = z0;
+			out[0].x = x0; out[0].y = y; out[0].z = z0; out[0].color = col;
 			out[0].u = (x0 + ox) * uMul; out[0].v = (z0 + oz) * vMul;
-			out[1].x = xa; out[1].y = y; out[1].z = za;
+			out[1].x = xa; out[1].y = y; out[1].z = za; out[1].color = col;
 			out[1].u = (xa + ox) * uMul; out[1].v = (za + oz) * vMul;
-			out[2].x = xb; out[2].y = y; out[2].z = zb;
+			out[2].x = xb; out[2].y = y; out[2].z = zb; out[2].color = col;
 			out[2].u = (xb + ox) * uMul; out[2].v = (zb + oz) * vMul;
 			out += 3;
 		}
@@ -327,6 +343,7 @@ namespace TFE_Jedi
 		const f32 ceilY  = fixedToF(sector->ceilingHeight);
 		const f32 yt = ceilY;
 		const f32 yb = floorY;
+		const u32 col  = ambientToColor(sector->ambient);
 
 		TFE_RenderBackend::GpuTexVert   tv[6];
 		TFE_RenderBackend::GpuColorVert cv[6];
@@ -358,12 +375,12 @@ namespace TFE_Jedi
 					TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
 						tex, tex->image, tex->width, tex->height, /*columnMajor*/true);
 
-				tv[0].x = x0; tv[0].y = yb; tv[0].z = z0; tv[0].u = 0.0f; tv[0].v = vMax;
-				tv[1].x = x0; tv[1].y = yt; tv[1].z = z0; tv[1].u = 0.0f; tv[1].v = 0.0f;
-				tv[2].x = x1; tv[2].y = yt; tv[2].z = z1; tv[2].u = uMax; tv[2].v = 0.0f;
-				tv[3].x = x0; tv[3].y = yb; tv[3].z = z0; tv[3].u = 0.0f; tv[3].v = vMax;
-				tv[4].x = x1; tv[4].y = yt; tv[4].z = z1; tv[4].u = uMax; tv[4].v = 0.0f;
-				tv[5].x = x1; tv[5].y = yb; tv[5].z = z1; tv[5].u = uMax; tv[5].v = vMax;
+				tv[0].x = x0; tv[0].y = yb; tv[0].z = z0; tv[0].color = col; tv[0].u = 0.0f; tv[0].v = vMax;
+				tv[1].x = x0; tv[1].y = yt; tv[1].z = z0; tv[1].color = col; tv[1].u = 0.0f; tv[1].v = 0.0f;
+				tv[2].x = x1; tv[2].y = yt; tv[2].z = z1; tv[2].color = col; tv[2].u = uMax; tv[2].v = 0.0f;
+				tv[3].x = x0; tv[3].y = yb; tv[3].z = z0; tv[3].color = col; tv[3].u = 0.0f; tv[3].v = vMax;
+				tv[4].x = x1; tv[4].y = yt; tv[4].z = z1; tv[4].color = col; tv[4].u = uMax; tv[4].v = 0.0f;
+				tv[5].x = x1; tv[5].y = yb; tv[5].z = z1; tv[5].color = col; tv[5].u = uMax; tv[5].v = vMax;
 
 				TFE_RenderBackend::gpuDrawTexturedTrisWorld(
 					s_xboxViewMtx, s_xboxProjMtx, gpuTex, tv, 2);

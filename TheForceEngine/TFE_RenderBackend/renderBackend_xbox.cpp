@@ -921,8 +921,12 @@ namespace TFE_RenderBackend
         s_device->SetRenderState(D3DRS_FOGENABLE,        FALSE);
 
         s_device->SetTexture(0, (IDirect3DTexture8*)tex);
-        s_device->SetTextureStageState(0, D3DTSS_COLOROP,   D3DTOP_SELECTARG1);
-        s_device->SetTextureStageState(0, D3DTSS_COLORARG1, tex ? D3DTA_TEXTURE : D3DTA_DIFFUSE);
+        // MODULATE so per-vertex diffuse tints the texel (Phase 6
+        // per-sector ambient). With diffuse = 0xFFFFFFFF this is
+        // equivalent to the previous SELECTARG1 path.
+        s_device->SetTextureStageState(0, D3DTSS_COLOROP,   tex ? D3DTOP_MODULATE  : D3DTOP_SELECTARG1);
+        s_device->SetTextureStageState(0, D3DTSS_COLORARG1, tex ? D3DTA_TEXTURE    : D3DTA_DIFFUSE);
+        s_device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
         s_device->SetTextureStageState(0, D3DTSS_ALPHAOP,   D3DTOP_SELECTARG1);
         s_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
         s_device->SetTextureStageState(0, D3DTSS_MAGFILTER, D3DTEXF_POINT);
@@ -933,7 +937,7 @@ namespace TFE_RenderBackend
         s_device->SetTextureStageState(1, D3DTSS_COLOROP,   D3DTOP_DISABLE);
         s_device->SetTextureStageState(1, D3DTSS_ALPHAOP,   D3DTOP_DISABLE);
 
-        s_device->SetVertexShader(D3DFVF_XYZ | D3DFVF_TEX1);
+        s_device->SetVertexShader(D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
         s_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, triCount, verts, sizeof(GpuTexVert));
     }
 

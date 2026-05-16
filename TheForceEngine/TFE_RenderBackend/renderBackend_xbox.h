@@ -20,14 +20,16 @@ namespace TFE_RenderBackend
         u32 color;   // D3DCOLOR (0xAARRGGBB)
     };
 
-    // Single-vertex layout for textured geometry. Matches
-    // D3DFVF_XYZ | D3DFVF_TEX1 on the wire. UVs are normalised [0,1]
-    // with wrap addressing - values outside the unit range tile the
-    // texture (used by walls whose texelLength exceeds the texture
-    // width).
+    // Single-vertex layout for textured + per-vertex-colored geometry.
+    // Matches D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1. The diffuse
+    // colour MODULATEs the sampled texel at stage 0 - Phase 6 uses this
+    // for per-sector ambient lighting (every wall/floor/ceiling vert of
+    // a sector gets the same grayscale diffuse derived from
+    // sector->ambient). UVs are normalised [0,1] with WRAP addressing.
     struct GpuTexVert
     {
         f32 x, y, z;
+        u32 color;   // D3DCOLOR, 0xFFFFFFFF for fullbright
         f32 u, v;
     };
 
