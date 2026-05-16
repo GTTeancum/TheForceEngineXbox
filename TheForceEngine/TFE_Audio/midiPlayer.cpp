@@ -4,23 +4,84 @@
 #ifdef BUILD_SYSMIDI
 #include "systemMidiDevice.h"
 #endif
-#include <SDL_mutex.h>
-#include <SDL_thread.h>
 #include <TFE_Asset/gmidAsset.h>
 #include <TFE_System/system.h>
 #include <TFE_Settings/settings.h>
+#ifndef _XBOX
 #include <TFE_FrontEndUI/console.h>
+#endif
 #include <TFE_Audio/MidiSynth/soundFontDevice.h>
 #include <TFE_Audio/MidiSynth/fm4Opl3Device.h>
-#include <algorithm>
 #include <assert.h>
 
+#ifdef _XBOX
+// Xbox uses Win32 CRITICAL_SECTION + CreateThread instead of SDL primitives.
+// Keep the upstream threading model: a background midi update thread that
+// processes the command buffer and ticks the iMuse callback at fixed
+// intervals. Xbox XDK has full Win32 thread / sync APIs.
+#include <xtl.h>
+typedef CRITICAL_SECTION* TFE_MidiMutex_t;
+static CRITICAL_SECTION s_midiThreadCS;
+static CRITICAL_SECTION s_deviceChangeCS;
+static inline TFE_MidiMutex_t TFE_Midi_CreateMutex(CRITICAL_SECTION* cs) { InitializeCriticalSection(cs); return cs; }
+static inline void TFE_Midi_DestroyMutex(TFE_MidiMutex_t m) { if (m) DeleteCriticalSection(m); }
+static inline void TFE_Midi_Lock(TFE_MidiMutex_t m)         { if (m) EnterCriticalSection(m); }
+static inline void TFE_Midi_Unlock(TFE_MidiMutex_t m)       { if (m) LeaveCriticalSection(m); }
+#define SDL_mutex             CRITICAL_SECTION
+#define SDL_CreateMutex()     TFE_Midi_CreateMutex(&s_midiThreadCS)
+#define SDL_LockMutex(m)      TFE_Midi_Lock(m)
+#define SDL_UnlockMutex(m)    TFE_Midi_Unlock(m)
+#define SDL_DestroyMutex(m)   TFE_Midi_DestroyMutex(m)
+// We have two mutexes upstream (s_midiThreadMutex and s_deviceChangeMutex).
+// Provide a second creator that uses the second CS.
+#define SDL_CreateMutex2()    TFE_Midi_CreateMutex(&s_deviceChangeCS)
+// Thread - upstream uses SDL_Thread (opaque struct ptr); we use Win32
+// HANDLE under the hood and let `SDL_Thread*` reduce to `void*` (defined
+// below) so the upstream `static SDL_Thread* s_thread` assignments work
+// without a cast.
+typedef DWORD                 (WINAPI* XboxMidiThreadFn)(LPVOID);
+// SDL_CreateThread expects (int (*)(void*), name, data); shim it.
+static inline HANDLE TFE_Midi_CreateThread(int (*fn)(void*), void* data)
+{
+    struct Trampoline {
+        int (*fn)(void*);
+        void* data;
+        static DWORD WINAPI run(LPVOID p) {
+            Trampoline* t = (Trampoline*)p;
+            int r = t->fn(t->data);
+            delete t;
+            return (DWORD)r;
+        }
+    };
+    Trampoline* t = new Trampoline;
+    t->fn = fn; t->data = data;
+    return CreateThread(NULL, 0, &Trampoline::run, t, 0, NULL);
+}
+#define SDL_CreateThread(fn, name, data) TFE_Midi_CreateThread((fn), (data))
+#define SDL_WaitThread(thr, statusPtr)   do { if (thr) { WaitForSingleObject((thr), INFINITE); CloseHandle((thr)); } (void)(statusPtr); } while(0)
+// atomic_bool - upstream uses <atomic>. MSVC 2005 doesn't have it; use a
+// volatile LONG with interlocked ops.
+struct XboxAtomicBool {
+    LONG v;
+    XboxAtomicBool() : v(0) {}
+    void store(bool b) { InterlockedExchange(&v, b ? 1 : 0); }
+    bool load()        { return InterlockedCompareExchange(&v, 0, 0) != 0; }
+};
+#define atomic_bool XboxAtomicBool
+// SDL_Thread is upstream's opaque struct; treat as void on Xbox so
+// `SDL_Thread*` is just `void*` and assigns cleanly from HANDLE.
+#define SDL_Thread void
+#else
+#include <SDL_mutex.h>
+#include <SDL_thread.h>
+#include <algorithm>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN 1
 #include <Windows.h>
 #undef min
 #undef max
 #endif
+#endif // _XBOX
 
 using namespace TFE_Audio;
 
@@ -48,9 +109,17 @@ namespace TFE_MidiPlayer
 
 	struct MidiCallback
 	{
+#ifdef _XBOX
+		// C++03 (MSVC 2005) - no non-static member initializers.
+		void(*callback)(void);
+		f64 timeStep;
+		f64 accumulator;
+		MidiCallback() : callback(NULL), timeStep(0.0), accumulator(0.0) {}
+#else
 		void(*callback)(void) = nullptr;	// callback function to call.
 		f64 timeStep = 0.0;					// delay between calls, this acts like an interrupt handler.
 		f64 accumulator = 0.0;				// current accumulator.
+#endif
 	};
 		
 	static const f32 c_musicVolumeScale = 0.75f;
@@ -65,10 +134,27 @@ namespace TFE_MidiPlayer
 	static SDL_mutex* s_deviceChangeMutex = nullptr;
 
 	static MidiDevice* s_midiDevice = nullptr;
+#ifdef _XBOX
+	// MidiCallback has a user-defined ctor on Xbox (C++03) so the default-
+	// initializer form below would be ill-formed. Default-construct instead.
+	static MidiCallback s_midiCallback;
+#else
 	static MidiCallback s_midiCallback = {};
+#endif
 
+#ifdef _XBOX
+	// Fixed-size scratch buffer for the MIDI synth. Sized to hold one full
+	// audio chunk (1024 stereo samples = 2048 floats = 8 KB). audioCallback
+	// passes frames = bufferSize/(channels*sizeof(f32)) = 1024 with our
+	// 8 KB chunk - times 2 channels = 2048 floats. Allocate 4x that as
+	// headroom in case the chunk size ever grows.
+	enum { XBOX_MIDI_SAMPLE_BUF_FLOATS = 8192 };
+	static f32  s_sampleBuffer[XBOX_MIDI_SAMPLE_BUF_FLOATS];
+	static f32* s_sampleBufferPtr = s_sampleBuffer;
+#else
 	static std::vector<f32> s_sampleBuffer;
 	static f32* s_sampleBufferPtr = nullptr;
+#endif
 
 	// Hanging note detection.
 	struct Instrument
@@ -85,8 +171,10 @@ namespace TFE_MidiPlayer
 	void allocateMidiDevice(MidiDeviceType type);
 
 	// Console Functions
+#ifndef _XBOX
 	void setMusicVolumeConsole(const ConsoleArgList& args);
 	void getMusicVolumeConsole(const ConsoleArgList& args);
+#endif
 
 	static const char* c_midiDeviceTypes[] =
 	{
@@ -105,14 +193,18 @@ namespace TFE_MidiPlayer
 		s_midiThreadMutex = SDL_CreateMutex();
 		if (!s_midiThreadMutex)
 		{
-			TFE_System::logWrite(LOG_ERROR, "Midi", "cannot initialize SDL midi thread mutex");
+			TFE_System::logWrite(LOG_ERROR, "Midi", "cannot initialize midi thread mutex");
 			return false;
 		}
 
+#ifdef _XBOX
+		s_deviceChangeMutex = SDL_CreateMutex2();
+#else
 		s_deviceChangeMutex = SDL_CreateMutex();
+#endif
 		if (!s_deviceChangeMutex)
 		{
-			TFE_System::logWrite(LOG_ERROR, "Midi", "cannot initialize SDL device change mutex");
+			TFE_System::logWrite(LOG_ERROR, "Midi", "cannot initialize device change mutex");
 			return false;
 		}
 
@@ -142,8 +234,10 @@ namespace TFE_MidiPlayer
 			res = false;
 		}
 
+#ifndef _XBOX
 		CCMD("setMusicVolume", setMusicVolumeConsole, 1, "Sets the music volume, range is 0.0 to 1.0");
 		CCMD("getMusicVolume", getMusicVolumeConsole, 0, "Get the current music volume where 0 = silent, 1 = maximum.");
+#endif
 
 		TFE_Settings_Sound* soundSettings = TFE_Settings::getSoundSettings();
 		setVolume(soundSettings->musicVolume);
@@ -314,12 +408,24 @@ namespace TFE_MidiPlayer
 		{
 			// Stereo samples -> actual samples.
 			const s32 linearSampleCount = (s32)stereoSampleCount * 2;
+#ifdef _XBOX
+			// Fixed scratch buffer. Clamp request so the synth never writes
+			// past the end. If a caller ever asks for more than the static
+			// buffer holds, drop the request (silent for that chunk) rather
+			// than risk corruption.
+			if (linearSampleCount > XBOX_MIDI_SAMPLE_BUF_FLOATS)
+			{
+				SDL_UnlockMutex(s_deviceChangeMutex);
+				return;
+			}
+#else
 			// Make sure the sample buffer is large enough, this should only happen once.
 			if (linearSampleCount > (s32)s_sampleBuffer.size() || !s_sampleBufferPtr)
 			{
 				s_sampleBuffer.resize(linearSampleCount);
 				s_sampleBufferPtr = s_sampleBuffer.data();
 			}
+#endif
 
 			// The midi device takes the number of stereo samples.
 			s_midiDevice->render(s_sampleBufferPtr, stereoSampleCount);
@@ -539,7 +645,8 @@ namespace TFE_MidiPlayer
 		return 0;
 	}
 
-	// Console Functions
+#ifndef _XBOX
+	// Console Functions (no console UI on Xbox)
 	void setMusicVolumeConsole(const ConsoleArgList& args)
 	{
 		if (args.size() < 2) { return; }
@@ -557,6 +664,7 @@ namespace TFE_MidiPlayer
 		sprintf(res, "Sound Volume: %2.3f", s_masterVolume);
 		TFE_Console::addToHistory(res);
 	}
+#endif
 
 	void allocateMidiDevice(MidiDeviceType type)
 	{

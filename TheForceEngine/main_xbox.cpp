@@ -313,8 +313,11 @@ void __cdecl main()
     TFE_Audio::init(false, TFE_Settings::getSoundSettings()->audioDevice);
     TFE_System::logWrite(LOG_MSG, "Main", "Audio init returned.");
 
-    // MidiPlayer is stubbed on Xbox (MIDI baked to OGG).
-    // TFE_MidiPlayer::init() - not called.
+    // MidiPlayer: OPL3 software synth (Fm4Opl3Device). Default device type
+    // matches iMuse expectation; rendering happens inside the audio mixer
+    // callback chain via synthesizeMidi().
+    TFE_MidiPlayer::init(-1, MIDI_TYPE_OPL3);
+    TFE_System::logWrite(LOG_MSG, "Main", "MidiPlayer init returned.");
 
     // -----------------------------------------------------------------------
     // Asset systems
@@ -452,7 +455,7 @@ void __cdecl main()
     inputMapping_shutdown();
 
     TFE_Audio::shutdown();
-    // TFE_MidiPlayer::destroy() - stubbed.
+    TFE_MidiPlayer::destroy();
     TFE_Image::shutdown();
     TFE_Palette::freeAll();
     TFE_Settings::shutdown();

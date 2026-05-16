@@ -124,7 +124,7 @@ for %%F in (
     TheForceEngine\TFE_Audio\audioDevice_xbox.cpp
     TheForceEngine\TFE_Audio\audioFilters.cpp
     TheForceEngine\TFE_Audio\audioSystem.cpp
-    TheForceEngine\TFE_Audio\midiPlayer_xbox.cpp
+    TheForceEngine\TFE_Audio\midiPlayer.cpp
     TheForceEngine\TFE_DarkForces\Actor\actor.cpp
     TheForceEngine\TFE_DarkForces\Actor\actorSerialization.cpp
     TheForceEngine\TFE_DarkForces\Actor\animTables.cpp
