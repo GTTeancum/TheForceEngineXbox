@@ -92,10 +92,22 @@ enum iMuseSoundType TFE_ENUM_BASE(u64)  // Force enum to unsigned (C++ 11)
 {
 	typeMidi = 1u,
 	typeWave = 2u,
+#ifndef _XBOX
+	// On platforms with typed enums (C++11) these stay inside the enum.
 	imMidiFlag  = 0x8000000000000000u,
 	imMidiMask  = 0x7fffffffffffffffu,
+#endif
 	imValidMask = 0xfff00000u,
 };
+#ifdef _XBOX
+// MSVC 2005 has no typed enums - TFE_ENUM_BASE expands to nothing, so the
+// enum falls back to int. The 64-bit constants would silently truncate
+// (imMidiFlag became 0, imMidiMask became -1) and every midi soundId would
+// fail the imMidiFlag test in ImInternalGetSoundData. Hoist them out as
+// real u64 constants instead.
+static const u64 imMidiFlag = 0x8000000000000000ULL;
+static const u64 imMidiMask = 0x7fffffffffffffffULL;
+#endif
 
 enum iMuseErrorCode
 {

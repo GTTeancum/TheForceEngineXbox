@@ -476,9 +476,16 @@ namespace TFE_Jedi
 		u8* data = ImInternalGetSoundData(soundId);
 		if (!data)
 		{
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_ERROR, "iMuse", "ImStartSound: null data soundId=%d", (int)soundId);
+#endif
 			IM_LOG_ERR("%s", "null sound addr in StartSound()");
 			return imFail;
 		}
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "iMuse", "ImStartSound soundId=%d prio=%d sig=%c%c%c%c",
+			(int)soundId, priority, data[0]?data[0]:'.', data[1]?data[1]:'.', data[2]?data[2]:'.', data[3]?data[3]:'.');
+#endif
 
 		s32 i = 0;
 		for (; i < 4; i++)
@@ -1115,12 +1122,18 @@ namespace TFE_Jedi
 		FilePath filePath;
 		if (!TFE_Paths::getFilePath(midiFile, &filePath))
 		{
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_ERROR, "iMuse", "loadMidiFile: getFilePath FAILED for '%s'", midiFile);
+#endif
 			IM_LOG_ERR("Cannot find midi file '%s'.", midiFile);
 			return IM_NULL_SOUNDID;
 		}
 		FileStream file;
 		if (!file.open(&filePath, Stream::MODE_READ))
 		{
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_ERROR, "iMuse", "loadMidiFile: open FAILED for '%s'", midiFile);
+#endif
 			IM_LOG_ERR("Cannot open midi file '%s'.", midiFile);
 			return IM_NULL_SOUNDID;
 		}
@@ -1130,6 +1143,11 @@ namespace TFE_Jedi
 		s_midiFiles[s_midiFileCount] = (u8*)imuse_alloc(len);
 		file.readBuffer(s_midiFiles[s_midiFileCount], u32(len));
 		file.close();
+
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "iMuse", "loadMidiFile: '%s' OK, bytes=%d slot=%d",
+			midiFile, (int)len, (int)s_midiFileCount);
+#endif
 
 		ImSoundId id = ImSoundId(s_midiFileCount | imMidiFlag);
 		s_midiFileCount++;

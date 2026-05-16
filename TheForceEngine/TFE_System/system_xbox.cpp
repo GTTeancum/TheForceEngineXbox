@@ -84,6 +84,32 @@ namespace TFE_System
     static char         s_msgStr[LOG_MSG_BUF];
     static bool         s_logTimeEnabled = true;
 
+    // Serialise access to the shared format buffers above. Without this the
+    // midi thread (firing every ~6.8ms via the iMuse callback) and the main
+    // thread race into s_msgStr / s_workStr. Once corrupted, vsprintf can
+    // spin forever following a wild format pointer - manifests as a hard
+    // freeze with no further log output (seen during mission load on SECBASE
+    // right after the midi callback was registered for the first time).
+    // Lazily initialised on first call - all log entry points route through
+    // ensureLogCS() before touching the shared buffers. Three-state init
+    // (0 uninit -> 1 initing -> 2 ready) avoids the classic CAS race where
+    // a second thread enters EnterCriticalSection on a not-yet-initialised
+    // CS.
+    static CRITICAL_SECTION s_logCS;
+    static LONG             s_logCSState = 0;
+    static inline void ensureLogCS()
+    {
+        if (InterlockedCompareExchange((LPLONG)&s_logCSState, 1, 0) == 0)
+        {
+            InitializeCriticalSection(&s_logCS);
+            InterlockedExchange((LPLONG)&s_logCSState, 2);
+        }
+        else
+        {
+            while (s_logCSState != 2) { Sleep(0); }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // s_logWriteRaw - dispatch a write to the right kernel API based on which
     // call opened the handle.
@@ -154,6 +180,8 @@ namespace TFE_System
     extern "C" void TFE_XboxLogf(const char* tag, const char* fmt, ...)
     {
         if (!tag || !fmt) return;
+        ensureLogCS();
+        EnterCriticalSection(&s_logCS);
 
         va_list arg;
         va_start(arg, fmt);
@@ -162,6 +190,7 @@ namespace TFE_System
 
         sprintf(s_workStr, "[%s] %s\r\n", tag, s_msgStr);
         TFE_XboxLog(s_workStr);
+        LeaveCriticalSection(&s_logCS);
     }
 
     // -----------------------------------------------------------------------
@@ -424,17 +453,22 @@ namespace TFE_System
     void debugWrite(const char* tag, const char* str, ...)
     {
         if (!tag || !str) return;
+        ensureLogCS();
+        EnterCriticalSection(&s_logCS);
         va_list arg;
         va_start(arg, str);
         vsprintf(s_msgStr, str, arg);
         va_end(arg);
         sprintf(s_workStr, "[%s] %s\r\n", tag, s_msgStr);
         OutputDebugStringA(s_workStr);
+        LeaveCriticalSection(&s_logCS);
     }
 
     void logWrite(LogWriteType type, const char* tag, const char* str, ...)
     {
         if (type >= LOG_COUNT || !tag || !str) return;
+        ensureLogCS();
+        EnterCriticalSection(&s_logCS);
 
         va_list arg;
         va_start(arg, str);
@@ -468,6 +502,7 @@ namespace TFE_System
 
         // Write to log file if open (synchronous via WRITE_THROUGH).
         s_logWriteRaw(s_workStr, (DWORD)strlen(s_workStr));
+        LeaveCriticalSection(&s_logCS);
     }
 
     // Single log overwritten each boot; rotation removed.

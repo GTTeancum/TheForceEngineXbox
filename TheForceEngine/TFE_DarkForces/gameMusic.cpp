@@ -176,6 +176,12 @@ namespace TFE_DarkForces
 
 	void gameMusic_start(s32 level)
 	{
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "GameMusic", "gameMusic_start level=%d stalk='%s' fight='%s'",
+			level,
+			(level >= 1 && level <= MUS_LEVEL_COUNT) ? c_levelMusic[level-1][MUS_STATE_STALK-1] : "<oob>",
+			(level >= 1 && level <= MUS_LEVEL_COUNT) ? c_levelMusic[level-1][MUS_STATE_FIGHT-1] : "<oob>");
+#endif
 		memset(s_stateEntrances, 0, MUS_STATE_UNDEFINED * sizeof(s32));
 		s_musicTask = createSubTask("iMuse", gameMusic_taskFunc);
 
