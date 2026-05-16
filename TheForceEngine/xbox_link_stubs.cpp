@@ -254,22 +254,61 @@ namespace TFE_Jedi
 		return 0xFF000000u | (g << 16) | (g << 8) | g;
 	}
 
-	// Phase 5: floor + ceiling polygons.
+	// Phase 5.5 proper: multi-loop polygon triangulation for sector flats.
 	//
-	// Each sector is a closed 2D polygon in XZ (vertices defined by
-	// walking the wall list, taking each wall's w0 in order). Floor and
-	// ceiling are two horizontal triangle fans pinned to the sector's
-	// floorHeight / ceilingHeight. UVs come from world XZ - DF tiles one
-	// full texture every (texWidth/8) world units.
+	// DF sectors store walls as one OR MORE closed loops in
+	// sector->walls. Loop boundaries are implicit: walls[i].w1 ==
+	// walls[i+1].w0 inside a loop, and != at loop boundaries (and at
+	// the wrap from the last wall back to the first wall of its loop).
+	// Single-loop sectors are plain polygons. Multi-loop sectors have
+	// one outer boundary plus one or more interior "hole" boundaries
+	// (interior pillars / columns).
 	//
-	// Fan triangulation from vertex 0 is correct for convex sectors and
-	// produces overlapping triangles for concave ones - with CULLNONE +
-	// ZWRITE the visible result is still right (overlapping tris paint
-	// over each other at the same Y so they Z-tie and the last one wins,
-	// which is the same pixel value anyway). Ear-clip can replace this
-	// later if specific sectors look bad.
-	static const u32 XBOX_MAX_FLAT_VERTS = 512;
+	// Algorithm:
+	//   1. Walk walls; emit each w0 into v[], split into loops by
+	//      checking consecutive w1 == next w0.
+	//   2. Signed-area each loop. The loop with the largest |area| is
+	//      the outer boundary; all others are holes.
+	//   3. For each hole, pick its rightmost vertex H, find the
+	//      Euclidean-closest outer vertex O, splice the hole into the
+	//      outer at O via a degenerate bridge: ... O, H, hole-from-H-
+	//      around-back-to-H, H, O, ... . If the hole's winding doesn't
+	//      match the outer's, walk it in reverse so the unified polygon
+	//      stays simple.
+	//   4. Ear-clip the unified polygon.
+	//   5. If ear-clip gets stuck (degenerate input), fall back to the
+	//      old fan-from-v[0] for whatever wasn't emitted.
+	static const u32 XBOX_MAX_FLAT_VERTS = 2048;
+	static const u32 XBOX_MAX_FLAT_POLY  = 384;     // verts inc. bridge dupes
+	static const u32 XBOX_MAX_FLAT_LOOPS = 16;
 	static TFE_RenderBackend::GpuTexVert s_flatVerts[XBOX_MAX_FLAT_VERTS];
+
+	struct XboxFlatVert { f32 x, z; };
+
+	static inline bool xboxPointInTri(f32 px, f32 pz,
+	                                  f32 ax, f32 az,
+	                                  f32 bx, f32 bz,
+	                                  f32 cx, f32 cz)
+	{
+		const f32 d1 = (px - bx) * (az - bz) - (ax - bx) * (pz - bz);
+		const f32 d2 = (px - cx) * (bz - cz) - (bx - cx) * (pz - cz);
+		const f32 d3 = (px - ax) * (cz - az) - (cx - ax) * (pz - az);
+		const bool neg = (d1 < 0.0f) || (d2 < 0.0f) || (d3 < 0.0f);
+		const bool pos = (d1 > 0.0f) || (d2 > 0.0f) || (d3 > 0.0f);
+		return !(neg && pos);
+	}
+
+	static inline f32 xboxSignedArea2(const XboxFlatVert* v, u32 start, u32 count)
+	{
+		f32 a = 0.0f;
+		for (u32 i = 0; i < count; i++)
+		{
+			const XboxFlatVert& p = v[start + i];
+			const XboxFlatVert& q = v[start + (i + 1) % count];
+			a += p.x * q.z - q.x * p.z;
+		}
+		return a;
+	}
 
 	static void xboxDrawSectorFlat(RSector* sector, fixed16_16 heightFx,
 	                               TextureData** texPtr, vec2_fixed offset)
@@ -280,49 +319,206 @@ namespace TFE_Jedi
 		if (!isPow2(tex->width) || !isPow2(tex->height)) return;
 		if (sector->wallCount < 3) return;
 
-		const s32 n = sector->wallCount;
-		const u32 triCount = (u32)(n - 2);
-		if (triCount * 3 > XBOX_MAX_FLAT_VERTS) return;
+		// ---- Step 1: build vertex array + identify loop boundaries.
+		XboxFlatVert loopVerts[XBOX_MAX_FLAT_POLY];
+		u32 loopStart[XBOX_MAX_FLAT_LOOPS];
+		u32 loopLen  [XBOX_MAX_FLAT_LOOPS];
+		u32 numLoops = 0;
+		u32 vN = 0;
+		u32 curStart = 0;
 
-		const f32 y     = fixedToF(heightFx);
-		const f32 ox    = fixedToF(offset.x);
-		const f32 oz    = fixedToF(offset.z);
-		const f32 uMul  = 8.0f / (f32)tex->width;
-		const f32 vMul  = 8.0f / (f32)tex->height;
-		const u32 col   = ambientToColor(sector->ambient);
-
-		// Pin vertex of the fan = walls[0].w0.
-		vec2_fixed* v0 = sector->walls[0].w0;
-		if (!v0) return;
-		const f32 x0 = fixedToF(v0->x), z0 = fixedToF(v0->z);
-
-		TFE_RenderBackend::GpuTexVert* out = s_flatVerts;
-		for (s32 i = 1; i <= n - 2; i++)
+		for (s32 i = 0; i < sector->wallCount; i++)
 		{
-			vec2_fixed* vA = sector->walls[i    ].w0;
-			vec2_fixed* vB = sector->walls[i + 1].w0;
-			if (!vA || !vB) continue;
-			const f32 xa = fixedToF(vA->x), za = fixedToF(vA->z);
-			const f32 xb = fixedToF(vB->x), zb = fixedToF(vB->z);
+			RWall* w = &sector->walls[i];
+			if (!w->w0) continue;
+			if (vN >= XBOX_MAX_FLAT_POLY) return;
+			loopVerts[vN].x = fixedToF(w->w0->x);
+			loopVerts[vN].z = fixedToF(w->w0->z);
+			vN++;
 
-			out[0].x = x0; out[0].y = y; out[0].z = z0; out[0].color = col;
-			out[0].u = (x0 + ox) * uMul; out[0].v = (z0 + oz) * vMul;
-			out[1].x = xa; out[1].y = y; out[1].z = za; out[1].color = col;
-			out[1].u = (xa + ox) * uMul; out[1].v = (za + oz) * vMul;
-			out[2].x = xb; out[2].y = y; out[2].z = zb; out[2].color = col;
-			out[2].u = (xb + ox) * uMul; out[2].v = (zb + oz) * vMul;
-			out += 3;
+			// Loop boundary: this wall's w1 doesn't match the next
+			// wall's w0 (or this is the last wall in the sector).
+			vec2_fixed* nextW0 = (i + 1 < sector->wallCount)
+			                   ? sector->walls[i + 1].w0 : NULL;
+			if (w->w1 != nextW0)
+			{
+				if (numLoops >= XBOX_MAX_FLAT_LOOPS) return;
+				loopStart[numLoops] = curStart;
+				loopLen  [numLoops] = vN - curStart;
+				numLoops++;
+				curStart = vN;
+			}
+		}
+		if (numLoops == 0) return;
+
+		// ---- Step 2: identify the outer loop (largest |signed area|).
+		f32 loopArea[XBOX_MAX_FLAT_LOOPS];
+		u32 outerIdx = 0;
+		f32 maxAbs = 0.0f;
+		for (u32 i = 0; i < numLoops; i++)
+		{
+			loopArea[i] = xboxSignedArea2(loopVerts, loopStart[i], loopLen[i]);
+			const f32 a = (loopArea[i] < 0.0f) ? -loopArea[i] : loopArea[i];
+			if (a > maxAbs) { maxAbs = a; outerIdx = i; }
+		}
+		const f32 outerSign = (loopArea[outerIdx] >= 0.0f) ? 1.0f : -1.0f;
+
+		// ---- Step 3: build the unified polygon. Start with outer.
+		XboxFlatVert poly[XBOX_MAX_FLAT_POLY];
+		u32 pN = 0;
+		for (u32 i = 0; i < loopLen[outerIdx]; i++)
+		{
+			poly[pN++] = loopVerts[loopStart[outerIdx] + i];
 		}
 
-		const u32 actualTris = (u32)(out - s_flatVerts) / 3;
-		if (actualTris == 0) return;
+		// Splice each hole.
+		for (u32 h = 0; h < numLoops; h++)
+		{
+			if (h == outerIdx) continue;
+			const u32 hs = loopStart[h];
+			const u32 hL = loopLen[h];
+			if (hL < 3) continue;
+
+			// Reverse the hole's traversal direction if its signed area
+			// has the SAME sign as the outer (holes should be wound the
+			// opposite way).
+			const bool reverseHole =
+				((loopArea[h] >= 0.0f) ? 1.0f : -1.0f) == outerSign;
+
+			// Rightmost hole vertex - canonical bridge starting point.
+			u32 hStart = 0;
+			for (u32 i = 1; i < hL; i++)
+				if (loopVerts[hs + i].x > loopVerts[hs + hStart].x) hStart = i;
+			const XboxFlatVert hv = loopVerts[hs + hStart];
+
+			// Closest current-polygon vertex (Euclidean).
+			u32 bestO = 0;
+			f32 bestD = 1e30f;
+			for (u32 i = 0; i < pN; i++)
+			{
+				const f32 dx = poly[i].x - hv.x;
+				const f32 dz = poly[i].z - hv.z;
+				const f32 d2 = dx * dx + dz * dz;
+				if (d2 < bestD) { bestD = d2; bestO = i; }
+			}
+
+			// Splice in:  ... poly[0..bestO], O, H, hole_walk, H, O, poly[bestO+1..] ...
+			// We insert (hL + 2) new vertices right after position bestO.
+			const u32 insertN = hL + 2;
+			if (pN + insertN > XBOX_MAX_FLAT_POLY) continue;
+
+			// Shift the tail.
+			for (s32 k = (s32)pN - 1; k > (s32)bestO; k--)
+				poly[k + insertN] = poly[k];
+			pN += insertN;
+
+			// Write the spliced region.
+			u32 w = bestO + 1;
+			poly[w++] = hv;                                  // H (entering)
+			if (reverseHole)
+			{
+				for (u32 i = 1; i < hL; i++)
+				{
+					const u32 src = (hStart + hL - i) % hL;
+					poly[w++] = loopVerts[hs + src];
+				}
+			}
+			else
+			{
+				for (u32 i = 1; i < hL; i++)
+				{
+					const u32 src = (hStart + i) % hL;
+					poly[w++] = loopVerts[hs + src];
+				}
+			}
+			poly[w++] = hv;                                  // H (exiting)
+			poly[w++] = poly[bestO];                         // O (exiting)
+		}
+
+		// ---- Step 4: ear-clip the unified polygon.
+		const f32 y    = fixedToF(heightFx);
+		const f32 ox   = fixedToF(offset.x);
+		const f32 oz   = fixedToF(offset.z);
+		const f32 uMul = 8.0f / (f32)tex->width;
+		const f32 vMul = 8.0f / (f32)tex->height;
+		const u32 col  = ambientToColor(sector->ambient);
+
+		TFE_RenderBackend::GpuTexVert* out    = s_flatVerts;
+		TFE_RenderBackend::GpuTexVert* outEnd = s_flatVerts + XBOX_MAX_FLAT_VERTS;
+
+		u32 idx[XBOX_MAX_FLAT_POLY];
+		for (u32 i = 0; i < pN; i++) idx[i] = i;
+
+		u32 remaining = pN;
+		u32 guard = pN * pN + 16;
+		while (remaining > 3 && guard--)
+		{
+			bool found = false;
+			for (u32 i = 0; i < remaining; i++)
+			{
+				const u32 ia = idx[(i == 0) ? remaining - 1 : i - 1];
+				const u32 ib = idx[i];
+				const u32 ic = idx[(i + 1) % remaining];
+
+				const f32 cross = (poly[ib].x - poly[ia].x) * (poly[ic].z - poly[ib].z)
+				                - (poly[ib].z - poly[ia].z) * (poly[ic].x - poly[ib].x);
+				if (cross * outerSign <= 0.0f) continue;
+
+				bool ok = true;
+				for (u32 j = 0; j < remaining; j++)
+				{
+					const u32 ij = idx[j];
+					if (ij == ia || ij == ib || ij == ic) continue;
+					if (xboxPointInTri(poly[ij].x, poly[ij].z,
+					                    poly[ia].x, poly[ia].z,
+					                    poly[ib].x, poly[ib].z,
+					                    poly[ic].x, poly[ic].z))
+					{ ok = false; break; }
+				}
+				if (!ok) continue;
+
+				if (out + 3 > outEnd) break;
+				#define EMIT(ix) do {                                 \
+					out->x = poly[ix].x; out->y = y; out->z = poly[ix].z; \
+					out->color = col;                                  \
+					out->u = (poly[ix].x + ox) * uMul;                 \
+					out->v = (poly[ix].z + oz) * vMul;                 \
+					out++;                                             \
+				} while(0)
+				EMIT(ia); EMIT(ib); EMIT(ic);
+
+				for (u32 k = i; k + 1 < remaining; k++) idx[k] = idx[k + 1];
+				remaining--;
+				found = true;
+				break;
+			}
+			if (!found) break;
+		}
+
+		if (remaining == 3 && out + 3 <= outEnd)
+		{
+			EMIT(idx[0]); EMIT(idx[1]); EMIT(idx[2]);
+		}
+		else if (remaining > 3)
+		{
+			// Ear-clip stuck on a degenerate region - fan-cover what's
+			// left so we don't leave a giant gap.
+			for (u32 i = 1; i + 1 < remaining && out + 3 <= outEnd; i++)
+			{
+				EMIT(idx[0]); EMIT(idx[i]); EMIT(idx[i + 1]);
+			}
+		}
+		#undef EMIT
+
+		const u32 tris = (u32)(out - s_flatVerts) / 3;
+		if (tris == 0) return;
 
 		TFE_RenderBackend::GpuTextureHandle gpuTex =
 			TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
 				tex, tex->image, tex->width, tex->height, /*columnMajor*/true);
 
 		TFE_RenderBackend::gpuDrawTexturedTrisWorld(
-			s_xboxViewMtx, s_xboxProjMtx, gpuTex, s_flatVerts, actualTris);
+			s_xboxViewMtx, s_xboxProjMtx, gpuTex, s_flatVerts, tris);
 	}
 
 	// Draw every solid wall (no nextSector) of `sector`. Adjoin walls
@@ -570,6 +766,80 @@ namespace TFE_Jedi
 		}
 	}
 
+	// Phase 10: wall signs (buttons, switches, door panels, level
+	// number plates...). Each wall optionally has a signTex (TextureData**)
+	// positioned at signOffset (in texels from the wall's w0 corner
+	// horizontally, from the wall's top vertically). Drawn as a small
+	// alpha-tested quad nudged a hair toward the room interior so it
+	// sits cleanly on top of the wall texture instead of Z-fighting.
+	static void xboxDrawWallSign(RWall* w, f32 x0, f32 z0, f32 x1, f32 z1,
+	                              f32 ceilY, f32 floorY, u32 sectorColor)
+	{
+		if (!w->signTex || !*w->signTex) return;
+		TextureData* tex = *w->signTex;
+		if (!tex->image || tex->compressed != 0) return;
+		if (!isPow2(tex->width) || !isPow2(tex->height)) return;
+		if (w->midTexelHeight <= 0 || w->texelLength <= 0) return;
+
+		// Sign U range along the wall (in texels along its length).
+		const f32 wallTexelLen = fixedToF(w->texelLength);
+		const f32 sigU0Tx = fixedToF(w->signOffset.x);
+		const f32 sigU1Tx = sigU0Tx + (f32)tex->width;
+		const f32 fracL = sigU0Tx / wallTexelLen;
+		const f32 fracR = sigU1Tx / wallTexelLen;
+
+		// Sign Y range (in normalised wall fraction from top down).
+		const f32 wallTexelH = fixedToF(w->midTexelHeight);
+		const f32 sigV0Tx = fixedToF(w->signOffset.z);
+		const f32 sigV1Tx = sigV0Tx + (f32)tex->height;
+		const f32 fracT = sigV0Tx / wallTexelH;
+		const f32 fracB = sigV1Tx / wallTexelH;
+
+		// World positions of the sign quad corners.
+		const f32 dx = x1 - x0, dz = z1 - z0;
+		const f32 sxL = x0 + fracL * dx;
+		const f32 szL = z0 + fracL * dz;
+		const f32 sxR = x0 + fracR * dx;
+		const f32 szR = z0 + fracR * dz;
+		const f32 yT = ceilY + fracT * (floorY - ceilY);
+		const f32 yB = ceilY + fracB * (floorY - ceilY);
+
+		// Bias the sign 0.05 units along the wall normal toward the
+		// room interior. Wall normal in XZ for CCW-wound DF sectors:
+		// rotate the wall direction 90 degrees clockwise.
+		const f32 wallLen = fixedToF(w->length);
+		const f32 nx = (wallLen > 0.001f) ? ( dz / wallLen) : 0.0f;
+		const f32 nz = (wallLen > 0.001f) ? (-dx / wallLen) : 0.0f;
+		const f32 bias = 0.05f;
+		const f32 bx = nx * bias, bz = nz * bias;
+
+		TFE_RenderBackend::GpuTextureHandle gpuTex =
+			TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
+				tex, tex->image, tex->width, tex->height, /*columnMajor*/true);
+		if (!gpuTex) return;
+
+		TFE_RenderBackend::GpuTexVert v[6];
+		// BL
+		v[0].x = sxL + bx; v[0].y = yB; v[0].z = szL + bz;
+		v[0].color = sectorColor; v[0].u = 0.0f; v[0].v = 1.0f;
+		// TL
+		v[1].x = sxL + bx; v[1].y = yT; v[1].z = szL + bz;
+		v[1].color = sectorColor; v[1].u = 0.0f; v[1].v = 0.0f;
+		// TR
+		v[2].x = sxR + bx; v[2].y = yT; v[2].z = szR + bz;
+		v[2].color = sectorColor; v[2].u = 1.0f; v[2].v = 0.0f;
+		// BL
+		v[3] = v[0];
+		// TR
+		v[4] = v[2];
+		// BR
+		v[5].x = sxR + bx; v[5].y = yB; v[5].z = szR + bz;
+		v[5].color = sectorColor; v[5].u = 1.0f; v[5].v = 1.0f;
+
+		TFE_RenderBackend::gpuDrawAlphaTestedTrisWorld(
+			s_xboxViewMtx, s_xboxProjMtx, gpuTex, v, 2);
+	}
+
 	static void xboxDrawSectorWalls(RSector* sector)
 	{
 		const f32 floorY = fixedToF(sector->floorHeight);
@@ -592,6 +862,7 @@ namespace TFE_Jedi
 				xboxEmitWallQuad(sector->id, i, x0, z0, x1, z1,
 					ceilY, floorY,
 					w->midTex, w->texelLength, w->midTexelHeight, col);
+				xboxDrawWallSign(w, x0, z0, x1, z1, ceilY, floorY, col);
 				continue;
 			}
 
@@ -619,6 +890,11 @@ namespace TFE_Jedi
 					nextFloor, floorY,
 					w->botTex, w->texelLength, w->botTexelHeight, col);
 			}
+
+			// Sign overlay (door panels, switches, etc.) - draws on
+			// adjoin walls too. signOffset.z is measured down from the
+			// current sector's ceiling.
+			xboxDrawWallSign(w, x0, z0, x1, z1, ceilY, floorY, col);
 		}
 	}
 
