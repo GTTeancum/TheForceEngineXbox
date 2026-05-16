@@ -247,6 +247,76 @@ namespace TFE_Jedi
 
 	static inline bool isPow2(u32 v) { return v != 0 && (v & (v - 1)) == 0; }
 
+	// Phase 5: floor + ceiling polygons.
+	//
+	// Each sector is a closed 2D polygon in XZ (vertices defined by
+	// walking the wall list, taking each wall's w0 in order). Floor and
+	// ceiling are two horizontal triangle fans pinned to the sector's
+	// floorHeight / ceilingHeight. UVs come from world XZ - DF tiles one
+	// full texture every (texWidth/8) world units.
+	//
+	// Fan triangulation from vertex 0 is correct for convex sectors and
+	// produces overlapping triangles for concave ones - with CULLNONE +
+	// ZWRITE the visible result is still right (overlapping tris paint
+	// over each other at the same Y so they Z-tie and the last one wins,
+	// which is the same pixel value anyway). Ear-clip can replace this
+	// later if specific sectors look bad.
+	static const u32 XBOX_MAX_FLAT_VERTS = 512;
+	static TFE_RenderBackend::GpuTexVert s_flatVerts[XBOX_MAX_FLAT_VERTS];
+
+	static void xboxDrawSectorFlat(RSector* sector, fixed16_16 heightFx,
+	                               TextureData** texPtr, vec2_fixed offset)
+	{
+		if (!texPtr || !*texPtr) return;
+		TextureData* tex = *texPtr;
+		if (!tex->image || tex->compressed != 0) return;
+		if (!isPow2(tex->width) || !isPow2(tex->height)) return;
+		if (sector->wallCount < 3) return;
+
+		const s32 n = sector->wallCount;
+		const u32 triCount = (u32)(n - 2);
+		if (triCount * 3 > XBOX_MAX_FLAT_VERTS) return;
+
+		const f32 y     = fixedToF(heightFx);
+		const f32 ox    = fixedToF(offset.x);
+		const f32 oz    = fixedToF(offset.z);
+		const f32 uMul  = 8.0f / (f32)tex->width;
+		const f32 vMul  = 8.0f / (f32)tex->height;
+
+		// Pin vertex of the fan = walls[0].w0.
+		vec2_fixed* v0 = sector->walls[0].w0;
+		if (!v0) return;
+		const f32 x0 = fixedToF(v0->x), z0 = fixedToF(v0->z);
+
+		TFE_RenderBackend::GpuTexVert* out = s_flatVerts;
+		for (s32 i = 1; i <= n - 2; i++)
+		{
+			vec2_fixed* vA = sector->walls[i    ].w0;
+			vec2_fixed* vB = sector->walls[i + 1].w0;
+			if (!vA || !vB) continue;
+			const f32 xa = fixedToF(vA->x), za = fixedToF(vA->z);
+			const f32 xb = fixedToF(vB->x), zb = fixedToF(vB->z);
+
+			out[0].x = x0; out[0].y = y; out[0].z = z0;
+			out[0].u = (x0 + ox) * uMul; out[0].v = (z0 + oz) * vMul;
+			out[1].x = xa; out[1].y = y; out[1].z = za;
+			out[1].u = (xa + ox) * uMul; out[1].v = (za + oz) * vMul;
+			out[2].x = xb; out[2].y = y; out[2].z = zb;
+			out[2].u = (xb + ox) * uMul; out[2].v = (zb + oz) * vMul;
+			out += 3;
+		}
+
+		const u32 actualTris = (u32)(out - s_flatVerts) / 3;
+		if (actualTris == 0) return;
+
+		TFE_RenderBackend::GpuTextureHandle gpuTex =
+			TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
+				tex, tex->image, tex->width, tex->height, /*columnMajor*/true);
+
+		TFE_RenderBackend::gpuDrawTexturedTrisWorld(
+			s_xboxViewMtx, s_xboxProjMtx, gpuTex, s_flatVerts, actualTris);
+	}
+
 	// Draw every solid wall (no nextSector) of `sector`. Adjoin walls
 	// (nextSector != NULL) are skipped so the player can see through
 	// them into the next sector. The traversal in draw() pushes those
@@ -348,6 +418,8 @@ namespace TFE_Jedi
 			if (!sec || sec->wallCount <= 0) continue;
 
 			xboxDrawSectorWalls(sec);
+			xboxDrawSectorFlat(sec, sec->floorHeight,   sec->floorTex, sec->floorOffset);
+			xboxDrawSectorFlat(sec, sec->ceilingHeight, sec->ceilTex,  sec->ceilOffset);
 			visited++;
 
 			// Queue every neighbour reachable through an adjoin we
