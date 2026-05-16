@@ -115,14 +115,19 @@ Near term:
 - Save game support via writable HDD partition
 
 Medium term — **port `RClassic_GPU` from OpenGL/GLSL to D3D8 on NV2A**:
-- The single biggest CPU win available. The Xbox CPU is currently running column rasterization, texture sampling, depth interpolation, palette expansion, AI, physics, audio mixing, and OPL3 synthesis. Offloading the rasterizer to the NV2A frees ~30-50% of the CPU budget.
-- This is what makes ambitious audio (full iMuse + multiple sound sources + MIDI synth) and eventually higher-resolution / widescreen output viable.
-- Not primarily a visual upgrade — at 480p 4:3 the pixels look near-identical to software. It's about CPU headroom.
-- Substantial work: TFE's GPU renderer is GLSL 3.3+ with FBOs, MRT, programmable pipeline. NV2A has fixed-function + register combiners (pseudo pixel shaders) + limited vertex programs. A real port, not a mechanical translation. xquake's D3D8 backend is the closest existing reference.
+The single biggest CPU win available, and the gating dependency for two distinct goals:
+- **Audio/synth headroom.** The Xbox CPU is currently running column rasterization, texture sampling, depth interpolation, palette expansion, AI, physics, audio mixing, *and* OPL3 software synthesis. Offloading the rasterizer to the NV2A frees ~30-50% of the CPU budget — enough to run full iMuse music + multiple sound sources without stutter.
+- **Split-screen multiplayer.** Original Xbox has 4 controller ports — split-screen is the platform's defining feature. Rendering the world from 2 (co-op) or 4 (deathmatch) viewports per frame is infeasible on the CPU software path but trivial on NV2A (multiple `SetViewport` + draw passes). TFE upstream has no multiplayer at all (Dark Forces was DOS single-player), so this is a genuinely new Xbox-only feature — but the GPU port is the prerequisite.
+
+Not primarily a visual upgrade — at 480p 4:3 the pixels look near-identical to software. It's about CPU headroom and what it unlocks.
+
+Substantial work: TFE's GPU renderer is GLSL 3.3+ with FBOs, MRT, programmable pipeline. NV2A has fixed-function + register combiners (pseudo pixel shaders) + limited vertex programs. A real port, not a mechanical translation. xquake's D3D8 backend is the closest existing reference.
 
 Longer term:
 - Front-end menu (level select, options) — non-ImGui, native Xbox UI
 - Cutscene playback (Landru cutscene system is in the source tree but disabled)
+- Split-screen co-op and vs deathmatch (depends on GPU port)
+- System Link / network multiplayer (independent of GPU port but also benefits)
 - Outlaws support — pending upstream
 
 ---
