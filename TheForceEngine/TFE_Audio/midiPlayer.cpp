@@ -243,6 +243,12 @@ namespace TFE_MidiPlayer
 			TFE_System::logWrite(LOG_ERROR, "Midi", "cannot create Midi Thread!");
 			res = false;
 		}
+#ifdef _XBOX
+		else
+		{
+			TFE_System::logWrite(LOG_MSG, "Midi", "midi thread created (handle=%p)", s_thread);
+		}
+#endif
 
 #ifndef _XBOX
 		CCMD("setMusicVolume", setMusicVolumeConsole, 1, "Sets the music volume, range is 0.0 to 1.0");
@@ -469,6 +475,18 @@ namespace TFE_MidiPlayer
 		}
 		changeVolume();
 		SDL_UnlockMutex(s_midiThreadMutex);
+#ifdef _XBOX
+		// One-shot: log the first time iMuse (or anything else) registers a
+		// callback with us. If this never appears, iMuse's digital sound
+		// init isn't running and music has no driver.
+		static bool s_loggedFirstSet = false;
+		if (!s_loggedFirstSet)
+		{
+			s_loggedFirstSet = true;
+			TFE_System::logWrite(LOG_MSG, "Midi", "midiSetCallback registered (cb=%p timeStep=%d us)",
+				callback, (int)(timeStep * 1000000.0));
+		}
+#endif
 	}
 
 	void midiClearCallback()
@@ -610,6 +628,9 @@ namespace TFE_MidiPlayer
 		u64 localTime = 0;
 		u64 localTimeCallback = 0;
 		f64 dt = 0.0;
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "Midi", "midi thread entered loop");
+#endif
 		while (runThread)
 		{
 			SDL_LockMutex(s_midiThreadMutex);
