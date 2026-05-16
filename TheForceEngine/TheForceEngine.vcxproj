@@ -1,0 +1,1219 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="BuildForRelease|Win32">
+      <Configuration>BuildForRelease</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="BuildForRelease|x64">
+      <Configuration>BuildForRelease</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Profile|Win32">
+      <Configuration>Profile</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Profile|x64">
+      <Configuration>Profile</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>15.0</VCProjectVersion>
+    <ProjectGuid>{31CD2991-9EF0-4AA9-AEEB-BA1194D2DAB4}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>TheForceEngine</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v141</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v141</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='BuildForRelease|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v141</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v141</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v141</PlatformToolset>
+    <CharacterSet>NotSet</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v141</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>NotSet</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='BuildForRelease|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v141</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>NotSet</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v141</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>NotSet</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='BuildForRelease|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Profile|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='BuildForRelease|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Profile|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <IncludePath>$(ProjectDir);$(ProjectDir)\TFE_ForceScript\Angelscript\angelscript\include;$(ProjectDir)\TFE_ForceScript\Angelscript\add_on;$(ProjectDir)\sdl2_win32\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)\sdl2_win32\lib\x64;$(ProjectDir)\lib;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='BuildForRelease|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <IncludePath>$(ProjectDir);$(ProjectDir)\TFE_ForceScript\Angelscript\angelscript\include;$(ProjectDir)\TFE_ForceScript\Angelscript\add_on;$(ProjectDir)\sdl2_win32\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)\sdl2_win32\lib\x64;$(ProjectDir)\lib;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='BuildForRelease|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <IncludePath>$(ProjectDir);$(ProjectDir)\TFE_ScriptSystem\AngelScript\sdk\angelscript\include;$(ProjectDir)\TFE_ScriptSystem\AngelScript\sdk\add_on;$(ProjectDir)\devILx64\include;$(ProjectDir)\sdl2_win32\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)\sdl2_win32\lib\x64;$(ProjectDir)\lib;$(ProjectDir)\devILx64\lib\x64\Release;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <IncludePath>$(ProjectDir);$(ProjectDir)\TFE_ScriptSystem\AngelScript\sdk\angelscript\include;$(ProjectDir)\TFE_ScriptSystem\AngelScript\sdk\add_on;$(ProjectDir)\devILx64\include;$(ProjectDir)\sdl2_win32\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)\sdl2_win32\lib\x64;$(ProjectDir)\lib;$(ProjectDir)\devILx64\lib\x64\Release;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;GLEW_STATIC;BUILD_SYSMIDI;BUILD_EDITOR;WIN32_OPENGL;__WINDOWS_MM__;ASMJIT_EMBED;ASMJIT_STATIC;ASMJIT_NO_FOREIGN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PreBuildEvent>
+      <Command>
+      </Command>
+    </PreBuildEvent>
+    <Manifest>
+      <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
+    </Manifest>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='BuildForRelease|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Profile|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;GLEW_STATIC;BUILD_SYSMIDI;BUILD_EDITOR;WIN32_OPENGL;__WINDOWS_MM__;ASMJIT_EMBED;ASMJIT_STATIC;ASMJIT_NO_FOREIGN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <FloatingPointModel>Fast</FloatingPointModel>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <Manifest>
+      <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
+    </Manifest>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='BuildForRelease|x64'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;GLEW_STATIC;WIN32_OPENGL;__WINDOWS_MM__;ASMJIT_EMBED;ASMJIT_STATIC;ASMJIT_NO_FOREIGN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <FloatingPointModel>Fast</FloatingPointModel>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PreBuildEvent>
+      <Command>@(
+echo const char c_gitVersion[] = R"(
+git describe --tags
+echo ^)";
+) &gt; "$(ProjectDir)gitVersion.h"</Command>
+    </PreBuildEvent>
+    <Manifest>
+      <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
+    </Manifest>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;GLEW_STATIC;WIN32_OPENGL;__WINDOWS_MM__;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <Manifest>
+      <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
+    </Manifest>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="Shaders\curve.h" />
+    <ClInclude Include="Shaders\filter.h" />
+    <ClInclude Include="Shaders\grid.h" />
+    <ClInclude Include="Shaders\lighting.h" />
+    <ClInclude Include="Shaders\textureSampleFunc.h" />
+    <ClInclude Include="TFE_A11y\accessibility.h" />
+    <ClInclude Include="TFE_A11y\filePathList.h" />
+    <ClInclude Include="TFE_Archive\archive.h" />
+    <ClInclude Include="TFE_Archive\gobArchive.h" />
+    <ClInclude Include="TFE_Archive\gobMemoryArchive.h" />
+    <ClInclude Include="TFE_Archive\labArchive.h" />
+    <ClInclude Include="TFE_Archive\lfdArchive.h" />
+    <ClInclude Include="TFE_Archive\zipArchive.h" />
+    <ClInclude Include="TFE_Archive\zip\miniz.h" />
+    <ClInclude Include="TFE_Archive\zip\zip.h" />
+    <ClInclude Include="TFE_Archive\zstdCompression.h" />
+    <ClInclude Include="TFE_Asset\assetSystem.h" />
+    <ClInclude Include="TFE_Asset\colormapAsset.h" />
+    <ClInclude Include="TFE_Asset\dfKeywords.h" />
+    <ClInclude Include="TFE_Asset\fontAsset.h" />
+    <ClInclude Include="TFE_Asset\gameMessages.h" />
+    <ClInclude Include="TFE_Asset\gifWriter.h" />
+    <ClInclude Include="TFE_Asset\gmidAsset.h" />
+    <ClInclude Include="TFE_Asset\imageAsset.h" />
+    <ClInclude Include="TFE_Asset\levelList.h" />
+    <ClInclude Include="TFE_Asset\modelAsset_jedi.h" />
+    <ClInclude Include="TFE_Asset\msf_gif.h" />
+    <ClInclude Include="TFE_Asset\paletteAsset.h" />
+    <ClInclude Include="TFE_Asset\spriteAsset_Jedi.h" />
+    <ClInclude Include="TFE_Asset\textureAsset.h" />
+    <ClInclude Include="TFE_Asset\vocAsset.h" />
+    <ClInclude Include="TFE_Asset\vueAsset.h" />
+    <ClInclude Include="TFE_Audio\audioDevice.h" />
+    <ClInclude Include="TFE_Audio\audioFilters.h" />
+    <ClInclude Include="TFE_Audio\audioOutput.h" />
+    <ClInclude Include="TFE_Audio\audioSystem.h" />
+    <ClInclude Include="TFE_Audio\midi.h" />
+    <ClInclude Include="TFE_Audio\midiDevice.h" />
+    <ClInclude Include="TFE_Audio\midiPlayer.h" />
+    <ClInclude Include="TFE_Audio\MidiSynth\fm4Opl3Device.h" />
+    <ClInclude Include="TFE_Audio\MidiSynth\fm4Tables.h" />
+    <ClInclude Include="TFE_Audio\MidiSynth\opl3.h" />
+    <ClInclude Include="TFE_Audio\MidiSynth\soundFontDevice.h" />
+    <ClInclude Include="TFE_Audio\MidiSynth\tsf.h" />
+    <ClInclude Include="TFE_Audio\RtMidi.h" />
+    <ClInclude Include="TFE_Audio\systemMidiDevice.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\actor.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\actorInternal.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\actorModule.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\actorSerialization.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\animTables.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\bobaFett.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\dragon.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\enemies.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\exploders.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\flyers.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\mousebot.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\phaseOne.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\phaseThree.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\phaseTwo.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\scenery.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\sewer.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\troopers.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\turret.h" />
+    <ClInclude Include="TFE_DarkForces\Actor\welder.h" />
+    <ClInclude Include="TFE_DarkForces\agent.h" />
+    <ClInclude Include="TFE_DarkForces\animLogic.h" />
+    <ClInclude Include="TFE_DarkForces\automap.h" />
+    <ClInclude Include="TFE_DarkForces\briefingList.h" />
+    <ClInclude Include="TFE_DarkForces\cheats.h" />
+    <ClInclude Include="TFE_DarkForces\config.h" />
+    <ClInclude Include="TFE_DarkForces\darkForcesMain.h" />
+    <ClInclude Include="TFE_DarkForces\gameMessage.h" />
+    <ClInclude Include="TFE_DarkForces\gameMusic.h" />
+    <ClInclude Include="TFE_DarkForces\GameUI\agentMenu.h" />
+    <ClInclude Include="TFE_DarkForces\GameUI\delt.h" />
+    <ClInclude Include="TFE_DarkForces\GameUI\editBox.h" />
+    <ClInclude Include="TFE_DarkForces\GameUI\escapeMenu.h" />
+    <ClInclude Include="TFE_DarkForces\GameUI\menu.h" />
+    <ClInclude Include="TFE_DarkForces\GameUI\missionBriefing.h" />
+    <ClInclude Include="TFE_DarkForces\GameUI\pda.h" />
+    <ClInclude Include="TFE_DarkForces\GameUI\uiDraw.h" />
+    <ClInclude Include="TFE_DarkForces\generator.h" />
+    <ClInclude Include="TFE_DarkForces\hitEffect.h" />
+    <ClInclude Include="TFE_DarkForces\hud.h" />
+    <ClInclude Include="TFE_DarkForces\item.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\cutscene.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\cutsceneList.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\cutscene_film.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\cutscene_player.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lactor.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lactorAnim.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lactorCust.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lactorDelt.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lcanvas.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\ldraw.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lfade.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lfont.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lmusic.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lpalette.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lrect.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lsound.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lsystem.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\ltimer.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\lview.h" />
+    <ClInclude Include="TFE_DarkForces\Landru\textCrawl.h" />
+    <ClInclude Include="TFE_DarkForces\logic.h" />
+    <ClInclude Include="TFE_DarkForces\mission.h" />
+    <ClInclude Include="TFE_DarkForces\pickup.h" />
+    <ClInclude Include="TFE_DarkForces\player.h" />
+    <ClInclude Include="TFE_DarkForces\playerCollision.h" />
+    <ClInclude Include="TFE_DarkForces\playerLogic.h" />
+    <ClInclude Include="TFE_DarkForces\projectile.h" />
+    <ClInclude Include="TFE_DarkForces\random.h" />
+    <ClInclude Include="TFE_DarkForces\Scripting\gameScripts.h" />
+    <ClInclude Include="TFE_DarkForces\Scripting\gs_game.h" />
+    <ClInclude Include="TFE_DarkForces\Scripting\gs_level.h" />
+    <ClInclude Include="TFE_DarkForces\Scripting\gs_player.h" />
+    <ClInclude Include="TFE_DarkForces\Scripting\gs_system.h" />
+    <ClInclude Include="TFE_DarkForces\Scripting\scriptElev.h" />
+    <ClInclude Include="TFE_DarkForces\Scripting\scriptObject.h" />
+    <ClInclude Include="TFE_DarkForces\Scripting\scriptSector.h" />
+    <ClInclude Include="TFE_DarkForces\Scripting\scriptTexture.h" />
+    <ClInclude Include="TFE_DarkForces\Scripting\scriptWall.h" />
+    <ClInclude Include="TFE_DarkForces\sound.h" />
+    <ClInclude Include="TFE_DarkForces\time.h" />
+    <ClInclude Include="TFE_DarkForces\updateLogic.h" />
+    <ClInclude Include="TFE_DarkForces\util.h" />
+    <ClInclude Include="TFE_DarkForces\vueLogic.h" />
+    <ClInclude Include="TFE_DarkForces\weapon.h" />
+    <ClInclude Include="TFE_DarkForces\weaponFireFunc.h" />
+    <ClInclude Include="TFE_Editor\AssetBrowser\assetBrowser.h" />
+    <ClInclude Include="TFE_Editor\editor.h" />
+    <ClInclude Include="TFE_Editor\EditorAsset\editor3dThumbnails.h" />
+    <ClInclude Include="TFE_Editor\EditorAsset\editorAsset.h" />
+    <ClInclude Include="TFE_Editor\EditorAsset\editorColormap.h" />
+    <ClInclude Include="TFE_Editor\EditorAsset\editorFrame.h" />
+    <ClInclude Include="TFE_Editor\EditorAsset\editorLevelPreview.h" />
+    <ClInclude Include="TFE_Editor\EditorAsset\editorObj3D.h" />
+    <ClInclude Include="TFE_Editor\EditorAsset\editorSound.h" />
+    <ClInclude Include="TFE_Editor\EditorAsset\editorSprite.h" />
+    <ClInclude Include="TFE_Editor\EditorAsset\editorTexture.h" />
+    <ClInclude Include="TFE_Editor\editorComboBox.h" />
+    <ClInclude Include="TFE_Editor\editorConfig.h" />
+    <ClInclude Include="TFE_Editor\editorLevel.h" />
+    <ClInclude Include="TFE_Editor\editorMath.h" />
+    <ClInclude Include="TFE_Editor\editorProject.h" />
+    <ClInclude Include="TFE_Editor\editorResources.h" />
+    <ClInclude Include="TFE_Editor\errorMessages.h" />
+    <ClInclude Include="TFE_Editor\history.h" />
+    <ClInclude Include="TFE_Editor\historyView.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\browser.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\camera.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\confirmDialogs.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\contextMenu.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\dragSelect.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\editCommon.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\editEntity.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\editGeometry.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\editGuidelines.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\editNotes.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\editSector.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\editSurface.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\editTransforms.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\editVertex.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\entity.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\error.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\featureId.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\findSectorUI.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\groups.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\guidelines.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\hotkeys.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\infoPanel.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\levelDataSnapshot.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\levelEditor.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\levelEditorData.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\levelEditorHistory.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\levelEditorInf.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\lighting.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\note.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\Rendering\gizmo.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\Rendering\grid.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\Rendering\grid2d.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\Rendering\grid3d.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\Rendering\viewport.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\Scripting\levelEditorScripts.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\Scripting\ls_draw.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\Scripting\ls_level.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\Scripting\ls_selection.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\Scripting\ls_system.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\selection.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\sharedState.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\shell.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\snapshotUI.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\tabControl.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\testOptions.h" />
+    <ClInclude Include="TFE_Editor\LevelEditor\userPreferences.h" />
+    <ClInclude Include="TFE_Editor\snapshotReaderWriter.h" />
+    <ClInclude Include="TFE_ExternalData\pickupExternal.h" />
+    <ClInclude Include="TFE_FileSystem\filestream.h" />
+    <ClInclude Include="TFE_FileSystem\fileutil.h" />
+    <ClInclude Include="TFE_FileSystem\memorystream.h" />
+    <ClInclude Include="TFE_FileSystem\paths.h" />
+    <ClInclude Include="TFE_FileSystem\stream.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\add_on\scriptarray\scriptarray.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\add_on\scriptbuilder\scriptbuilder.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\add_on\scriptstdstring\scriptstdstring.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\include\angelscript.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_array.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_atomic.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_builder.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_bytecode.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_callfunc.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_compiler.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_config.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_configgroup.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_context.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_criticalsection.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_datatype.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_debug.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_gc.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_generic.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_map.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_memory.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_module.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_namespace.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_objecttype.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_outputbuffer.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_parser.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_property.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_restore.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_scriptcode.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_scriptengine.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_scriptfunction.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_scriptnode.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_scriptobject.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_string.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_string_util.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_symboltable.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_texts.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_thread.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_tokendef.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_tokenizer.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_typeinfo.h" />
+    <ClInclude Include="TFE_ForceScript\Angelscript\angelscript\source\as_variablescope.h" />
+    <ClInclude Include="TFE_ForceScript\float2.h" />
+    <ClInclude Include="TFE_ForceScript\float2x2.h" />
+    <ClInclude Include="TFE_ForceScript\float3.h" />
+    <ClInclude Include="TFE_ForceScript\float3x3.h" />
+    <ClInclude Include="TFE_ForceScript\float4.h" />
+    <ClInclude Include="TFE_ForceScript\float4x4.h" />
+    <ClInclude Include="TFE_ForceScript\forceScript.h" />
+    <ClInclude Include="TFE_ForceScript\ScriptAPI-Shared\scriptMath.h" />
+    <ClInclude Include="TFE_ForceScript\ScriptAPI-Shared\scriptTest.h" />
+    <ClInclude Include="TFE_ForceScript\ScriptAPI-Shared\sharedScriptAPI.h" />
+    <ClInclude Include="TFE_ForceScript\scriptAPI.h" />
+    <ClInclude Include="TFE_ForceScript\scriptInterface.h" />
+    <ClInclude Include="TFE_FrontEndUI\console.h" />
+    <ClInclude Include="TFE_FrontEndUI\frontEndUi.h" />
+    <ClInclude Include="TFE_FrontEndUI\modLoader.h" />
+    <ClInclude Include="TFE_FrontEndUI\profilerView.h" />
+    <ClInclude Include="TFE_FrontEndUI\uiTexture.h" />
+    <ClInclude Include="TFE_Game\igame.h" />
+    <ClInclude Include="TFE_Game\reticle.h" />
+    <ClInclude Include="TFE_Game\saveSystem.h" />
+    <ClInclude Include="TFE_Input\input.h" />
+    <ClInclude Include="TFE_Input\inputEnum.h" />
+    <ClInclude Include="TFE_Input\inputMapping.h" />
+    <ClInclude Include="TFE_Input\replay.h" />
+    <ClInclude Include="TFE_Jedi\Collision\collision.h" />
+    <ClInclude Include="TFE_Jedi\IMuse\imConst.h" />
+    <ClInclude Include="TFE_Jedi\IMuse\imDigitalSound.h" />
+    <ClInclude Include="TFE_Jedi\IMuse\imDigitalVolumeTable.h" />
+    <ClInclude Include="TFE_Jedi\IMuse\imList.h" />
+    <ClInclude Include="TFE_Jedi\IMuse\imMidiCmd.h" />
+    <ClInclude Include="TFE_Jedi\IMuse\imMidiPlayer.h" />
+    <ClInclude Include="TFE_Jedi\IMuse\imOpCodes.h" />
+    <ClInclude Include="TFE_Jedi\IMuse\imSoundFader.h" />
+    <ClInclude Include="TFE_Jedi\IMuse\imTrigger.h" />
+    <ClInclude Include="TFE_Jedi\IMuse\imuse.h" />
+    <ClInclude Include="TFE_Jedi\IMuse\midiData.h" />
+    <ClInclude Include="TFE_Jedi\InfSystem\infElevatorUpdateFunc.h" />
+    <ClInclude Include="TFE_Jedi\InfSystem\infPublicTypes.h" />
+    <ClInclude Include="TFE_Jedi\InfSystem\infState.h" />
+    <ClInclude Include="TFE_Jedi\InfSystem\infSystem.h" />
+    <ClInclude Include="TFE_Jedi\InfSystem\infTypesInternal.h" />
+    <ClInclude Include="TFE_Jedi\InfSystem\message.h" />
+    <ClInclude Include="TFE_Jedi\Level\level.h" />
+    <ClInclude Include="TFE_Jedi\Level\levelBin.h" />
+    <ClInclude Include="TFE_Jedi\Level\levelData.h" />
+    <ClInclude Include="TFE_Jedi\Level\levelTextures.h" />
+    <ClInclude Include="TFE_Jedi\Level\rfont.h" />
+    <ClInclude Include="TFE_Jedi\Level\robjData.h" />
+    <ClInclude Include="TFE_Jedi\Level\robject.h" />
+    <ClInclude Include="TFE_Jedi\Level\roffscreenBuffer.h" />
+    <ClInclude Include="TFE_Jedi\Level\rsector.h" />
+    <ClInclude Include="TFE_Jedi\Level\rtexture.h" />
+    <ClInclude Include="TFE_Jedi\Level\rwall.h" />
+    <ClInclude Include="TFE_Jedi\Math\core_math.h" />
+    <ClInclude Include="TFE_Jedi\Math\cosTable.h" />
+    <ClInclude Include="TFE_Jedi\Math\fixedPoint.h" />
+    <ClInclude Include="TFE_Jedi\Memory\allocator.h" />
+    <ClInclude Include="TFE_Jedi\Memory\list.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\jediRenderer.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\rclassicFixed.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\rclassicFixedSharedState.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\redgePairFixed.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\rflatFixed.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\rlightingFixed.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed_ClipFunc.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed_Clipping.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed_Culling.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed_PolygonDraw.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed_PolygonSetup.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed_PolyRenderFunc.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed_TransformAndLighting.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\rsectorFixed.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Fixed\rwallFixed.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\fixedPoint20.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\rclassicFloat.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\rclassicFloatSharedState.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\redgePairFloat.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\rflatFloat.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\rlightingFloat.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat_ClipFunc.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat_Clipping.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat_Culling.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat_PolygonDraw.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat_PolygonSetup.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat_PolyRenderFunc.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat_TransformAndLighting.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\rsectorFloat.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_Float\rwallFloat.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_GPU\debug.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_GPU\frustum.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_GPU\modelGPU.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_GPU\objectPortalPlanes.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_GPU\rclassicGPU.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_GPU\renderDebug.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_GPU\rsectorGPU.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_GPU\sbuffer.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_GPU\screenDrawGPU.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_GPU\sectorDisplayList.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\RClassic_GPU\spriteDisplayList.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\rcommon.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\redgePair.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\rlimits.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\robjectRender.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\rscanline.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\rsectorRender.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\rwallRender.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\rwallSegment.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\screenDraw.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\textureInfo.h" />
+    <ClInclude Include="TFE_Jedi\Renderer\virtualFramebuffer.h" />
+    <ClInclude Include="TFE_Jedi\Serialization\serialization.h" />
+    <ClInclude Include="TFE_Jedi\Task\task.h" />
+    <ClInclude Include="TFE_Jedi\Task\taskMacros.h" />
+    <ClInclude Include="TFE_Memory\chunkedArray.h" />
+    <ClInclude Include="TFE_Memory\memoryRegion.h" />
+    <ClInclude Include="TFE_Outlaws\outlawsMain.h" />
+    <ClInclude Include="TFE_Polygon\clipper.hpp" />
+    <ClInclude Include="TFE_Polygon\polygon.h" />
+    <ClInclude Include="TFE_PostProcess\blit.h" />
+    <ClInclude Include="TFE_PostProcess\bloomDownsample.h" />
+    <ClInclude Include="TFE_PostProcess\bloomMerge.h" />
+    <ClInclude Include="TFE_PostProcess\bloomThreshold.h" />
+    <ClInclude Include="TFE_PostProcess\overlay.h" />
+    <ClInclude Include="TFE_PostProcess\postprocess.h" />
+    <ClInclude Include="TFE_PostProcess\postprocesseffect.h" />
+    <ClInclude Include="TFE_RenderBackend\dynamicTexture.h" />
+    <ClInclude Include="TFE_RenderBackend\indexBuffer.h" />
+    <ClInclude Include="TFE_RenderBackend\renderBackend.h" />
+    <ClInclude Include="TFE_RenderBackend\renderState.h" />
+    <ClInclude Include="TFE_RenderBackend\shader.h" />
+    <ClInclude Include="TFE_RenderBackend\shaderBuffer.h" />
+    <ClInclude Include="TFE_RenderBackend\textureGpu.h" />
+    <ClInclude Include="TFE_RenderBackend\vertexBuffer.h" />
+    <ClInclude Include="TFE_RenderBackend\Win32OpenGL\gl.h" />
+    <ClInclude Include="TFE_RenderBackend\Win32OpenGL\glslParser.h" />
+    <ClInclude Include="TFE_RenderBackend\Win32OpenGL\openGL_Caps.h" />
+    <ClInclude Include="TFE_RenderBackend\Win32OpenGL\renderTarget.h" />
+    <ClInclude Include="TFE_RenderBackend\Win32OpenGL\screenCapture.h" />
+    <ClInclude Include="TFE_RenderShared\camera3d.h" />
+    <ClInclude Include="TFE_RenderShared\gridDef.h" />
+    <ClInclude Include="TFE_RenderShared\lineDraw2d.h" />
+    <ClInclude Include="TFE_RenderShared\lineDraw3d.h" />
+    <ClInclude Include="TFE_RenderShared\lineDrawMode.h" />
+    <ClInclude Include="TFE_RenderShared\modelDraw.h" />
+    <ClInclude Include="TFE_RenderShared\quadDraw2d.h" />
+    <ClInclude Include="TFE_RenderShared\texturePacker.h" />
+    <ClInclude Include="TFE_RenderShared\triDraw2d.h" />
+    <ClInclude Include="TFE_RenderShared\triDraw3d.h" />
+    <ClInclude Include="TFE_Settings\gameSourceData.h" />
+    <ClInclude Include="TFE_Settings\settings.h" />
+    <ClInclude Include="TFE_ExternalData\dfLogics.h" />
+    <ClInclude Include="TFE_ExternalData\logicTables.h" />
+    <ClInclude Include="TFE_ExternalData\weaponExternal.h" />
+    <ClInclude Include="TFE_Settings\windows\registry.h" />
+    <ClInclude Include="TFE_System\cJSON.h" />
+    <ClInclude Include="TFE_System\CrashHandler\crashHandler.h" />
+    <ClInclude Include="TFE_System\frameLimiter.h" />
+    <ClInclude Include="TFE_System\iniParser.h" />
+    <ClInclude Include="TFE_System\math.h" />
+    <ClInclude Include="TFE_System\memoryPool.h" />
+    <ClInclude Include="TFE_System\parser.h" />
+    <ClInclude Include="TFE_System\profiler.h" />
+    <ClInclude Include="TFE_System\system.h" />
+    <ClInclude Include="TFE_System\tfeMessage.h" />
+    <ClInclude Include="TFE_System\types.h" />
+    <ClInclude Include="TFE_System\utf8.h" />
+    <ClInclude Include="TFE_Ui\imGUI\Dirent\dirent.h" />
+    <ClInclude Include="TFE_Ui\imGUI\imconfig.h" />
+    <ClInclude Include="TFE_Ui\imGUI\imgui.h" />
+    <ClInclude Include="TFE_Ui\imGUI\imgui_impl_opengl3.h" />
+    <ClInclude Include="TFE_Ui\imGUI\imgui_impl_sdl2.h" />
+    <ClInclude Include="TFE_Ui\imGUI\imgui_internal.h" />
+    <ClInclude Include="TFE_Ui\imGUI\imgui_tfe_widgets.h" />
+    <ClInclude Include="TFE_Ui\imGUI\imstb_rectpack.h" />
+    <ClInclude Include="TFE_Ui\imGUI\imstb_textedit.h" />
+    <ClInclude Include="TFE_Ui\imGUI\imstb_truetype.h" />
+    <ClInclude Include="TFE_Ui\markdown.h" />
+    <ClInclude Include="TFE_Ui\portable-file-dialogs.h" />
+    <ClInclude Include="TFE_Ui\ui.h" />
+    <ClInclude Include="main.h" />
+    <ClInclude Include="Resource.h" />
+    <ClInclude Include="targetver.h" />
+    <ClInclude Include="version.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="TFE_A11y\accessibility.cpp" />
+    <ClCompile Include="TFE_A11y\filePathList.cpp" />
+    <ClCompile Include="TFE_Archive\archive.cpp" />
+    <ClCompile Include="TFE_Archive\gobArchive.cpp" />
+    <ClCompile Include="TFE_Archive\gobMemoryArchive.cpp" />
+    <ClCompile Include="TFE_Archive\labArchive.cpp" />
+    <ClCompile Include="TFE_Archive\lfdArchive.cpp" />
+    <ClCompile Include="TFE_Archive\zipArchive.cpp" />
+    <ClCompile Include="TFE_Archive\zip\zip.c" />
+    <ClCompile Include="TFE_Archive\zstdCompression.cpp" />
+    <ClCompile Include="TFE_Asset\assetSystem.cpp" />
+    <ClCompile Include="TFE_Asset\colormapAsset.cpp" />
+    <ClCompile Include="TFE_Asset\dfKeywords.cpp" />
+    <ClCompile Include="TFE_Asset\fontAsset.cpp" />
+    <ClCompile Include="TFE_Asset\gameMessages.cpp" />
+    <ClCompile Include="TFE_Asset\gifWriter.cpp" />
+    <ClCompile Include="TFE_Asset\gmidAsset.cpp" />
+    <ClCompile Include="TFE_Asset\imageAsset.cpp" />
+    <ClCompile Include="TFE_Asset\levelList.cpp" />
+    <ClCompile Include="TFE_Asset\modelAsset_jedi.cpp" />
+    <ClCompile Include="TFE_Asset\paletteAsset.cpp" />
+    <ClCompile Include="TFE_Asset\spriteAsset_Jedi.cpp" />
+    <ClCompile Include="TFE_Asset\textureAsset.cpp" />
+    <ClCompile Include="TFE_Asset\vocAsset.cpp" />
+    <ClCompile Include="TFE_Asset\vueAsset.cpp" />
+    <ClCompile Include="TFE_Audio\audioDevice.cpp" />
+    <ClCompile Include="TFE_Audio\audioFilters.cpp" />
+    <ClCompile Include="TFE_Audio\audioSystem.cpp" />
+    <ClCompile Include="TFE_Audio\midiPlayer.cpp" />
+    <ClCompile Include="TFE_Audio\MidiSynth\fm4Opl3Device.cpp" />
+    <ClCompile Include="TFE_Audio\MidiSynth\opl3.c" />
+    <ClCompile Include="TFE_Audio\MidiSynth\soundFontDevice.cpp" />
+    <ClCompile Include="TFE_Audio\RtMidi.cpp" />
+    <ClCompile Include="TFE_Audio\systemMidiDevice.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\actor.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\actorSerialization.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\animTables.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\bobaFett.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\dragon.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\enemies.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\exploders.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\flyers.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\mousebot.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\phaseOne.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\phaseThree.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\phaseTwo.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\scenery.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\sewer.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\troopers.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\turret.cpp" />
+    <ClCompile Include="TFE_DarkForces\Actor\welder.cpp" />
+    <ClCompile Include="TFE_DarkForces\agent.cpp" />
+    <ClCompile Include="TFE_DarkForces\animLogic.cpp" />
+    <ClCompile Include="TFE_DarkForces\automap.cpp" />
+    <ClCompile Include="TFE_DarkForces\briefingList.cpp" />
+    <ClCompile Include="TFE_DarkForces\cheats.cpp" />
+    <ClCompile Include="TFE_DarkForces\config.cpp" />
+    <ClCompile Include="TFE_DarkForces\darkForcesMain.cpp" />
+    <ClCompile Include="TFE_DarkForces\gameMessage.cpp" />
+    <ClCompile Include="TFE_DarkForces\gameMusic.cpp" />
+    <ClCompile Include="TFE_DarkForces\GameUI\agentMenu.cpp" />
+    <ClCompile Include="TFE_DarkForces\GameUI\delt.cpp" />
+    <ClCompile Include="TFE_DarkForces\GameUI\editBox.cpp" />
+    <ClCompile Include="TFE_DarkForces\GameUI\escapeMenu.cpp" />
+    <ClCompile Include="TFE_DarkForces\GameUI\menu.cpp" />
+    <ClCompile Include="TFE_DarkForces\GameUI\missionBriefing.cpp" />
+    <ClCompile Include="TFE_DarkForces\GameUI\pda.cpp" />
+    <ClCompile Include="TFE_DarkForces\GameUI\uiDraw.cpp" />
+    <ClCompile Include="TFE_DarkForces\generator.cpp" />
+    <ClCompile Include="TFE_DarkForces\hitEffect.cpp" />
+    <ClCompile Include="TFE_DarkForces\hud.cpp" />
+    <ClCompile Include="TFE_DarkForces\item.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\cutscene.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\cutsceneList.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\cutscene_film.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\cutscene_player.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lactor.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lactorAnim.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lactorCust.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lactorDelt.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lcanvas.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\ldraw.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lfade.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lfont.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lmusic.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lpalette.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lrect.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lsound.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lsystem.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\ltimer.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\lview.cpp" />
+    <ClCompile Include="TFE_DarkForces\Landru\textCrawl.cpp" />
+    <ClCompile Include="TFE_DarkForces\logic.cpp" />
+    <ClCompile Include="TFE_DarkForces\mission.cpp" />
+    <ClCompile Include="TFE_DarkForces\pickup.cpp" />
+    <ClCompile Include="TFE_DarkForces\player.cpp" />
+    <ClCompile Include="TFE_DarkForces\playerCollision.cpp" />
+    <ClCompile Include="TFE_DarkForces\projectile.cpp" />
+    <ClCompile Include="TFE_DarkForces\random.cpp" />
+    <ClCompile Include="TFE_DarkForces\Scripting\gameScripts.cpp" />
+    <ClCompile Include="TFE_DarkForces\Scripting\gs_game.cpp" />
+    <ClCompile Include="TFE_DarkForces\Scripting\gs_level.cpp" />
+    <ClCompile Include="TFE_DarkForces\Scripting\gs_player.cpp" />
+    <ClCompile Include="TFE_DarkForces\Scripting\gs_system.cpp" />
+    <ClCompile Include="TFE_DarkForces\Scripting\scriptElev.cpp" />
+    <ClCompile Include="TFE_DarkForces\Scripting\scriptObject.cpp" />
+    <ClCompile Include="TFE_DarkForces\Scripting\scriptSector.cpp" />
+    <ClCompile Include="TFE_DarkForces\Scripting\scriptTexture.cpp" />
+    <ClCompile Include="TFE_DarkForces\Scripting\scriptWall.cpp" />
+    <ClCompile Include="TFE_DarkForces\sound.cpp" />
+    <ClCompile Include="TFE_DarkForces\time.cpp" />
+    <ClCompile Include="TFE_DarkForces\updateLogic.cpp" />
+    <ClCompile Include="TFE_DarkForces\util.cpp" />
+    <ClCompile Include="TFE_DarkForces\vueLogic.cpp" />
+    <ClCompile Include="TFE_DarkForces\weapon.cpp" />
+    <ClCompile Include="TFE_DarkForces\weaponFireFunc.cpp" />
+    <ClCompile Include="TFE_Editor\AssetBrowser\assetBrowser.cpp" />
+    <ClCompile Include="TFE_Editor\editor.cpp" />
+    <ClCompile Include="TFE_Editor\EditorAsset\editor3dThumbnails.cpp" />
+    <ClCompile Include="TFE_Editor\EditorAsset\editorAsset.cpp" />
+    <ClCompile Include="TFE_Editor\EditorAsset\editorColormap.cpp" />
+    <ClCompile Include="TFE_Editor\EditorAsset\editorFrame.cpp" />
+    <ClCompile Include="TFE_Editor\EditorAsset\editorLevelPreview.cpp" />
+    <ClCompile Include="TFE_Editor\EditorAsset\editorObj3D.cpp" />
+    <ClCompile Include="TFE_Editor\EditorAsset\editorSound.cpp" />
+    <ClCompile Include="TFE_Editor\EditorAsset\editorSprite.cpp" />
+    <ClCompile Include="TFE_Editor\EditorAsset\editorTexture.cpp" />
+    <ClCompile Include="TFE_Editor\editorComboBox.cpp" />
+    <ClCompile Include="TFE_Editor\editorConfig.cpp" />
+    <ClCompile Include="TFE_Editor\editorLevel.cpp" />
+    <ClCompile Include="TFE_Editor\editorMath.cpp" />
+    <ClCompile Include="TFE_Editor\editorProject.cpp" />
+    <ClCompile Include="TFE_Editor\editorResources.cpp" />
+    <ClCompile Include="TFE_Editor\errorMessages.cpp" />
+    <ClCompile Include="TFE_Editor\history.cpp" />
+    <ClCompile Include="TFE_Editor\historyView.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\browser.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\camera.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\confirmDialogs.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\contextMenu.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\dragSelect.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\editCommon.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\editEntity.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\editGeometry.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\editGuidelines.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\editNotes.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\editSector.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\editSurface.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\editTransforms.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\editVertex.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\entity.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\featureId.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\findSectorUI.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\groups.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\guidelines.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\hotkeys.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\infoPanel.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\levelDataSnapshot.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\levelEditor.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\levelEditorData.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\levelEditorHistory.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\levelEditorInf.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\lighting.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\note.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\Rendering\gizmo.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\Rendering\grid.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\Rendering\grid2d.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\Rendering\grid3d.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\Rendering\viewport.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\Scripting\levelEditorScripts.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\Scripting\ls_draw.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\Scripting\ls_level.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\Scripting\ls_selection.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\Scripting\ls_system.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\selection.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\shell.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\snapshotUI.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\tabControl.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\testOptions.cpp" />
+    <ClCompile Include="TFE_Editor\LevelEditor\userPreferences.cpp" />
+    <ClCompile Include="TFE_Editor\snapshotReaderWriter.cpp" />
+    <ClCompile Include="TFE_ExternalData\pickupExternal.cpp" />
+    <ClCompile Include="TFE_FileSystem\filestream.cpp" />
+    <ClCompile Include="TFE_FileSystem\fileutil.cpp" />
+    <ClCompile Include="TFE_FileSystem\memorystream.cpp" />
+    <ClCompile Include="TFE_FileSystem\paths.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\add_on\scriptarray\scriptarray.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\add_on\scriptbuilder\scriptbuilder.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\add_on\scriptstdstring\scriptstdstring.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\add_on\scriptstdstring\scriptstdstring_utils.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_atomic.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_builder.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_bytecode.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_callfunc.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_callfunc_x64_msvc.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_callfunc_x86.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_compiler.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_configgroup.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_context.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_datatype.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_gc.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_generic.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_globalproperty.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_memory.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_module.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_objecttype.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_outputbuffer.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_parser.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_restore.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_scriptcode.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_scriptengine.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_scriptfunction.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_scriptnode.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_scriptobject.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_string.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_string_util.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_thread.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_tokenizer.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_typeinfo.cpp" />
+    <ClCompile Include="TFE_ForceScript\Angelscript\angelscript\source\as_variablescope.cpp" />
+    <ClCompile Include="TFE_ForceScript\float2.cpp" />
+    <ClCompile Include="TFE_ForceScript\float2x2.cpp" />
+    <ClCompile Include="TFE_ForceScript\float3.cpp" />
+    <ClCompile Include="TFE_ForceScript\float3x3.cpp" />
+    <ClCompile Include="TFE_ForceScript\float4.cpp" />
+    <ClCompile Include="TFE_ForceScript\float4x4.cpp" />
+    <ClCompile Include="TFE_ForceScript\forceScript.cpp" />
+    <ClCompile Include="TFE_ForceScript\ScriptAPI-Shared\scriptMath.cpp" />
+    <ClCompile Include="TFE_ForceScript\ScriptAPI-Shared\scriptTest.cpp" />
+    <ClCompile Include="TFE_ForceScript\ScriptAPI-Shared\sharedScriptAPI.cpp" />
+    <ClCompile Include="TFE_ForceScript\scriptInterface.cpp" />
+    <ClCompile Include="TFE_FrontEndUI\console.cpp" />
+    <ClCompile Include="TFE_FrontEndUI\frontEndUi.cpp" />
+    <ClCompile Include="TFE_FrontEndUI\modLoader.cpp" />
+    <ClCompile Include="TFE_FrontEndUI\profilerView.cpp" />
+    <ClCompile Include="TFE_FrontEndUI\uiTexture.cpp" />
+    <ClCompile Include="TFE_Game\igame.cpp" />
+    <ClCompile Include="TFE_Game\reticle.cpp" />
+    <ClCompile Include="TFE_Game\saveSystem.cpp" />
+    <ClCompile Include="TFE_Input\input.cpp" />
+    <ClCompile Include="TFE_Input\inputMapping.cpp" />
+    <ClCompile Include="TFE_Input\replay.cpp" />
+    <ClCompile Include="TFE_Jedi\Collision\collision.cpp" />
+    <ClCompile Include="TFE_Jedi\IMuse\imConst.cpp" />
+    <ClCompile Include="TFE_Jedi\IMuse\imDigitalSound.cpp" />
+    <ClCompile Include="TFE_Jedi\IMuse\imList.cpp" />
+    <ClCompile Include="TFE_Jedi\IMuse\imMidiCmd.cpp" />
+    <ClCompile Include="TFE_Jedi\IMuse\imMidiPlayer.cpp" />
+    <ClCompile Include="TFE_Jedi\IMuse\imSoundFader.cpp" />
+    <ClCompile Include="TFE_Jedi\IMuse\imTrigger.cpp" />
+    <ClCompile Include="TFE_Jedi\IMuse\imuse.cpp" />
+    <ClCompile Include="TFE_Jedi\IMuse\midiData.cpp" />
+    <ClCompile Include="TFE_Jedi\InfSystem\infState.cpp" />
+    <ClCompile Include="TFE_Jedi\InfSystem\infSystem.cpp" />
+    <ClCompile Include="TFE_Jedi\InfSystem\message.cpp" />
+    <ClCompile Include="TFE_Jedi\Level\level.cpp" />
+    <ClCompile Include="TFE_Jedi\Level\levelBin.cpp" />
+    <ClCompile Include="TFE_Jedi\Level\levelData.cpp" />
+    <ClCompile Include="TFE_Jedi\Level\levelTextures.cpp" />
+    <ClCompile Include="TFE_Jedi\Level\rfont.cpp" />
+    <ClCompile Include="TFE_Jedi\Level\robjData.cpp" />
+    <ClCompile Include="TFE_Jedi\Level\robject.cpp" />
+    <ClCompile Include="TFE_Jedi\Level\roffscreenBuffer.cpp" />
+    <ClCompile Include="TFE_Jedi\Level\rsector.cpp" />
+    <ClCompile Include="TFE_Jedi\Level\rtexture.cpp" />
+    <ClCompile Include="TFE_Jedi\Level\rwall.cpp" />
+    <ClCompile Include="TFE_Jedi\Math\core_math.cpp" />
+    <ClCompile Include="TFE_Jedi\Math\cosTable.cpp" />
+    <ClCompile Include="TFE_Jedi\Memory\allocator.cpp" />
+    <ClCompile Include="TFE_Jedi\Memory\list.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\jediRenderer.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\rclassicFixed.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\rclassicFixedSharedState.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\redgePairFixed.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\rflatFixed.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\rlightingFixed.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed_Clipping.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed_Culling.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed_PolygonDraw.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed_PolygonSetup.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\robj3d_fixed\robj3dFixed_TransformAndLighting.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\rsectorFixed.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Fixed\rwallFixed.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\rclassicFloat.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\rclassicFloatSharedState.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\redgePairFloat.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\rflatFloat.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\rlightingFloat.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat_Clipping.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat_Culling.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat_PolygonDraw.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat_PolygonSetup.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\robj3d_float\robj3dFloat_TransformAndLighting.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\rsectorFloat.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_Float\rwallFloat.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_GPU\debug.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_GPU\frustum.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_GPU\modelGPU.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_GPU\objectPortalPlanes.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_GPU\rclassicGPU.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_GPU\renderDebug.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_GPU\rsectorGPU.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_GPU\sbuffer.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_GPU\screenDrawGPU.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_GPU\sectorDisplayList.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\RClassic_GPU\spriteDisplayList.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\rcommon.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\rscanline.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\rsectorRender.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\screenDraw.cpp" />
+    <ClCompile Include="TFE_Jedi\Renderer\virtualFramebuffer.cpp" />
+    <ClCompile Include="TFE_Jedi\Serialization\serialization.cpp" />
+    <ClCompile Include="TFE_Jedi\Task\task.cpp" />
+    <ClCompile Include="TFE_Memory\chunkedArray.cpp" />
+    <ClCompile Include="TFE_Memory\memoryRegion.cpp" />
+    <ClCompile Include="TFE_Outlaws\outlawsMain.cpp" />
+    <ClCompile Include="TFE_Polygon\clipper.cpp" />
+    <ClCompile Include="TFE_Polygon\polygon.cpp" />
+    <ClCompile Include="TFE_PostProcess\blit.cpp" />
+    <ClCompile Include="TFE_PostProcess\bloomDownsample.cpp" />
+    <ClCompile Include="TFE_PostProcess\bloomMerge.cpp" />
+    <ClCompile Include="TFE_PostProcess\bloomThreshold.cpp" />
+    <ClCompile Include="TFE_PostProcess\overlay.cpp" />
+    <ClCompile Include="TFE_PostProcess\postprocess.cpp" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\dynamicTexture.cpp" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\glad.c" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\glslParser.cpp" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\indexBuffer.cpp" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\openGL_Caps.cpp" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\renderBackend.cpp" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\renderState.cpp" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\renderTarget.cpp" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\screenCapture.cpp" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\shader.cpp" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\shaderBuffer.cpp" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\textureGpu.cpp" />
+    <ClCompile Include="TFE_RenderBackend\Win32OpenGL\vertexBuffer.cpp" />
+    <ClCompile Include="TFE_RenderShared\lineDraw2d.cpp" />
+    <ClCompile Include="TFE_RenderShared\lineDraw3d.cpp" />
+    <ClCompile Include="TFE_RenderShared\lineDrawMode.cpp" />
+    <ClCompile Include="TFE_RenderShared\modelDraw.cpp" />
+    <ClCompile Include="TFE_RenderShared\quadDraw2d.cpp" />
+    <ClCompile Include="TFE_RenderShared\texturePacker.cpp" />
+    <ClCompile Include="TFE_RenderShared\triDraw2d.cpp" />
+    <ClCompile Include="TFE_RenderShared\triDraw3d.cpp" />
+    <ClCompile Include="TFE_Settings\settings.cpp" />
+    <ClCompile Include="TFE_ExternalData\dfLogics.cpp" />
+    <ClCompile Include="TFE_ExternalData\logicTables.cpp" />
+    <ClCompile Include="TFE_ExternalData\weaponExternal.cpp" />
+    <ClCompile Include="TFE_Settings\windows\registry.cpp" />
+    <ClCompile Include="TFE_System\cJSON.c" />
+    <ClCompile Include="TFE_System\CrashHandler\crashHandlerWin32.cpp" />
+    <ClCompile Include="TFE_System\frameLimiter.cpp" />
+    <ClCompile Include="TFE_System\iniParser.cpp" />
+    <ClCompile Include="TFE_System\log.cpp" />
+    <ClCompile Include="TFE_System\math.cpp" />
+    <ClCompile Include="TFE_System\memoryPool.cpp" />
+    <ClCompile Include="TFE_System\parser.cpp" />
+    <ClCompile Include="TFE_System\profiler.cpp" />
+    <ClCompile Include="TFE_System\system.cpp" />
+    <ClCompile Include="TFE_System\tfeMessage.cpp" />
+    <ClCompile Include="TFE_System\utf8.cpp" />
+    <ClCompile Include="TFE_Ui\imGUI\imgui.cpp" />
+    <ClCompile Include="TFE_Ui\imGUI\imgui_demo.cpp" />
+    <ClCompile Include="TFE_Ui\imGUI\imgui_draw.cpp" />
+    <ClCompile Include="TFE_Ui\imGUI\imgui_impl_opengl3.cpp" />
+    <ClCompile Include="TFE_Ui\imGUI\imgui_impl_sdl2.cpp" />
+    <ClCompile Include="TFE_Ui\imGUI\imgui_tables.cpp" />
+    <ClCompile Include="TFE_Ui\imGUI\imgui_tfe_widgets.cpp" />
+    <ClCompile Include="TFE_Ui\imGUI\imgui_widgets.cpp" />
+    <ClCompile Include="TFE_Ui\markdown.cpp" />
+    <ClCompile Include="TFE_Ui\ui.cpp" />
+    <ClCompile Include="main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="TheForceEngine.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="TheForceEngine.ico" />
+    <Image Include="small.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Documentation\markdown\About.md" />
+    <None Include="Documentation\markdown\Game\About.md" />
+    <None Include="Documentation\markdown\Game\TheForceEngine Manual.md" />
+    <None Include="Documentation\markdown\Game\GameManual.md" />
+    <None Include="Documentation\markdown\InfScript.md" />
+    <None Include="Documentation\markdown\InfTut_BasicDoor.md" />
+    <None Include="Documentation\markdown\InfTut_BasicElevator.md" />
+    <None Include="Documentation\markdown\InfTut_RedKeyDoor.md" />
+    <None Include="Documentation\markdown\InfTut_SwitchDoor.md" />
+    <None Include="Documentation\markdown\Inf_Editor.md" />
+    <None Include="Documentation\markdown\Inf_Elevators.md" />
+    <None Include="Documentation\markdown\Inf_FormattingDifferences.md" />
+    <None Include="Documentation\markdown\Inf_Functions.md" />
+    <None Include="Documentation\markdown\Inf_InteractiveElements.md" />
+    <None Include="Documentation\markdown\Inf_SimpleInteractiveElements.md" />
+    <None Include="Documentation\markdown\Inf_Teleporters.md" />
+    <None Include="Documentation\markdown\Inf_Triggers.md" />
+    <None Include="Documentation\markdown\Inf_Tutorials.md" />
+    <None Include="Documentation\markdown\Inf_Variables.md" />
+    <None Include="Documentation\markdown\Level Editor Shortcuts.md" />
+    <None Include="Documentation\markdown\Manifesto.md" />
+    <None Include="Documentation\markdown\Manual.md" />
+    <None Include="Shaders\blit.frag" />
+    <None Include="Shaders\blit.vert" />
+    <None Include="Shaders\bloom.vert" />
+    <None Include="Shaders\bloomDownsample.frag" />
+    <None Include="Shaders\bloomMerge.frag" />
+    <None Include="Shaders\bloomThreshold.frag" />
+    <None Include="Shaders\gpu_render_modelHologram.frag" />
+    <None Include="Shaders\gpu_render_modelHologram.vert" />
+    <None Include="Shaders\gpu_render_modelSolid.frag" />
+    <None Include="Shaders\gpu_render_modelSolid.vert" />
+    <None Include="Shaders\gpu_render_quad.frag" />
+    <None Include="Shaders\gpu_render_quad.vert" />
+    <None Include="Shaders\gpu_render_sprite.frag" />
+    <None Include="Shaders\gpu_render_sprite.vert" />
+    <None Include="Shaders\gpu_render_wall.frag" />
+    <None Include="Shaders\gpu_render_wall.vert" />
+    <None Include="Shaders\grid2d.frag" />
+    <None Include="Shaders\grid2d.vert" />
+    <None Include="Shaders\grid3d.frag" />
+    <None Include="Shaders\grid3d.vert" />
+    <None Include="Shaders\line2d.frag" />
+    <None Include="Shaders\line2d.vert" />
+    <None Include="Shaders\line3d.frag" />
+    <None Include="Shaders\line3d.vert" />
+    <None Include="Shaders\line3d_debug.frag" />
+    <None Include="Shaders\line3d_debug.vert" />
+    <None Include="Shaders\mdl3d.frag" />
+    <None Include="Shaders\mdl3d.vert" />
+    <None Include="Shaders\overlay.frag" />
+    <None Include="Shaders\overlay.vert" />
+    <None Include="Shaders\quad2d.frag" />
+    <None Include="Shaders\quad2d.vert" />
+    <None Include="Shaders\tri2dTextured.frag" />
+    <None Include="Shaders\tri2dTextured.vert" />
+    <None Include="Shaders\tri3dColor.frag" />
+    <None Include="Shaders\tri3dColor.vert" />
+    <None Include="Shaders\tri3dTexture.frag" />
+    <None Include="Shaders\tri3dTexture.vert" />
+    <None Include="Shaders\tri3dTextureClamp.frag" />
+    <None Include="Shaders\tri3dTextureTrans.frag" />
+    <CustomBuild Include="TFE_ForceScript\Angelscript\angelscript\source\as_callfunc_x64_msvc_asm.asm">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ml64.exe /c  /nologo /Fo"$(Configuration)\as_callfunc_x64_msvc_asm.obj" /W3 /Zi /Ta "%(RootDir)%(Directory)\%(Filename)%(Extension)"</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Configuration)\as_callfunc_x64_msvc_asm.obj;%(Outputs)</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">ml64.exe /c  /nologo /Fo"$(Configuration)\as_callfunc_x64_msvc_asm.obj" /W3 /Zi /Ta "%(RootDir)%(Directory)\%(Filename)%(Extension)"</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Configuration)\as_callfunc_x64_msvc_asm.obj;%(Outputs)</Outputs>
+    </CustomBuild>
+    <None Include="Shaders\tri3dWall.frag" />
+    <None Include="Shaders\tri3dWall.vert" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

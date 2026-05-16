@@ -1,0 +1,50 @@
+# --------------------------------------------------------------------------
+# TheForceEngineXbox .gitignore
+# --------------------------------------------------------------------------
+
+# Local-only upstream reference (re-clone from origin TFE when needed)
+TheForceEngine-ORIGINAL/
+
+# Xbox build output
+build/
+*.obj
+*.exe
+*.xbe
+*.lib
+*.map
+*.pdb
+*.ilk
+*.rsp
+*.exp
+build_xbox.log
+
+# Game data (NEVER commit copyrighted DF assets)
+DARK/
+Mods/
+Saves/
+
+# Editor / IDE
+.vs/
+.vscode/
+*.suo
+*.user
+*.sln.docstates
+*.sdf
+*.opensdf
+*.ncb
+
+# Claude Code session config (user-local permissions, not portable)
+.claude/
+
+# OS / misc
+Thumbs.db
+.DS_Store
+*.bak
+*.tmp
+*.swp
+*.swo
+*~
+
+# Pre-existing TFE Linux/Mac CI artefacts we don't need
+TheForceEngine/build/
+TheForceEngine/install/
