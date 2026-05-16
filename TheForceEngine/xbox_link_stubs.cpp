@@ -17,10 +17,14 @@
 #include <TFE_Jedi/Renderer/RClassic_GPU/rclassicGPU.h>
 #include <TFE_Jedi/Renderer/RClassic_GPU/rsectorGPU.h>
 #include <TFE_Jedi/Renderer/RClassic_GPU/screenDrawGPU.h>
+#include <TFE_Jedi/Level/rsector.h>
+#include <TFE_Jedi/Level/rwall.h>
+#include <TFE_RenderBackend/renderBackend_xbox.h>
 #include <TFE_ForceScript/forceScript.h>
 #include <TFE_DarkForces/Landru/lsystem.h>
 #include <TFE_Settings/windows/registry.h>
 
+#include <math.h>
 #include <string.h>
 
 // =====================================================================
@@ -94,40 +98,222 @@ namespace TFE_Jedi
 	void screenGPU_blitTextureIScale(TextureData*, DrawRect*, s32, s32, s32) {}
 
 	// =====================================================================
-	// RClassic_GPU stubs
+	// Phase 2 of the RClassic_GPU/D3D8 port.
+	//
+	// Camera globals are populated by RClassic_GPU::computeCameraTransform
+	// once per frame (called from jediRenderer at the end of the camera
+	// update). The Xbox renderer keeps its own D3D-LH view + projection
+	// matrices alongside, derived from the same yaw/pitch/position. We do
+	// NOT reuse RClassic_GPU's s_cameraProj because that matrix is built
+	// for OpenGL conventions (clip-z in [-1,1], w_clip = -view.z); D3D8
+	// needs clip-z in [0,1] and w_clip = +view.z, which is cleaner to
+	// build fresh from focal length + viewport.
 	// =====================================================================
+	Vec3f s_cameraPos   = { 0.0f, 0.0f, 0.0f };
+	Vec3f s_cameraDir   = { 0.0f, 0.0f, 0.0f };
+	Vec3f s_cameraDirXZ = { 0.0f, 0.0f, 0.0f };
+
+	// D3D-ready matrices, row-major (D3DMATRIX layout). Updated each frame.
+	static f32 s_xboxViewMtx[16];
+	static f32 s_xboxProjMtx[16];
+	static s32 s_xboxViewW = 320;
+	static s32 s_xboxViewH = 200;
+	static f32 s_xboxLastYaw = 0.0f, s_xboxLastPitch = 0.0f;
+
+	static inline void xboxIdentity4(f32 m[16])
+	{
+		memset(m, 0, sizeof(f32) * 16);
+		m[0] = m[5] = m[10] = m[15] = 1.0f;
+	}
+
+	static void xboxBuildProj()
+	{
+		// JEDI engine convention - at 320x200 with horiz FOV ~90 the
+		// focalLength = halfWidth (160), focalLenAspect = 160. The proj
+		// scales are 2*focal/dim, which for 320x200 gives xScale=1,
+		// yScale=1.6. Rectangular-pixel correction (200p) keeps yScale=1.6
+		// since aspectScaleY only kicks in for square-pixel resolutions.
+		const f32 halfW = (f32)(s_xboxViewW >> 1);
+		const f32 focal = halfW;            // 90 deg horiz FOV
+		const f32 focalAspect = halfW;      // 200p case, no scale
+		const f32 xScale = 2.0f * focal       / (f32)s_xboxViewW;
+		const f32 yScale = 2.0f * focalAspect / (f32)s_xboxViewH;
+		const f32 zn = 0.01f, zf = 4096.0f;
+
+		f32* p = s_xboxProjMtx;
+		memset(p, 0, sizeof(f32) * 16);
+		p[ 0] = xScale;
+		// NEGATIVE yScale flips screen-Y vs view-Y. JEDI uses -Y up in
+		// world space (floorHeight > ceilingHeight numerically); with a
+		// standard +yScale, view-space "up" lands on screen-space "down"
+		// and the world renders upside down (or, with the camera between
+		// floor and ceiling, simply off-screen). Flipping yScale lets us
+		// keep every vertex + the camera in TFE conventions and have the
+		// projection step do the handedness fix in one place.
+		p[ 5] = -yScale;
+		p[10] = zf / (zf - zn);
+		p[11] = 1.0f;                       // w_clip = view.z (D3D LH)
+		p[14] = -zn * zf / (zf - zn);
+	}
+
 	namespace RClassic_GPU
 	{
 		void resetState() {}
-		void setupInitCameraAndLights(s32, s32) {}
-		void changeResolution(s32, s32) {}
-		void computeCameraTransform(RSector*, f32, f32, f32, f32, f32) {}
+		void setupInitCameraAndLights(s32 w, s32 h)
+		{
+			s_xboxViewW = w; s_xboxViewH = h;
+			xboxBuildProj();
+			xboxIdentity4(s_xboxViewMtx);
+		}
+		void changeResolution(s32 w, s32 h)
+		{
+			s_xboxViewW = w; s_xboxViewH = h;
+			xboxBuildProj();
+		}
+		void computeCameraTransform(RSector*, f32 pitch, f32 yaw,
+		                            f32 camX, f32 camY, f32 camZ)
+		{
+			s_cameraPos.x = camX; s_cameraPos.y = camY; s_cameraPos.z = camZ;
+			s_xboxLastYaw = yaw; s_xboxLastPitch = pitch;
+
+			// TFE camera basis (matches rclassicGPU.cpp):
+			//   right   = ( cosYaw,                0,                 sinYaw)
+			//   up      = ( sinYaw*sinPitch,       cosPitch,         -cosYaw*sinPitch)
+			//   forward = (-sinYaw*cosPitch,       sinPitch,          cosYaw*cosPitch)
+			// (TFE stores forward = -m2 since m2 is "back"; we materialise
+			// forward directly here so the D3D view matrix is straightforward.)
+			//
+			// Angles arrive in JEDI angle14 units (16384 = 2pi). sinCosFlt
+			// does the unit conversion - calling raw sinf/cosf treats the
+			// 14-bit angle as radians and produces a garbage basis (the
+			// Phase 2 walls drew at hr=S_OK but landed off-screen).
+			f32 sy, cy, sp, cp;
+			TFE_Jedi::sinCosFlt(-yaw,   &sy, &cy);
+			TFE_Jedi::sinCosFlt(-pitch, &sp, &cp);
+			const Vec3f r = {  cy,             0.0f,           sy           };
+			const Vec3f u = {  sy * sp,        cp,            -cy * sp      };
+			const Vec3f f = { -sy * cp,        sp,             cy * cp      };
+			s_cameraDir   = f;
+			s_cameraDirXZ.x = f.x; s_cameraDirXZ.y = 0.0f; s_cameraDirXZ.z = f.z;
+
+			// D3D LH view matrix, row-vector convention:
+			//   [ r.x  u.x  f.x  0 ]
+			//   [ r.y  u.y  f.y  0 ]
+			//   [ r.z  u.z  f.z  0 ]
+			//   [-P.r -P.u -P.f  1 ]
+			const Vec3f P = s_cameraPos;
+			f32* m = s_xboxViewMtx;
+			m[ 0] = r.x; m[ 1] = u.x; m[ 2] = f.x; m[ 3] = 0.0f;
+			m[ 4] = r.y; m[ 5] = u.y; m[ 6] = f.y; m[ 7] = 0.0f;
+			m[ 8] = r.z; m[ 9] = u.z; m[10] = f.z; m[11] = 0.0f;
+			m[12] = -(P.x*r.x + P.y*r.y + P.z*r.z);
+			m[13] = -(P.x*u.x + P.y*u.y + P.z*u.z);
+			m[14] = -(P.x*f.x + P.y*f.y + P.z*f.z);
+			m[15] = 1.0f;
+		}
 		void transformPointByCamera(vec3_float*, vec3_float*) {}
 		void computeSkyOffsets() {}
 	}
 
 	// =====================================================================
-	// TFE_Sectors_GPU class stubs
-	// The constructor is already inline in rsectorGPU.h, so we only
-	// need the virtual methods and non-virtual helpers.
+	// TFE_Sectors_GPU - Phase 2 implementation.
+	//
+	// draw(): walk the current sector's wall list and submit two triangles
+	// per wall (a vertical quad spanning ceilingHeight to floorHeight in
+	// world space). One flat color per wall, derived from wall index, so
+	// adjacent walls don't blend visually. No textures, no lighting, no
+	// portal traversal yet - just the room you're standing in as a
+	// flat-shaded outline. Adjoin walls (open portals to next sectors)
+	// render as solid in Phase 2 so the room reads as a closed volume.
+	//
+	// Per-frame allocation: a static vertex buffer sized for any plausible
+	// sector wall count. SECBASE's largest sectors hover around 30-40
+	// walls; 256 walls (1536 verts, 24 KB) is comfortable headroom.
 	// =====================================================================
+	static const u32 XBOX_MAX_WALLS_PER_DRAW = 256;
+	static TFE_RenderBackend::GpuColorVert s_wallVerts[XBOX_MAX_WALLS_PER_DRAW * 6];
+
+	static inline f32 fixedToF(fixed16_16 x) { return (f32)x * (1.0f / 65536.0f); }
+
+	// Cheap deterministic color from wall id so adjacent walls contrast.
+	static inline u32 wallColor(s32 wid, s32 secId)
+	{
+		const u32 seed = (u32)(wid * 2654435761u) ^ (u32)(secId * 374761393u);
+		const u8 r = (u8)(64 + (seed         & 0x7F));
+		const u8 g = (u8)(64 + ((seed >> 8)  & 0x7F));
+		const u8 b = (u8)(64 + ((seed >> 16) & 0x7F));
+		return (0xFFu << 24) | ((u32)r << 16) | ((u32)g << 8) | (u32)b;
+	}
+
 	void TFE_Sectors_GPU::destroy()             {}
 	void TFE_Sectors_GPU::reset()               {}
 	void TFE_Sectors_GPU::prepare()             {}
-	void TFE_Sectors_GPU::draw(RSector*)        {}
+	void TFE_Sectors_GPU::draw(RSector* sector)
+	{
+		if (!sector || sector->wallCount <= 0) return;
+
+		const f32 floorY = fixedToF(sector->floorHeight);
+		const f32 ceilY  = fixedToF(sector->ceilingHeight);
+
+		// Log on sector transitions so we can see the player walking
+		// through adjoins. Quiet during steady-state - one line on
+		// first draw, one line each time the player enters a new sector.
+		static s32 s_lastDrawnSectorId = -1;
+		if (sector->id != s_lastDrawnSectorId)
+		{
+			s_lastDrawnSectorId = sector->id;
+			TFE_System::logWrite(LOG_MSG, "GPU",
+				"entered sec=%d walls=%d floorY=%d/100 ceilY=%d/100 cam=(%d/100,%d/100,%d/100) yaw=%d pitch=%d",
+				sector->id, sector->wallCount,
+				(s32)(floorY * 100.0f), (s32)(ceilY * 100.0f),
+				(s32)(s_cameraPos.x * 100.0f), (s32)(s_cameraPos.y * 100.0f), (s32)(s_cameraPos.z * 100.0f),
+				(s32)s_xboxLastYaw, (s32)s_xboxLastPitch);
+		}
+
+		const s32 wallCount = (sector->wallCount < (s32)XBOX_MAX_WALLS_PER_DRAW)
+		                    ? sector->wallCount
+		                    : (s32)XBOX_MAX_WALLS_PER_DRAW;
+
+		u32 vi = 0;
+		for (s32 i = 0; i < wallCount; i++)
+		{
+			RWall* w = &sector->walls[i];
+			if (!w->w0 || !w->w1) continue;
+
+			const f32 x0 = fixedToF(w->w0->x);
+			const f32 z0 = fixedToF(w->w0->z);
+			const f32 x1 = fixedToF(w->w1->x);
+			const f32 z1 = fixedToF(w->w1->z);
+			const u32 c  = wallColor(i, sector->id);
+
+			// Two triangles forming the wall quad. Coords are in TFE's
+			// native -Y up convention - ceilY is numerically smaller
+			// (more negative) than floorY. The projection's -yScale
+			// flip handles the screen-space conversion.
+			const f32 yt = ceilY;
+			const f32 yb = floorY;
+
+			TFE_RenderBackend::GpuColorVert* v = &s_wallVerts[vi];
+			v[0].x = x0; v[0].y = yb; v[0].z = z0; v[0].color = c;
+			v[1].x = x0; v[1].y = yt; v[1].z = z0; v[1].color = c;
+			v[2].x = x1; v[2].y = yt; v[2].z = z1; v[2].color = c;
+			v[3].x = x0; v[3].y = yb; v[3].z = z0; v[3].color = c;
+			v[4].x = x1; v[4].y = yt; v[4].z = z1; v[4].color = c;
+			v[5].x = x1; v[5].y = yb; v[5].z = z1; v[5].color = c;
+			vi += 6;
+		}
+
+		const u32 triCount = vi / 3;
+		if (triCount > 0)
+		{
+			TFE_RenderBackend::gpuDrawColoredTrisWorld(
+				s_xboxViewMtx, s_xboxProjMtx, s_wallVerts, triCount);
+		}
+	}
 	void TFE_Sectors_GPU::subrendererChanged()  {}
 	void TFE_Sectors_GPU::flushCache()          {}
 	void TFE_Sectors_GPU::flushTextureCache()   {}
 	TextureGpu* TFE_Sectors_GPU::getColormap()  { return NULL; }
-
-	// =====================================================================
-	// Camera globals (defined in rclassicGPU.cpp which is excluded)
-	// Referenced by other GPU code that is also excluded, but the linker
-	// may still need them if jediRenderer.cpp touches the GPU path.
-	// =====================================================================
-	Vec3f s_cameraPos   = { 0.0f, 0.0f, 0.0f };
-	Vec3f s_cameraDir   = { 0.0f, 0.0f, 0.0f };
-	Vec3f s_cameraDirXZ = { 0.0f, 0.0f, 0.0f };
 
 	// =====================================================================
 	// getLevelScript / getLevelScriptFunc

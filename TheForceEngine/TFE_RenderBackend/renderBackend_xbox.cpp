@@ -16,6 +16,7 @@
 // settings here.
 
 #include <TFE_RenderBackend/renderBackend.h>
+#include <TFE_RenderBackend/renderBackend_xbox.h>
 #include <TFE_RenderBackend/textureGpu.h>
 #include <TFE_RenderBackend/dynamicTexture.h>
 #include <TFE_Settings/settings.h>
@@ -81,12 +82,24 @@ namespace TFE_RenderBackend
     static bool s_vsync        = false;
     static bool s_widescreen   = false;
     static bool s_deviceReady  = false;
-    // GPU render-target mode: when set, swap() clears to magenta and skips
-    // the 8-bit-vdisp blit. Phase 0 of the RClassic_GPU/D3D8 port - magenta
-    // is the visible signal that the renderer=1 path is being taken end to
-    // end. Becomes false again as soon as the GPU renderer draws real
-    // geometry.
+    // GPU render-target mode: when set, the per-frame contract is
+    //   bindVirtualDisplay   -> BeginScene
+    //   clearVirtualDisplay  -> Clear(TARGET|ZBUFFER|STENCIL, color)
+    //   ... sector / sprite / HUD draws happen here ...
+    //   unbindRenderTarget   -> no-op (scene stays open for HUD)
+    //   swap                 -> EndScene + Present (no clear, no blit)
+    // s_gpuSceneOpen tracks the BeginScene/EndScene pairing so menu /
+    // edge states that skip bind still get a valid frame.
     static bool s_vdispGpuMode = false;
+    static bool s_gpuSceneOpen = false;
+    // True once at least one GPU-mode frame has been Presented. While
+    // false, no-bind frames issue a black clear+Present so the loading
+    // screen left over from software mode doesn't sit on the front
+    // buffer. After that, no-bind frames skip Present entirely and the
+    // display engine continues scanning out the last wall frame from
+    // the front buffer - prevents flashing between wall frames and
+    // black clears at the mission_render vs main_loop rate mismatch.
+    static bool s_gpuFirstFramePresented = false;
 
     // Destination rect on back buffer (letterbox/pillarbox).
     static RECT s_destRect;
@@ -304,7 +317,7 @@ namespace TFE_RenderBackend
         s_vdispGpuMode  = (vdispInfo.flags & VDISP_RENDER_TARGET) != 0;
         if (s_vdispGpuMode)
         {
-            TFE_XboxLogf("VDISP", "GPU render-target mode active (Phase 0: magenta clear, no world geometry)");
+            TFE_XboxLogf("VDISP", "GPU render-target mode active");
         }
 
         computeDestRect();
@@ -416,109 +429,51 @@ namespace TFE_RenderBackend
     {
         if (!s_deviceReady) return;
 
-        // Required Xbox D3D8 frame bracket: BeginScene before any rendering
-        // (Clear/blit/etc.), EndScene before Present. Without these the
-        // device is in an invalid state and Present crashes inside the
-        // D3D HLE. Matches OpenJKDF2 fakeglx.cpp::SwapBuffers pattern.
+        // GPU mode:
+        //   - scene opened (mission_render ran this frame): finish + present.
+        //   - scene not opened, no GPU frame ever presented: clear + present
+        //     to wipe the stale software-mode loading screen.
+        //   - scene not opened, but walls were presented earlier: skip
+        //     Present so the display engine continues scanning out the
+        //     last wall frame (eliminates flashing at the main_loop vs
+        //     mission_render rate mismatch).
+        if (s_vdispGpuMode)
+        {
+            if (s_gpuSceneOpen)
+            {
+                s_device->EndScene();
+                s_gpuSceneOpen = false;
+                s_device->Present(NULL, NULL, NULL, NULL);
+                s_gpuFirstFramePresented = true;
+                return;
+            }
+            if (!s_gpuFirstFramePresented)
+            {
+                s_device->BeginScene();
+                s_device->Clear(0, NULL,
+                                D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL,
+                                D3DCOLOR_XRGB(0, 0, 0), 1.0f, 0);
+                s_device->EndScene();
+                s_device->Present(NULL, NULL, NULL, NULL);
+            }
+            // Otherwise: hold the last wall frame.
+            return;
+        }
+
+        // Software path - unchanged from Phase 0. Begin/Clear/blit/End/Present
+        // all inside swap() because the 8-bit framebuffer is uploaded as a
+        // texture and presented via a fullscreen quad here.
         s_device->BeginScene();
 
         // Always clear TARGET|ZBUFFER|STENCIL together (NV20 quirk).
         // OpenJKDF2 fakeglx.cpp:1829-1844. xquake same. Mercs same.
         // We allocated D3DFMT_D24S8 in the present params; partial-clear
         // leaves it undefined which the HLE Present path crashes on.
-        // Magenta clear in GPU mode is a Phase 0 marker - any pixel that
-        // stays magenta means the GPU renderer did not draw there yet.
-        const D3DCOLOR clearColor = s_vdispGpuMode ? D3DCOLOR_XRGB(255, 0, 255) : 0;
         s_device->Clear(0, NULL,
                         D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL,
-                        clearColor, 1.0f, 0);
+                        0, 1.0f, 0);
 
-        // -----------------------------------------------------------------
-        // Phase 1 of the RClassic_GPU/D3D8 port: hello-triangle in world
-        // space. Uses a fixed pose (camera at origin looking down +Z) and a
-        // triangle at z=100 so visibility is independent of game camera
-        // state. This proves the D3D8 fixed-function transform pipeline +
-        // matrix conventions are working before we wire the actual JEDI
-        // camera into the view matrix (Phase 2).
-        //
-        // Drawn from swap() rather than from TFE_Sectors_GPU::draw because
-        // the clear above otherwise wipes any geometry that the stub drew
-        // earlier in the frame. Phase 2 fixes this properly by moving the
-        // clear into clearVirtualDisplay() and BeginScene/EndScene into
-        // bind/unbindVirtualDisplay().
-        // -----------------------------------------------------------------
-        if (s_vdispGpuMode)
-        {
-            // D3D8 left-handed perspective projection. FOV ~90 deg horiz on
-            // 4:3, znear 1, zfar 4096. yScale = cot(fovY/2), xScale =
-            // yScale / aspect. For aspect=4/3 and fovY chosen so fovX=90:
-            // tan(fovX/2)=1 -> tan(fovY/2)=aspect_inv=0.75 -> yScale=4/3.
-            const f32 yScale = 4.0f / 3.0f;
-            const f32 xScale = 1.0f;            // = yScale / (4/3)
-            const f32 zn = 1.0f, zf = 4096.0f;
-            D3DMATRIX proj; memset(&proj, 0, sizeof(proj));
-            proj._11 = xScale;
-            proj._22 = yScale;
-            proj._33 = zf / (zf - zn);
-            proj._34 = 1.0f;
-            proj._43 = -zn * zf / (zf - zn);
-
-            // View = identity (camera at origin, looking down +Z LH).
-            D3DMATRIX view; memset(&view, 0, sizeof(view));
-            view._11 = view._22 = view._33 = view._44 = 1.0f;
-
-            // World = identity.
-            D3DMATRIX world; memset(&world, 0, sizeof(world));
-            world._11 = world._22 = world._33 = world._44 = 1.0f;
-
-            s_device->SetTransform(D3DTS_PROJECTION, &proj);
-            s_device->SetTransform(D3DTS_VIEW,       &view);
-            s_device->SetTransform(D3DTS_WORLD,      &world);
-
-            // Fixed-function: lighting off (vertex color is final), depth
-            // off (only thing on screen so order doesn't matter), no cull
-            // (so triangle is visible regardless of winding), no texture.
-            s_device->SetRenderState(D3DRS_LIGHTING,         FALSE);
-            s_device->SetRenderState(D3DRS_ZENABLE,          FALSE);
-            s_device->SetRenderState(D3DRS_ZWRITEENABLE,     FALSE);
-            s_device->SetRenderState(D3DRS_CULLMODE,         D3DCULL_NONE);
-            s_device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
-            s_device->SetRenderState(D3DRS_ALPHATESTENABLE,  FALSE);
-            s_device->SetRenderState(D3DRS_FOGENABLE,        FALSE);
-
-            // Stage 0: take color from the diffuse vertex attribute only.
-            s_device->SetTextureStageState(0, D3DTSS_COLOROP,   D3DTOP_SELECTARG1);
-            s_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
-            s_device->SetTextureStageState(0, D3DTSS_ALPHAOP,   D3DTOP_SELECTARG1);
-            s_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
-            s_device->SetTexture(0, NULL);
-            s_device->SetTextureStageState(1, D3DTSS_COLOROP,   D3DTOP_DISABLE);
-            s_device->SetTextureStageState(1, D3DTSS_ALPHAOP,   D3DTOP_DISABLE);
-
-            struct HelloVert { f32 x, y, z; D3DCOLOR c; };
-            const DWORD HELLO_FVF = D3DFVF_XYZ | D3DFVF_DIFFUSE;
-
-            // World coords. Triangle in front of camera (at z=100, well
-            // within [zn,zf]). Y up. Big enough to be unmissable.
-            HelloVert v[3] =
-            {
-                { -40.0f, -30.0f, 100.0f, D3DCOLOR_XRGB(255,   0,   0) }, // bottom-left  red
-                {   0.0f,  40.0f, 100.0f, D3DCOLOR_XRGB(  0, 255,   0) }, // top          green
-                {  40.0f, -30.0f, 100.0f, D3DCOLOR_XRGB(  0,   0, 255) }, // bottom-right blue
-            };
-
-            s_device->SetVertexShader(HELLO_FVF);
-            HRESULT hr = s_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, v, sizeof(HelloVert));
-
-            static bool s_loggedFirstHello = false;
-            if (!s_loggedFirstHello)
-            {
-                s_loggedFirstHello = true;
-                TFE_XboxLogf("GPU", "Phase 1 hello-triangle drawn (hr=0x%08x)", hr);
-            }
-        }
-
-        if (blitVirtualDisplay && s_vdispTex && !s_vdispGpuMode)
+        if (blitVirtualDisplay && s_vdispTex)
         {
             // Fixed-function pipeline: just sample the texture, no lighting,
             // no depth test, no culling, no blending.
@@ -660,8 +615,41 @@ namespace TFE_RenderBackend
     // Stubs - bindVirtualDisplay / clearVirtualDisplay / copyTo*
     // These are only used by the GPU renderer path which is not active.
     // -----------------------------------------------------------------------
-    void bindVirtualDisplay()                              {}
-    void clearVirtualDisplay(f32* /*color*/, bool)        {}
+    void bindVirtualDisplay()
+    {
+        if (!s_deviceReady || !s_vdispGpuMode) return;
+        if (!s_gpuSceneOpen)
+        {
+            s_device->BeginScene();
+            s_gpuSceneOpen = true;
+        }
+        // Back buffer is the only render target on Xbox right now (no
+        // offscreen RT yet) so nothing to SetRenderTarget here.
+    }
+
+    void clearVirtualDisplay(f32* color, bool clearColor)
+    {
+        if (!s_deviceReady || !s_vdispGpuMode) return;
+        if (!s_gpuSceneOpen)
+        {
+            s_device->BeginScene();
+            s_gpuSceneOpen = true;
+        }
+        D3DCOLOR c = D3DCOLOR_XRGB(0, 0, 0);
+        if (color && clearColor)
+        {
+            const u8 r = (u8)(color[0] * 255.0f);
+            const u8 g = (u8)(color[1] * 255.0f);
+            const u8 b = (u8)(color[2] * 255.0f);
+            const u8 a = (u8)(color[3] * 255.0f);
+            c = D3DCOLOR_ARGB(a, r, g, b);
+        }
+        // NV20 quirk - always clear all three together. D24S8 must not be
+        // left undefined or Present can crash inside the HLE.
+        s_device->Clear(0, NULL,
+                        D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL,
+                        c, 1.0f, 0);
+    }
     void copyToVirtualDisplay(RenderTargetHandle /*src*/)  {}
     void copyBackbufferToRenderTarget(RenderTargetHandle /*dst*/) {}
     void captureScreenToMemory(u32* /*mem*/)               {}
@@ -684,7 +672,64 @@ namespace TFE_RenderBackend
     void clearRenderTarget(RenderTargetHandle, const f32*, f32)     {}
     void clearRenderTargetDepth(RenderTargetHandle, f32)            {}
     void copyRenderTarget(RenderTargetHandle, RenderTargetHandle)   {}
-    void unbindRenderTarget()                                        {}
+    void unbindRenderTarget()
+    {
+        // Scene stays open through HUD/swap. Phase 2+ may move HUD here.
+    }
+
+    // -----------------------------------------------------------------------
+    // gpuDrawColoredTrisWorld - Phase 2 of the RClassic_GPU/D3D8 port.
+    // Untextured colored geometry in world space. Used by the JEDI sector
+    // renderer to visualise sector walls before texturing / lighting land.
+    // Sets matrices + FF state, draws, restores nothing - subsequent calls
+    // can change state freely.
+    // -----------------------------------------------------------------------
+    void gpuDrawColoredTrisWorld(const f32 viewMtx[16], const f32 projMtx[16],
+                                 const GpuColorVert* verts, u32 triCount)
+    {
+        if (!s_deviceReady || !s_gpuSceneOpen || !verts || triCount == 0) return;
+
+        D3DMATRIX view; memcpy(&view, viewMtx, sizeof(view));
+        D3DMATRIX proj; memcpy(&proj, projMtx, sizeof(proj));
+        D3DMATRIX world; memset(&world, 0, sizeof(world));
+        world._11 = world._22 = world._33 = world._44 = 1.0f;
+
+        s_device->SetTransform(D3DTS_PROJECTION, &proj);
+        s_device->SetTransform(D3DTS_VIEW,       &view);
+        s_device->SetTransform(D3DTS_WORLD,      &world);
+
+        // Untextured colored geometry: depth on (so walls occlude each
+        // other), cull off (Phase 2 - winding is unverified), no blending
+        // or fog, lighting off (the diffuse vertex attribute IS the color).
+        s_device->SetRenderState(D3DRS_LIGHTING,         FALSE);
+        s_device->SetRenderState(D3DRS_ZENABLE,          TRUE);
+        s_device->SetRenderState(D3DRS_ZWRITEENABLE,     TRUE);
+        s_device->SetRenderState(D3DRS_ZFUNC,            D3DCMP_LESSEQUAL);
+        s_device->SetRenderState(D3DRS_CULLMODE,         D3DCULL_NONE);
+        s_device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        s_device->SetRenderState(D3DRS_ALPHATESTENABLE,  FALSE);
+        s_device->SetRenderState(D3DRS_FOGENABLE,        FALSE);
+
+        s_device->SetTextureStageState(0, D3DTSS_COLOROP,   D3DTOP_SELECTARG1);
+        s_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+        s_device->SetTextureStageState(0, D3DTSS_ALPHAOP,   D3DTOP_SELECTARG1);
+        s_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+        s_device->SetTexture(0, NULL);
+        s_device->SetTextureStageState(1, D3DTSS_COLOROP,   D3DTOP_DISABLE);
+        s_device->SetTextureStageState(1, D3DTSS_ALPHAOP,   D3DTOP_DISABLE);
+
+        s_device->SetVertexShader(D3DFVF_XYZ | D3DFVF_DIFFUSE);
+        HRESULT hr = s_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, triCount,
+                                               verts, sizeof(GpuColorVert));
+
+        static bool s_loggedFirstWorld = false;
+        if (!s_loggedFirstWorld)
+        {
+            s_loggedFirstWorld = true;
+            TFE_XboxLogf("GPU", "Phase 2 first world draw: tris=%u hr=0x%08x",
+                         triCount, hr);
+        }
+    }
 
     const TextureGpu* getRenderTargetTexture(RenderTargetHandle /*h*/) { return NULL; }
     void getRenderTargetDim(RenderTargetHandle /*h*/, u32* w, u32* h)
