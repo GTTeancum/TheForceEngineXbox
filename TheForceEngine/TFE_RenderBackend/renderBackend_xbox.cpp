@@ -25,6 +25,7 @@
 
 #include <xtl.h>
 #include <d3d8.h>
+#include <xgraphics.h>
 #include <string.h>
 #include <assert.h>
 #include <stdio.h>
@@ -100,6 +101,11 @@ namespace TFE_RenderBackend
     // the front buffer - prevents flashing between wall frames and
     // black clears at the mission_render vs main_loop rate mismatch.
     static bool s_gpuFirstFramePresented = false;
+
+    // Forward decls: setPalette (defined early in the file) calls into
+    // the Phase 3 texture cache which lives later.
+    void gpuInvalidateTextureCache();
+    u32  gpuTextureCacheCount();
 
     // Destination rect on back buffer (letterbox/pillarbox).
     static RECT s_destRect;
@@ -401,6 +407,22 @@ namespace TFE_RenderBackend
             s_lastFirst  = s_paletteCpu[0];
             s_lastSecond = s_paletteCpu[1];
         }
+
+        // Texture cache invalidation. Cached textures hold pre-expanded
+        // pixels against the *previous* palette - on any change those
+        // pixels are stale. memcmp on a kept copy is the cheap signal
+        // (palette is 1 KB, rebuild is ~16 KB per texture, so we only
+        // pay when it actually changed). Phase 3 brute-force: drop the
+        // whole cache and let the next draw repopulate.
+        static u32 s_paletteCpuLast[256] = {0};
+        const u32 cached = gpuTextureCacheCount();
+        if (cached > 0 &&
+            memcmp(s_paletteCpu, s_paletteCpuLast, sizeof(s_paletteCpu)) != 0)
+        {
+            TFE_XboxLogf("GPU", "palette changed - dropping %u cached textures", cached);
+            gpuInvalidateTextureCache();
+        }
+        memcpy(s_paletteCpuLast, s_paletteCpu, sizeof(s_paletteCpu));
     }
 
     const u32* getPalette()             { return s_paletteCpu; }
@@ -729,6 +751,190 @@ namespace TFE_RenderBackend
             TFE_XboxLogf("GPU", "Phase 2 first world draw: tris=%u hr=0x%08x",
                          triCount, hr);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 3: indexed-texture cache + textured world draw.
+    //
+    // Strategy: CPU-expand 8-bit indexed pixels to XRGB8888 using the
+    // current palette, upload as D3DFMT_LIN_X8R8G8B8, cache keyed by the
+    // source TextureData*. DF BM data is column-major - we transpose
+    // during the expand. Cache is a linear array; lookup is O(N) but N
+    // stays small (DF levels have ~30-150 unique wall textures and
+    // SECBASE is on the low end).
+    //
+    // We do NOT use D3DFMT_P8 even though Xbox supports it. The present-
+    // quad path already established 32-bit linear textures as the
+    // working convention on this NV2A target, and per-frame palette
+    // upload + texture palette state would add a state-change axis we
+    // don't need yet. Palette FX (vision modifiers etc.) will require
+    // re-uploading and are handled by gpuInvalidateTextureCache().
+    // -----------------------------------------------------------------------
+    enum { XBOX_TEX_CACHE_CAP = 384 };
+    struct GpuTexCacheEntry
+    {
+        const void* key;
+        IDirect3DTexture8* tex;
+    };
+    static GpuTexCacheEntry s_texCache[XBOX_TEX_CACHE_CAP];
+    static u32              s_texCacheCount = 0;
+    static u32              s_texCacheRejectLogged = 0;
+
+    u32 gpuTextureCacheCount() { return s_texCacheCount; }
+
+    void gpuInvalidateTextureCache()
+    {
+        for (u32 i = 0; i < s_texCacheCount; i++)
+        {
+            if (s_texCache[i].tex) s_texCache[i].tex->Release();
+            s_texCache[i].tex = NULL;
+            s_texCache[i].key = NULL;
+        }
+        s_texCacheCount = 0;
+    }
+
+    GpuTextureHandle gpuGetOrUploadIndexedTexture(const void* key,
+                                                  const u8* indexed,
+                                                  u32 width, u32 height,
+                                                  bool columnMajor)
+    {
+        if (!s_deviceReady || !key || !indexed || !width || !height) return NULL;
+
+        // O(N) lookup. N <= 384, branch-cheap; if this ever shows up in
+        // profiles, swap for a sparse hash keyed by (key>>4) & MASK.
+        for (u32 i = 0; i < s_texCacheCount; i++)
+        {
+            if (s_texCache[i].key == key) return (GpuTextureHandle)s_texCache[i].tex;
+        }
+
+        if (s_texCacheCount >= XBOX_TEX_CACHE_CAP)
+        {
+            if (!s_texCacheRejectLogged)
+            {
+                s_texCacheRejectLogged = 1;
+                TFE_XboxLogf("GPU", "texture cache full (%u entries) - new uploads dropped, expect missing textures",
+                             s_texCacheCount);
+            }
+            return NULL;
+        }
+
+        // Swizzled (non-LIN) format. Critical for getting normalised [0,1]
+        // UVs with WRAP addressing - linear-format textures on Xbox use
+        // texel-unit UVs and don't wrap, which made every fragment sample
+        // the upper-left corner texel and showed walls as a single colour.
+        IDirect3DTexture8* tex = NULL;
+        HRESULT hr = s_device->CreateTexture(width, height, 1, 0,
+                                             D3DFMT_X8R8G8B8,
+                                             0, &tex);
+        if (FAILED(hr) || !tex)
+        {
+            TFE_XboxLogf("GPU", "CreateTexture %ux%u failed hr=0x%08x", width, height, hr);
+            return NULL;
+        }
+
+        // Stage the linear XRGB pixels into a scratch buffer first, then
+        // let XGSwizzleRect rearrange them into the NV2A's swizzled layout
+        // while writing into the locked texture. Doing the palette-expand
+        // straight into swizzled memory would mean a separate manual
+        // swizzle calc per pixel - not worth it; the scratch staging copy
+        // is bounded (64x64 = 16 KB, ~150x128 max common = 76 KB).
+        enum { MAX_STAGE_BYTES = 256 * 256 * 4 };
+        static u32 s_stage[MAX_STAGE_BYTES / 4];
+        if (width * height > (MAX_STAGE_BYTES / 4))
+        {
+            TFE_XboxLogf("GPU", "texture %ux%u exceeds stage buffer, dropping", width, height);
+            tex->Release();
+            return NULL;
+        }
+
+        if (columnMajor)
+        {
+            // DF BM: indexed[col * height + row]. Transpose to row-major
+            // XRGB while filling the linear stage.
+            for (u32 y = 0; y < height; y++)
+            {
+                u32* dstRow = s_stage + y * width;
+                for (u32 x = 0; x < width; x++)
+                    dstRow[x] = s_paletteCpu[indexed[x * height + y]];
+            }
+        }
+        else
+        {
+            for (u32 y = 0; y < height; y++)
+            {
+                u32* dstRow = s_stage + y * width;
+                const u8* srcRow = indexed + y * width;
+                for (u32 x = 0; x < width; x++) dstRow[x] = s_paletteCpu[srcRow[x]];
+            }
+        }
+
+        D3DLOCKED_RECT lr;
+        hr = tex->LockRect(0, &lr, NULL, 0);
+        if (FAILED(hr))
+        {
+            TFE_XboxLogf("GPU", "tex LockRect failed hr=0x%08x", hr);
+            tex->Release();
+            return NULL;
+        }
+        // Source pitch is width*4 (tight); XGSwizzleRect writes to dst in
+        // swizzled order. Dest pitch arg is unused for swizzled outputs.
+        XGSwizzleRect(s_stage, width * 4, NULL,
+                      lr.pBits, width, height, NULL, 4);
+        tex->UnlockRect(0);
+
+        s_texCache[s_texCacheCount].key = key;
+        s_texCache[s_texCacheCount].tex = tex;
+        s_texCacheCount++;
+
+        static bool s_loggedFirstTex = false;
+        if (!s_loggedFirstTex)
+        {
+            s_loggedFirstTex = true;
+            TFE_XboxLogf("GPU", "Phase 3 first texture upload: %ux%u, cache=%u",
+                         width, height, s_texCacheCount);
+        }
+        return (GpuTextureHandle)tex;
+    }
+
+    void gpuDrawTexturedTrisWorld(const f32 viewMtx[16], const f32 projMtx[16],
+                                  GpuTextureHandle tex,
+                                  const GpuTexVert* verts, u32 triCount)
+    {
+        if (!s_deviceReady || !s_gpuSceneOpen || !verts || triCount == 0) return;
+
+        D3DMATRIX view; memcpy(&view, viewMtx, sizeof(view));
+        D3DMATRIX proj; memcpy(&proj, projMtx, sizeof(proj));
+        D3DMATRIX world; memset(&world, 0, sizeof(world));
+        world._11 = world._22 = world._33 = world._44 = 1.0f;
+
+        s_device->SetTransform(D3DTS_PROJECTION, &proj);
+        s_device->SetTransform(D3DTS_VIEW,       &view);
+        s_device->SetTransform(D3DTS_WORLD,      &world);
+
+        s_device->SetRenderState(D3DRS_LIGHTING,         FALSE);
+        s_device->SetRenderState(D3DRS_ZENABLE,          TRUE);
+        s_device->SetRenderState(D3DRS_ZWRITEENABLE,     TRUE);
+        s_device->SetRenderState(D3DRS_ZFUNC,            D3DCMP_LESSEQUAL);
+        s_device->SetRenderState(D3DRS_CULLMODE,         D3DCULL_NONE);
+        s_device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        s_device->SetRenderState(D3DRS_ALPHATESTENABLE,  FALSE);
+        s_device->SetRenderState(D3DRS_FOGENABLE,        FALSE);
+
+        s_device->SetTexture(0, (IDirect3DTexture8*)tex);
+        s_device->SetTextureStageState(0, D3DTSS_COLOROP,   D3DTOP_SELECTARG1);
+        s_device->SetTextureStageState(0, D3DTSS_COLORARG1, tex ? D3DTA_TEXTURE : D3DTA_DIFFUSE);
+        s_device->SetTextureStageState(0, D3DTSS_ALPHAOP,   D3DTOP_SELECTARG1);
+        s_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+        s_device->SetTextureStageState(0, D3DTSS_MAGFILTER, D3DTEXF_POINT);
+        s_device->SetTextureStageState(0, D3DTSS_MINFILTER, D3DTEXF_POINT);
+        s_device->SetTextureStageState(0, D3DTSS_MIPFILTER, D3DTEXF_NONE);
+        s_device->SetTextureStageState(0, D3DTSS_ADDRESSU,  D3DTADDRESS_WRAP);
+        s_device->SetTextureStageState(0, D3DTSS_ADDRESSV,  D3DTADDRESS_WRAP);
+        s_device->SetTextureStageState(1, D3DTSS_COLOROP,   D3DTOP_DISABLE);
+        s_device->SetTextureStageState(1, D3DTSS_ALPHAOP,   D3DTOP_DISABLE);
+
+        s_device->SetVertexShader(D3DFVF_XYZ | D3DFVF_TEX1);
+        s_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, triCount, verts, sizeof(GpuTexVert));
     }
 
     const TextureGpu* getRenderTargetTexture(RenderTargetHandle /*h*/) { return NULL; }

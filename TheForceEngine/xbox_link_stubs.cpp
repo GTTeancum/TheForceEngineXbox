@@ -230,12 +230,11 @@ namespace TFE_Jedi
 	// sector wall count. SECBASE's largest sectors hover around 30-40
 	// walls; 256 walls (1536 verts, 24 KB) is comfortable headroom.
 	// =====================================================================
-	static const u32 XBOX_MAX_WALLS_PER_DRAW = 256;
-	static TFE_RenderBackend::GpuColorVert s_wallVerts[XBOX_MAX_WALLS_PER_DRAW * 6];
-
 	static inline f32 fixedToF(fixed16_16 x) { return (f32)x * (1.0f / 65536.0f); }
 
 	// Cheap deterministic color from wall id so adjacent walls contrast.
+	// Phase 3 fallback when a wall has no usable mid texture (NULL,
+	// compressed RLE we don't decode yet, or non-power-of-2 dims).
 	static inline u32 wallColor(s32 wid, s32 secId)
 	{
 		const u32 seed = (u32)(wid * 2654435761u) ^ (u32)(secId * 374761393u);
@@ -244,6 +243,8 @@ namespace TFE_Jedi
 		const u8 b = (u8)(64 + ((seed >> 16) & 0x7F));
 		return (0xFFu << 24) | ((u32)r << 16) | ((u32)g << 8) | (u32)b;
 	}
+
+	static inline bool isPow2(u32 v) { return v != 0 && (v & (v - 1)) == 0; }
 
 	void TFE_Sectors_GPU::destroy()             {}
 	void TFE_Sectors_GPU::reset()               {}
@@ -256,8 +257,7 @@ namespace TFE_Jedi
 		const f32 ceilY  = fixedToF(sector->ceilingHeight);
 
 		// Log on sector transitions so we can see the player walking
-		// through adjoins. Quiet during steady-state - one line on
-		// first draw, one line each time the player enters a new sector.
+		// through adjoins. Quiet during steady-state.
 		static s32 s_lastDrawnSectorId = -1;
 		if (sector->id != s_lastDrawnSectorId)
 		{
@@ -270,12 +270,18 @@ namespace TFE_Jedi
 				(s32)s_xboxLastYaw, (s32)s_xboxLastPitch);
 		}
 
-		const s32 wallCount = (sector->wallCount < (s32)XBOX_MAX_WALLS_PER_DRAW)
-		                    ? sector->wallCount
-		                    : (s32)XBOX_MAX_WALLS_PER_DRAW;
+		// Phase 3: draw each wall individually with its midTex bound.
+		// One DrawPrimitiveUP per wall is wasteful (state changes
+		// dominate) but it's the simplest path; Phase 4 batches by
+		// texture. Walls with a missing/unusable midTex fall back to
+		// the Phase 2 flat-color path so the level still reads as a
+		// closed volume.
+		TFE_RenderBackend::GpuTexVert   tv[6];
+		TFE_RenderBackend::GpuColorVert cv[6];
+		const f32 yt = ceilY;
+		const f32 yb = floorY;
 
-		u32 vi = 0;
-		for (s32 i = 0; i < wallCount; i++)
+		for (s32 i = 0; i < sector->wallCount; i++)
 		{
 			RWall* w = &sector->walls[i];
 			if (!w->w0 || !w->w1) continue;
@@ -284,30 +290,51 @@ namespace TFE_Jedi
 			const f32 z0 = fixedToF(w->w0->z);
 			const f32 x1 = fixedToF(w->w1->x);
 			const f32 z1 = fixedToF(w->w1->z);
-			const u32 c  = wallColor(i, sector->id);
 
-			// Two triangles forming the wall quad. Coords are in TFE's
-			// native -Y up convention - ceilY is numerically smaller
-			// (more negative) than floorY. The projection's -yScale
-			// flip handles the screen-space conversion.
-			const f32 yt = ceilY;
-			const f32 yb = floorY;
+			TextureData* tex = w->midTex;
+			const bool texUsable =
+				tex && tex->image && tex->compressed == 0 &&
+				isPow2(tex->width) && isPow2(tex->height);
 
-			TFE_RenderBackend::GpuColorVert* v = &s_wallVerts[vi];
-			v[0].x = x0; v[0].y = yb; v[0].z = z0; v[0].color = c;
-			v[1].x = x0; v[1].y = yt; v[1].z = z0; v[1].color = c;
-			v[2].x = x1; v[2].y = yt; v[2].z = z1; v[2].color = c;
-			v[3].x = x0; v[3].y = yb; v[3].z = z0; v[3].color = c;
-			v[4].x = x1; v[4].y = yt; v[4].z = z1; v[4].color = c;
-			v[5].x = x1; v[5].y = yb; v[5].z = z1; v[5].color = c;
-			vi += 6;
-		}
+			if (texUsable)
+			{
+				// UVs in normalised [0, N] - WRAP addressing tiles the
+				// texture across walls longer than texelLength. JEDI
+				// stores texel lengths/heights in fixed16 texels; one
+				// texture-width worth of texels equals one [0,1]
+				// segment.
+				const f32 texelLen = fixedToF(w->texelLength);
+				const f32 midHt    = fixedToF(w->midTexelHeight);
+				const f32 uMax = texelLen / (f32)tex->width;
+				const f32 vMax = midHt    / (f32)tex->height;
 
-		const u32 triCount = vi / 3;
-		if (triCount > 0)
-		{
-			TFE_RenderBackend::gpuDrawColoredTrisWorld(
-				s_xboxViewMtx, s_xboxProjMtx, s_wallVerts, triCount);
+				TFE_RenderBackend::GpuTextureHandle gpuTex =
+					TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
+						tex, tex->image, tex->width, tex->height, /*columnMajor*/true);
+
+				tv[0].x = x0; tv[0].y = yb; tv[0].z = z0; tv[0].u = 0.0f; tv[0].v = vMax;
+				tv[1].x = x0; tv[1].y = yt; tv[1].z = z0; tv[1].u = 0.0f; tv[1].v = 0.0f;
+				tv[2].x = x1; tv[2].y = yt; tv[2].z = z1; tv[2].u = uMax; tv[2].v = 0.0f;
+				tv[3].x = x0; tv[3].y = yb; tv[3].z = z0; tv[3].u = 0.0f; tv[3].v = vMax;
+				tv[4].x = x1; tv[4].y = yt; tv[4].z = z1; tv[4].u = uMax; tv[4].v = 0.0f;
+				tv[5].x = x1; tv[5].y = yb; tv[5].z = z1; tv[5].u = uMax; tv[5].v = vMax;
+
+				TFE_RenderBackend::gpuDrawTexturedTrisWorld(
+					s_xboxViewMtx, s_xboxProjMtx, gpuTex, tv, 2);
+			}
+			else
+			{
+				const u32 c = wallColor(i, sector->id);
+				cv[0].x = x0; cv[0].y = yb; cv[0].z = z0; cv[0].color = c;
+				cv[1].x = x0; cv[1].y = yt; cv[1].z = z0; cv[1].color = c;
+				cv[2].x = x1; cv[2].y = yt; cv[2].z = z1; cv[2].color = c;
+				cv[3].x = x0; cv[3].y = yb; cv[3].z = z0; cv[3].color = c;
+				cv[4].x = x1; cv[4].y = yt; cv[4].z = z1; cv[4].color = c;
+				cv[5].x = x1; cv[5].y = yb; cv[5].z = z1; cv[5].color = c;
+
+				TFE_RenderBackend::gpuDrawColoredTrisWorld(
+					s_xboxViewMtx, s_xboxProjMtx, cv, 2);
+			}
 		}
 	}
 	void TFE_Sectors_GPU::subrendererChanged()  {}
