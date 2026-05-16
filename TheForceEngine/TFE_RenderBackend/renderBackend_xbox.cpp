@@ -147,10 +147,14 @@ namespace TFE_RenderBackend
         // XbConvert.cpp:1105-1132 confirms swizzled vs linear classification.
         // Non-power-of-2 dimensions like 320x200 force linear in any case;
         // making it explicit removes ambiguity.)
+        // A8R8G8B8 (not X8R8G8B8) so Phase 9 HUD overlay can use the
+        // alpha channel for palette-index-0 transparency. In software
+        // mode the alpha is just 0xFF everywhere and looks identical
+        // to the old format.
         HRESULT hr = s_device->CreateTexture(
             width, height, 1,
             0,                      // no render target
-            D3DFMT_LIN_X8R8G8B8,
+            D3DFMT_LIN_A8R8G8B8,
             D3DPOOL_MANAGED,
             &s_vdispTex);
 
@@ -352,9 +356,17 @@ namespace TFE_RenderBackend
             return;
         }
 
-        // CPU palette expand: 8-bit index -> XRGB8888.
+        // CPU palette expand: 8-bit index -> ARGB8888.
+        // Palette index 0 = transparent (DF convention). Force alpha=0
+        // there so the GPU-mode overlay alpha-test discards untouched
+        // pixels; force alpha=0xFF everywhere else so software-mode
+        // present looks identical to before.
         for (u32 i = 0; i < pixels; i++)
-            s_expandBuf[i] = s_paletteCpu[src[i]];
+        {
+            const u8 idx = src[i];
+            s_expandBuf[i] = (idx == 0) ? 0u
+                : ((s_paletteCpu[idx] & 0x00FFFFFFu) | 0xFF000000u);
+        }
 
         s_vdispCalls++;
 
@@ -447,22 +459,80 @@ namespace TFE_RenderBackend
     };
     #define PRESENT_QUAD_FVF (D3DFVF_XYZRHW | D3DFVF_TEX1)
 
+    // Blit s_vdispTex as a screen-aligned quad over the back buffer.
+    // alphaTest=true enables the alpha test so palette-index-0 pixels
+    // (uploaded with alpha=0 in updateVirtualDisplay) discard - used
+    // for the Phase 9 HUD overlay in GPU mode.
+    static void blitVdispQuad(bool alphaTest)
+    {
+        s_device->SetRenderState(D3DRS_LIGHTING,          FALSE);
+        s_device->SetRenderState(D3DRS_ZENABLE,           FALSE);
+        s_device->SetRenderState(D3DRS_ZWRITEENABLE,      FALSE);
+        s_device->SetRenderState(D3DRS_CULLMODE,          D3DCULL_NONE);
+        s_device->SetRenderState(D3DRS_ALPHABLENDENABLE,  FALSE);
+        s_device->SetRenderState(D3DRS_ALPHATESTENABLE,   alphaTest ? TRUE : FALSE);
+        if (alphaTest)
+        {
+            s_device->SetRenderState(D3DRS_ALPHAREF,      0x80);
+            s_device->SetRenderState(D3DRS_ALPHAFUNC,     D3DCMP_GREATEREQUAL);
+        }
+        s_device->SetRenderState(D3DRS_FOGENABLE,         FALSE);
+
+        s_device->SetTextureStageState(0, D3DTSS_COLOROP,   D3DTOP_SELECTARG1);
+        s_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        s_device->SetTextureStageState(0, D3DTSS_ALPHAOP,   D3DTOP_SELECTARG1);
+        s_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        // POINT in GPU/alpha-test mode (chunky HUD pixels), LINEAR in
+        // software mode (matches the prior look).
+        const D3DTEXTUREFILTERTYPE filt = alphaTest ? D3DTEXF_POINT : D3DTEXF_LINEAR;
+        s_device->SetTextureStageState(0, D3DTSS_MAGFILTER, filt);
+        s_device->SetTextureStageState(0, D3DTSS_MINFILTER, filt);
+        s_device->SetTextureStageState(0, D3DTSS_MIPFILTER, D3DTEXF_NONE);
+        s_device->SetTextureStageState(0, D3DTSS_ADDRESSU,  D3DTADDRESS_CLAMP);
+        s_device->SetTextureStageState(0, D3DTSS_ADDRESSV,  D3DTADDRESS_CLAMP);
+
+        s_device->SetTextureStageState(1, D3DTSS_COLOROP,   D3DTOP_DISABLE);
+        s_device->SetTextureStageState(1, D3DTSS_ALPHAOP,   D3DTOP_DISABLE);
+
+        s_device->SetTexture(0, s_vdispTex);
+        s_device->SetVertexShader(PRESENT_QUAD_FVF);
+
+        const f32 l = (f32)s_destRect.left   - 0.5f;
+        const f32 t = (f32)s_destRect.top    - 0.5f;
+        const f32 r = (f32)s_destRect.right  - 0.5f;
+        const f32 b = (f32)s_destRect.bottom - 0.5f;
+        const f32 uMax = (f32)s_vdispWidth;
+        const f32 vMax = (f32)s_vdispHeight;
+
+        PresentQuadVert q[4];
+        q[0].x = l; q[0].y = t; q[0].z = 0.0f; q[0].rhw = 1.0f; q[0].u = 0.0f; q[0].v = 0.0f;
+        q[1].x = r; q[1].y = t; q[1].z = 0.0f; q[1].rhw = 1.0f; q[1].u = uMax; q[1].v = 0.0f;
+        q[2].x = l; q[2].y = b; q[2].z = 0.0f; q[2].rhw = 1.0f; q[2].u = 0.0f; q[2].v = vMax;
+        q[3].x = r; q[3].y = b; q[3].z = 0.0f; q[3].rhw = 1.0f; q[3].u = uMax; q[3].v = vMax;
+
+        s_device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof(PresentQuadVert));
+        s_device->SetTexture(0, NULL);
+
+        if (alphaTest) s_device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    }
+
     void swap(bool blitVirtualDisplay)
     {
         if (!s_deviceReady) return;
 
         // GPU mode:
-        //   - scene opened (mission_render ran this frame): finish + present.
-        //   - scene not opened, no GPU frame ever presented: clear + present
-        //     to wipe the stale software-mode loading screen.
-        //   - scene not opened, but walls were presented earlier: skip
-        //     Present so the display engine continues scanning out the
-        //     last wall frame (eliminates flashing at the main_loop vs
-        //     mission_render rate mismatch).
+        //   - scene opened (mission_render ran this frame): blit the
+        //     8-bit framebuffer as an alpha-tested HUD overlay (Phase 9),
+        //     then finish + present.
+        //   - scene not opened, no GPU frame ever presented: clear +
+        //     present to wipe the stale software-mode loading screen.
+        //   - scene not opened, walls already presented earlier: skip
+        //     Present so the display engine holds the last wall frame.
         if (s_vdispGpuMode)
         {
             if (s_gpuSceneOpen)
             {
+                if (blitVirtualDisplay && s_vdispTex) blitVdispQuad(/*alphaTest*/true);
                 s_device->EndScene();
                 s_gpuSceneOpen = false;
                 s_device->Present(NULL, NULL, NULL, NULL);
@@ -478,7 +548,6 @@ namespace TFE_RenderBackend
                 s_device->EndScene();
                 s_device->Present(NULL, NULL, NULL, NULL);
             }
-            // Otherwise: hold the last wall frame.
             return;
         }
 
@@ -495,84 +564,7 @@ namespace TFE_RenderBackend
                         D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL,
                         0, 1.0f, 0);
 
-        if (blitVirtualDisplay && s_vdispTex)
-        {
-            // Fixed-function pipeline: just sample the texture, no lighting,
-            // no depth test, no culling, no blending.
-            s_device->SetRenderState(D3DRS_LIGHTING,          FALSE);
-            s_device->SetRenderState(D3DRS_ZENABLE,           FALSE);
-            s_device->SetRenderState(D3DRS_ZWRITEENABLE,      FALSE);
-            s_device->SetRenderState(D3DRS_CULLMODE,          D3DCULL_NONE);
-            s_device->SetRenderState(D3DRS_ALPHABLENDENABLE,  FALSE);
-            s_device->SetRenderState(D3DRS_ALPHATESTENABLE,   FALSE);
-            s_device->SetRenderState(D3DRS_FOGENABLE,         FALSE);
-
-            // Stage 0: sample the texture (color and alpha both come from it).
-            // We previously set ALPHAOP=DISABLE while COLOROP was enabled —
-            // legal on retail Xbox (the alpha pipeline is independent) but
-            // CXBX-R's GetFixedFunctionShader (XbPixelShader.cpp:846) emits a
-            // "LOG_TEST_CASE: Alpha stage disabled when colour stage is
-            // enabled" warning and falls back to a default shader that does
-            // not sample the texture, so the on-screen output stays black
-            // even though DrawPrimitiveUP returns S_OK. Setting both ops to
-            // SELECTARG1=TEXTURE removes the ambiguity and works identically
-            // on retail and CXBX-R. Stage 1 is then terminated explicitly
-            // with COLOROP/ALPHAOP=DISABLE so the HLE knows the chain ends.
-            s_device->SetTextureStageState(0, D3DTSS_COLOROP,   D3DTOP_SELECTARG1);
-            s_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-            s_device->SetTextureStageState(0, D3DTSS_ALPHAOP,   D3DTOP_SELECTARG1);
-            s_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-            s_device->SetTextureStageState(0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
-            s_device->SetTextureStageState(0, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
-            s_device->SetTextureStageState(0, D3DTSS_MIPFILTER, D3DTEXF_NONE);
-            s_device->SetTextureStageState(0, D3DTSS_ADDRESSU, D3DTADDRESS_CLAMP);
-            s_device->SetTextureStageState(0, D3DTSS_ADDRESSV, D3DTADDRESS_CLAMP);
-
-            // Stage 1: chain terminator.
-            s_device->SetTextureStageState(1, D3DTSS_COLOROP,   D3DTOP_DISABLE);
-            s_device->SetTextureStageState(1, D3DTSS_ALPHAOP,   D3DTOP_DISABLE);
-
-            s_device->SetTexture(0, s_vdispTex);
-            s_device->SetVertexShader(PRESENT_QUAD_FVF);
-
-            // XYZRHW vertices live in screen space. The -0.5 offset is the
-            // classic D3D8 half-pixel correction so texel centers line up
-            // with pixel centers on the destination.
-            const f32 l = (f32)s_destRect.left   - 0.5f;
-            const f32 t = (f32)s_destRect.top    - 0.5f;
-            const f32 r = (f32)s_destRect.right  - 0.5f;
-            const f32 b = (f32)s_destRect.bottom - 0.5f;
-
-            // Linear-format textures on Xbox use NON-normalized texture
-            // coordinates: U=0..textureWidth, V=0..textureHeight (texel
-            // units). Swizzled textures use the familiar 0..1 normalized
-            // range. The same XDK / GPU is consistent with CXBX-R's own
-            // implementation note in Direct3D9.cpp:8030-8032: "Linear
-            // formats are not addressed with normalized coordinates."
-            // Earlier the quad used 0..1 UVs, which on a linear texture
-            // means "sample the first texel only" - the bilinear filter
-            // then blends the 1x1 corner region into a smooth gradient
-            // covering the whole back buffer (the visible symptom we saw).
-            const f32 uMax = (f32)s_vdispWidth;
-            const f32 vMax = (f32)s_vdispHeight;
-
-            PresentQuadVert q[4];
-            q[0].x = l; q[0].y = t; q[0].z = 0.0f; q[0].rhw = 1.0f; q[0].u = 0.0f; q[0].v = 0.0f;
-            q[1].x = r; q[1].y = t; q[1].z = 0.0f; q[1].rhw = 1.0f; q[1].u = uMax; q[1].v = 0.0f;
-            q[2].x = l; q[2].y = b; q[2].z = 0.0f; q[2].rhw = 1.0f; q[2].u = 0.0f; q[2].v = vMax;
-            q[3].x = r; q[3].y = b; q[3].z = 0.0f; q[3].rhw = 1.0f; q[3].u = uMax; q[3].v = vMax;
-
-            HRESULT hr = s_device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof(PresentQuadVert));
-
-            // Log only on failure - success is the steady state.
-            if (FAILED(hr))
-            {
-                TFE_XboxLogf("VDISP", "DrawPrimitiveUP FAILED hr=0x%08x dest=%ld,%ld,%ld,%ld",
-                    hr, s_destRect.left, s_destRect.top, s_destRect.right, s_destRect.bottom);
-            }
-
-            s_device->SetTexture(0, NULL);
-        }
+        if (blitVirtualDisplay && s_vdispTex) blitVdispQuad(/*alphaTest*/false);
 
         s_device->EndScene();
         s_device->Present(NULL, NULL, NULL, NULL);

@@ -919,11 +919,18 @@ namespace TFE_DarkForces
 		ScreenRect* screenRect = vfb_getScreenRect(VFB_RECT_UI);
 
 		// TFE Note: drawing the HUD when GPU rendering is enabled is a bit different, since we can just draw all of the items scaled.
+#ifndef _XBOX
 		if (TFE_Jedi::getSubRenderer() == TSR_CLASSIC_GPU)
 		{
 			hud_drawGpu();
 			return;
 		}
+#else
+		// On Xbox the screenGPU_* path is stubbed; fall through to the
+		// software 8-bit framebuffer path. The renderBackend_xbox swap
+		// blits that buffer as an alpha-tested overlay on top of the GPU
+		// world so HUD pixels show up.
+#endif
 
 		// Clear the 3D view while the HUD positions are being animated.
 		if (s_rightHudMove || s_leftHudMove)

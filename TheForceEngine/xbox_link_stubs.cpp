@@ -49,24 +49,14 @@
 // =====================================================================
 namespace TFE_Jedi
 {
-	// screenDraw wrapper stubs — screenDraw.cpp has these but they call
-	// screenGPU_* which may cause link issues in Release. Provide explicit
-	// stubs only for overloads that the linker can't find.
-	// NOTE: screenDraw.cpp IS compiled but some callers use overloads with
-	// different default-argument signatures that produce different manglings.
-	void screen_clear() { }
-	void screen_enableGPU(bool) { }
-	void screenDraw_beginLines(u32, u32) { }
-	void screenDraw_endLines() { }
-	void screenDraw_beginQuads(u32, u32) { }
-	void screenDraw_endQuads() { }
-	void screenDraw_setTransColor(u8) { }
-	void blitTextureToScreen(ScreenImage*, DrawRect*, s32, s32, u8*) {}
-	void blitTextureToScreenScaled(ScreenImage*, DrawRect*, s32, s32, s32, s32, u8*) {}
-	void blitTextureToScreen(TextureData*, DrawRect*, s32, s32, u8*, u32, u32) {}
-	void blitTextureToScreenScaled(TextureData*, DrawRect*, s32, s32, s32, s32, u8*, u32) {}
-	void blitTextureToScreenScaledText(TextureData*, DrawRect*, s32, s32, s32, s32, u8*, u32) {}
-	void blitTextureToScreenLitScaled(TextureData*, DrawRect*, s32, s32, s32, s32, const u8*, u8*, u32) {}
+	// screenDraw.cpp provides real software-blit implementations of all
+	// the functions below. Earlier the duplicate stubs here were winning
+	// at link time and blit calls silently did nothing - that's exactly
+	// why the HUD/weapon were invisible in Phase 9. Removed; the real
+	// software path now runs. screen_enableGPU is patched in
+	// screenDraw.cpp itself to keep s_gpuEnabled=false on Xbox so the
+	// software branches are taken even though the renderer is set to
+	// RENDERER_HARDWARE.
 
 	// screenDrawGPU.h functions
 	void screenGPU_init()    {}

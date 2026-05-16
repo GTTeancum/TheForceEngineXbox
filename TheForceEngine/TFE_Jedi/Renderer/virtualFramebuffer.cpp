@@ -168,6 +168,18 @@ namespace TFE_Jedi
 
 	void vfb_bindRenderTarget(bool clearColor)
 	{
+#ifdef _XBOX
+		// Phase 9: the Xbox GPU path skips the per-frame software-renderer
+		// fill of the 8-bit framebuffer (TFE_Sectors_GPU::draw doesn't
+		// touch s_curFrameBuffer), but the HUD / weapon / message-text
+		// code still writes through it. Clear here so each frame starts
+		// with palette-index-0 (transparent) and only HUD writes survive
+		// into the alpha-tested overlay blit at present time.
+		if (s_curFrameBuffer && s_width && s_height)
+		{
+			memset(s_curFrameBuffer, 0, s_width * s_height);
+		}
+#endif
 		TFE_RenderBackend::bindVirtualDisplay();
 
 		// For now, in the future disable again (but clear depth).

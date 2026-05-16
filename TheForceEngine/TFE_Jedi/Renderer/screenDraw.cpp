@@ -30,6 +30,18 @@ namespace TFE_Jedi
 
 	void screen_enableGPU(bool enable)
 	{
+#ifdef _XBOX
+		// Xbox composites the software-drawn 8-bit framebuffer (HUD,
+		// weapon, messages, automap) as an alpha-tested overlay on top
+		// of the GPU world inside renderBackend_xbox::swap. The
+		// screenGPU_* path is stubbed - if we honoured the enable=true
+		// from jediRenderer on the GPU path, every software blit here
+		// would early-out to a no-op. Force false so the if(s_gpuEnabled)
+		// branches throughout this file take the software path.
+		(void)enable;
+		s_gpuEnabled = false;
+		return;
+#endif
 		s_gpuEnabled = enable;
 	}
 

@@ -1028,8 +1028,26 @@ namespace TFE_DarkForces
 			u32 dispWidth, dispHeight;
 			vfb_getResolution(&dispWidth, &dispHeight);
 
+#ifdef _XBOX
+			// Xbox: always take the software-blit path - GPU stubs are no-ops
+			// and we composite this onto the GPU world via an alpha-tested
+			// overlay in renderBackend_xbox::swap.
+			if (dispWidth == 320 && dispHeight == 200)
+#else
 			if (dispWidth == 320 && dispHeight == 200 && TFE_Jedi::getSubRenderer() != TSR_CLASSIC_GPU)
+#endif
 			{
+#ifdef _XBOX
+				// The lit variant uses RClassic_Fixed::computeLighting's
+				// per-distance attenuation ramp - that ramp depends on
+				// the software renderer's per-frame state (s_colorMap,
+				// camera Y for headlamp, etc.) which the GPU renderer
+				// doesn't populate. Using it here remaps every pixel to
+				// near-zero indices and the weapon comes out as a black
+				// silhouette. Use the unlit blit; the GPU world already
+				// handles its own lighting via vertex-diffuse modulation.
+				blitTextureToScreen(tex, rect, x, y, display, JTRUE);
+#else
 				if (atten && !s_weaponLight)
 				{
 					blitTextureToScreenLit(tex, rect, x, y, atten, display, JTRUE);
@@ -1038,6 +1056,7 @@ namespace TFE_DarkForces
 				{
 					blitTextureToScreen(tex, rect, x, y, display, JTRUE);
 				}
+#endif
 			}
 			else
 			{
