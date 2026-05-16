@@ -640,6 +640,16 @@ namespace TFE_MidiPlayer
 
 			SDL_UnlockMutex(s_midiThreadMutex);
 			runThread = s_runMusicThread.load();
+#ifdef _XBOX
+			// Yield. Xbox has a single CPU and the upstream SDL build relies
+			// on SDL_mutex / OS scheduler quirks to keep this loop from
+			// burning a core. Raw CRITICAL_SECTION on Xbox returns instantly
+			// when uncontested, so without a sleep this loop pins the CPU
+			// and starves the render+audio-pump main thread. The midi
+			// callback timeStep is ~6ms (iMuse default), so polling at 1kHz
+			// is still 6x faster than needed.
+			Sleep(1);
+#endif
 		};
 		
 		return 0;
