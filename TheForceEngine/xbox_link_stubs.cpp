@@ -19,6 +19,7 @@
 #include <TFE_Jedi/Renderer/RClassic_GPU/screenDrawGPU.h>
 #include <TFE_Jedi/Level/rsector.h>
 #include <TFE_Jedi/Level/rwall.h>
+#include <TFE_Jedi/Renderer/rcommon.h>
 #include <TFE_RenderBackend/renderBackend_xbox.h>
 #include <TFE_ForceScript/forceScript.h>
 #include <TFE_DarkForces/Landru/lsystem.h>
@@ -246,45 +247,25 @@ namespace TFE_Jedi
 
 	static inline bool isPow2(u32 v) { return v != 0 && (v & (v - 1)) == 0; }
 
-	void TFE_Sectors_GPU::destroy()             {}
-	void TFE_Sectors_GPU::reset()               {}
-	void TFE_Sectors_GPU::prepare()             {}
-	void TFE_Sectors_GPU::draw(RSector* sector)
+	// Draw every solid wall (no nextSector) of `sector`. Adjoin walls
+	// (nextSector != NULL) are skipped so the player can see through
+	// them into the next sector. The traversal in draw() pushes those
+	// next sectors onto the visit queue.
+	static void xboxDrawSectorWalls(RSector* sector)
 	{
-		if (!sector || sector->wallCount <= 0) return;
-
 		const f32 floorY = fixedToF(sector->floorHeight);
 		const f32 ceilY  = fixedToF(sector->ceilingHeight);
-
-		// Log on sector transitions so we can see the player walking
-		// through adjoins. Quiet during steady-state.
-		static s32 s_lastDrawnSectorId = -1;
-		if (sector->id != s_lastDrawnSectorId)
-		{
-			s_lastDrawnSectorId = sector->id;
-			TFE_System::logWrite(LOG_MSG, "GPU",
-				"entered sec=%d walls=%d floorY=%d/100 ceilY=%d/100 cam=(%d/100,%d/100,%d/100) yaw=%d pitch=%d",
-				sector->id, sector->wallCount,
-				(s32)(floorY * 100.0f), (s32)(ceilY * 100.0f),
-				(s32)(s_cameraPos.x * 100.0f), (s32)(s_cameraPos.y * 100.0f), (s32)(s_cameraPos.z * 100.0f),
-				(s32)s_xboxLastYaw, (s32)s_xboxLastPitch);
-		}
-
-		// Phase 3: draw each wall individually with its midTex bound.
-		// One DrawPrimitiveUP per wall is wasteful (state changes
-		// dominate) but it's the simplest path; Phase 4 batches by
-		// texture. Walls with a missing/unusable midTex fall back to
-		// the Phase 2 flat-color path so the level still reads as a
-		// closed volume.
-		TFE_RenderBackend::GpuTexVert   tv[6];
-		TFE_RenderBackend::GpuColorVert cv[6];
 		const f32 yt = ceilY;
 		const f32 yb = floorY;
+
+		TFE_RenderBackend::GpuTexVert   tv[6];
+		TFE_RenderBackend::GpuColorVert cv[6];
 
 		for (s32 i = 0; i < sector->wallCount; i++)
 		{
 			RWall* w = &sector->walls[i];
 			if (!w->w0 || !w->w1) continue;
+			if (w->nextSector) continue;     // Phase 4: skip portal walls.
 
 			const f32 x0 = fixedToF(w->w0->x);
 			const f32 z0 = fixedToF(w->w0->z);
@@ -298,11 +279,6 @@ namespace TFE_Jedi
 
 			if (texUsable)
 			{
-				// UVs in normalised [0, N] - WRAP addressing tiles the
-				// texture across walls longer than texelLength. JEDI
-				// stores texel lengths/heights in fixed16 texels; one
-				// texture-width worth of texels equals one [0,1]
-				// segment.
 				const f32 texelLen = fixedToF(w->texelLength);
 				const f32 midHt    = fixedToF(w->midTexelHeight);
 				const f32 uMax = texelLen / (f32)tex->width;
@@ -335,6 +311,71 @@ namespace TFE_Jedi
 				TFE_RenderBackend::gpuDrawColoredTrisWorld(
 					s_xboxViewMtx, s_xboxProjMtx, cv, 2);
 			}
+		}
+	}
+
+	void TFE_Sectors_GPU::destroy()             {}
+	void TFE_Sectors_GPU::reset()               {}
+	void TFE_Sectors_GPU::prepare()             {}
+	void TFE_Sectors_GPU::draw(RSector* startSector)
+	{
+		if (!startSector || startSector->wallCount <= 0) return;
+
+		// Phase 4: portal traversal.
+		// BFS from the player's current sector. For each visited sector,
+		// draw its solid walls (no nextSector); each adjoin wall queues
+		// its nextSector for later visit. Sectors are visit-stamped with
+		// the global s_drawFrame counter (incremented in jediRenderer
+		// drawWorld right before us) so each sector is drawn at most
+		// once per frame.
+		//
+		// No frustum culling, no portal clipping - the GPU's clipper +
+		// Z-test handle visibility. DF levels have <500 sectors total
+		// and we'll visit at most a connected subgraph reachable through
+		// open adjoins. SECBASE traversal from spawn caps around 40-50
+		// sectors; the 512-entry visit queue is comfortable headroom.
+		enum { XBOX_VISIT_CAP = 512 };
+		static RSector* s_visitQueue[XBOX_VISIT_CAP];
+		u32 head = 0, tail = 0;
+
+		s_visitQueue[tail++] = startSector;
+		startSector->prevDrawFrame = TFE_Jedi::s_drawFrame;
+
+		u32 visited = 0;
+		while (head < tail)
+		{
+			RSector* sec = s_visitQueue[head++];
+			if (!sec || sec->wallCount <= 0) continue;
+
+			xboxDrawSectorWalls(sec);
+			visited++;
+
+			// Queue every neighbour reachable through an adjoin we
+			// haven't already stamped this frame.
+			for (s32 i = 0; i < sec->wallCount; i++)
+			{
+				RWall* w = &sec->walls[i];
+				RSector* next = w->nextSector;
+				if (!next) continue;
+				if (next->prevDrawFrame == TFE_Jedi::s_drawFrame) continue;
+				if (tail >= XBOX_VISIT_CAP) break;
+
+				next->prevDrawFrame = TFE_Jedi::s_drawFrame;
+				s_visitQueue[tail++] = next;
+			}
+		}
+
+		// One log line each time the player walks into a new starting
+		// sector, plus how many sectors the traversal reached.
+		static s32 s_lastStartSectorId = -1;
+		if (startSector->id != s_lastStartSectorId)
+		{
+			s_lastStartSectorId = startSector->id;
+			TFE_System::logWrite(LOG_MSG, "GPU",
+				"entered sec=%d walls=%d visited=%u cam=(%d/100,%d/100,%d/100) yaw=%d",
+				startSector->id, startSector->wallCount, visited,
+				(s32)(s_cameraPos.x * 100.0f), (s32)(s_cameraPos.y * 100.0f), (s32)(s_cameraPos.z * 100.0f),
+				(s32)s_xboxLastYaw);
 		}
 	}
 	void TFE_Sectors_GPU::subrendererChanged()  {}
