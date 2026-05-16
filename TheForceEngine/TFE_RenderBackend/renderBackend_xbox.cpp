@@ -93,6 +93,19 @@ namespace TFE_RenderBackend
     // edge states that skip bind still get a valid frame.
     static bool s_vdispGpuMode = false;
     static bool s_gpuSceneOpen = false;
+
+    // Phase 11 rework: hardware D3DFMT_P8 palette. Textures upload as
+    // raw 8-bit indices ONCE, and the per-frame DF palette FX (damage
+    // flash, dark-trooper screen tint, level-load fade etc.) updates
+    // only this one palette object. Mirrors upstream TFE's approach
+    // where the GPU shader does palette lookup with a per-frame uniform.
+    //
+    // Without P8 the texture cache was being invalidated every frame
+    // during palette FX (50+ per-frame palette updates dropped 100+
+    // cached cell textures each), so half the sprites flickered as the
+    // re-upload couldn't keep up with mission_render's draw rate.
+    static D3DPalette* s_p8Palette = NULL;
+    static bool        s_p8PaletteDirty = true;
     // True once at least one GPU-mode frame has been Presented. While
     // false, no-bind frames issue a black clear+Present so the loading
     // screen left over from software mode doesn't sit on the front
@@ -420,21 +433,16 @@ namespace TFE_RenderBackend
             s_lastSecond = s_paletteCpu[1];
         }
 
-        // Texture cache invalidation. Cached textures hold pre-expanded
-        // pixels against the *previous* palette - on any change those
-        // pixels are stale. memcmp on a kept copy is the cheap signal
-        // (palette is 1 KB, rebuild is ~16 KB per texture, so we only
-        // pay when it actually changed). Phase 3 brute-force: drop the
-        // whole cache and let the next draw repopulate.
+        // Phase 11: textures are D3DFMT_P8 (raw indices). On a palette
+        // change we just mark the D3D palette object dirty - the next
+        // frame's ensureP8PaletteSynced rewrites its 256 entries.
+        // No cached pixel data needs to be discarded.
         static u32 s_paletteCpuLast[256] = {0};
-        const u32 cached = gpuTextureCacheCount();
-        if (cached > 0 &&
-            memcmp(s_paletteCpu, s_paletteCpuLast, sizeof(s_paletteCpu)) != 0)
+        if (memcmp(s_paletteCpu, s_paletteCpuLast, sizeof(s_paletteCpu)) != 0)
         {
-            TFE_XboxLogf("GPU", "palette changed - dropping %u cached textures", cached);
-            gpuInvalidateTextureCache();
+            s_p8PaletteDirty = true;
+            memcpy(s_paletteCpuLast, s_paletteCpu, sizeof(s_paletteCpu));
         }
-        memcpy(s_paletteCpuLast, s_paletteCpu, sizeof(s_paletteCpu));
     }
 
     const u32* getPalette()             { return s_paletteCpu; }
@@ -762,7 +770,13 @@ namespace TFE_RenderBackend
     // don't need yet. Palette FX (vision modifiers etc.) will require
     // re-uploading and are handled by gpuInvalidateTextureCache().
     // -----------------------------------------------------------------------
-    enum { XBOX_TEX_CACHE_CAP = 384 };
+    // Cache cap sized for SECBASE: ~150 wall+flat textures + per-frame
+    // sprite cells (enemies have ~5 anims x 32 views x ~5 frames ~= 800
+    // cells per type, though most slots are NULL view fallbacks). 1024
+    // is a comfortable headroom on Xbox's 64 MB; worst-case 1024 *
+    // 64 KB = 64 MB would blow the budget but typical sprite cells
+    // are 16-32 KB swizzled.
+    enum { XBOX_TEX_CACHE_CAP = 1024 };
     struct GpuTexCacheEntry
     {
         const void* key;
@@ -783,6 +797,48 @@ namespace TFE_RenderBackend
             s_texCache[i].key = NULL;
         }
         s_texCacheCount = 0;
+    }
+
+    static inline u32 nextPow2_u32(u32 v)
+    {
+        u32 r = 1;
+        while (r < v) r <<= 1;
+        return r;
+    }
+
+    // Create (lazily) + update the hardware palette from s_paletteCpu.
+    // Index 0 is the DF transparent colour for sprites: we force its
+    // alpha to 0 so the sprite-draw alpha test discards it. All other
+    // indices get alpha 0xFF. Walls don't enable alpha test so the
+    // alpha bits are simply ignored on those draws.
+    static void ensureP8PaletteSynced()
+    {
+        if (!s_deviceReady) return;
+        if (!s_p8Palette)
+        {
+            HRESULT hr = s_device->CreatePalette(D3DPALETTE_256, &s_p8Palette);
+            if (FAILED(hr) || !s_p8Palette)
+            {
+                TFE_XboxLogf("GPU", "CreatePalette failed hr=0x%08x", hr);
+                return;
+            }
+            TFE_XboxLogf("GPU", "Phase 11 hardware palette created");
+            s_p8PaletteDirty = true;
+        }
+        if (!s_p8PaletteDirty) return;
+
+        D3DCOLOR* entries = NULL;
+        HRESULT hr = s_p8Palette->Lock(&entries, 0);
+        if (FAILED(hr) || !entries) return;
+
+        for (int i = 0; i < 256; i++)
+        {
+            // s_paletteCpu already in 0xAARRGGBB layout.
+            entries[i] = (s_paletteCpu[i] & 0x00FFFFFFu) | 0xFF000000u;
+        }
+        entries[0] = 0x00000000u;  // transparent
+        s_p8Palette->Unlock();
+        s_p8PaletteDirty = false;
     }
 
     GpuTextureHandle gpuGetOrUploadIndexedTexture(const void* key,
@@ -810,53 +866,83 @@ namespace TFE_RenderBackend
             return NULL;
         }
 
-        // Swizzled (non-LIN) format. Critical for getting normalised [0,1]
-        // UVs with WRAP addressing - linear-format textures on Xbox use
-        // texel-unit UVs and don't wrap, which made every fragment sample
-        // the upper-left corner texel and showed walls as a single colour.
+        // NV2A swizzled D3DFMT_P8 needs pow2 dimensions. Non-pow2
+        // sources scale up via nearest-neighbour as before; the caller's
+        // [0,1] WRAP UV math is unchanged since one full GPU-texture tile
+        // covers the same world distance regardless of resolution.
+        const u32 texW = nextPow2_u32(width);
+        const u32 texH = nextPow2_u32(height);
+        const bool needScale = (texW != width) || (texH != height);
+
+        // D3DFMT_P8 (swizzled): raw 8-bit indices, sampled with the
+        // currently-bound D3D palette to produce RGBA. Static through
+        // palette FX - the palette object changes, the texture data
+        // does not.
         IDirect3DTexture8* tex = NULL;
-        HRESULT hr = s_device->CreateTexture(width, height, 1, 0,
-                                             D3DFMT_X8R8G8B8,
+        HRESULT hr = s_device->CreateTexture(texW, texH, 1, 0,
+                                             D3DFMT_P8,
                                              0, &tex);
         if (FAILED(hr) || !tex)
         {
-            TFE_XboxLogf("GPU", "CreateTexture %ux%u failed hr=0x%08x", width, height, hr);
+            TFE_XboxLogf("GPU", "CreateTexture P8 %ux%u (src %ux%u) failed hr=0x%08x",
+                         texW, texH, width, height, hr);
             return NULL;
         }
 
-        // Stage the linear XRGB pixels into a scratch buffer first, then
-        // let XGSwizzleRect rearrange them into the NV2A's swizzled layout
-        // while writing into the locked texture. Doing the palette-expand
-        // straight into swizzled memory would mean a separate manual
-        // swizzle calc per pixel - not worth it; the scratch staging copy
-        // is bounded (64x64 = 16 KB, ~150x128 max common = 76 KB).
-        enum { MAX_STAGE_BYTES = 256 * 256 * 4 };
-        static u32 s_stage[MAX_STAGE_BYTES / 4];
-        if (width * height > (MAX_STAGE_BYTES / 4))
+        // 1 byte per pixel. 512x512 = 256 KB stage; we share a 1 MB
+        // pool with the (now-removed) RGBA expand path so the existing
+        // size is fine.
+        enum { MAX_STAGE_BYTES = 512 * 512 };
+        static u8 s_stage[MAX_STAGE_BYTES];
+        if (texW * texH > MAX_STAGE_BYTES)
         {
-            TFE_XboxLogf("GPU", "texture %ux%u exceeds stage buffer, dropping", width, height);
+            TFE_XboxLogf("GPU", "texture %ux%u exceeds P8 stage buffer, dropping", texW, texH);
             tex->Release();
             return NULL;
         }
 
-        if (columnMajor)
+        if (!needScale && columnMajor)
         {
-            // DF BM: indexed[col * height + row]. Transpose to row-major
-            // XRGB while filling the linear stage.
-            for (u32 y = 0; y < height; y++)
+            // DF BM column-major -> row-major copy.
+            for (u32 y = 0; y < texH; y++)
             {
-                u32* dstRow = s_stage + y * width;
-                for (u32 x = 0; x < width; x++)
-                    dstRow[x] = s_paletteCpu[indexed[x * height + y]];
+                u8* dstRow = s_stage + y * texW;
+                for (u32 x = 0; x < texW; x++)
+                    dstRow[x] = indexed[x * height + y];
+            }
+        }
+        else if (!needScale)
+        {
+            for (u32 y = 0; y < texH; y++)
+            {
+                u8* dstRow = s_stage + y * texW;
+                const u8* srcRow = indexed + y * width;
+                memcpy(dstRow, srcRow, texW);
             }
         }
         else
         {
-            for (u32 y = 0; y < height; y++)
+            for (u32 y = 0; y < texH; y++)
             {
-                u32* dstRow = s_stage + y * width;
-                const u8* srcRow = indexed + y * width;
-                for (u32 x = 0; x < width; x++) dstRow[x] = s_paletteCpu[srcRow[x]];
+                const u32 srcY = (y * height) / texH;
+                u8* dstRow = s_stage + y * texW;
+                if (columnMajor)
+                {
+                    for (u32 x = 0; x < texW; x++)
+                    {
+                        const u32 srcX = (x * width) / texW;
+                        dstRow[x] = indexed[srcX * height + srcY];
+                    }
+                }
+                else
+                {
+                    const u8* srcRow = indexed + srcY * width;
+                    for (u32 x = 0; x < texW; x++)
+                    {
+                        const u32 srcX = (x * width) / texW;
+                        dstRow[x] = srcRow[srcX];
+                    }
+                }
             }
         }
 
@@ -868,10 +954,9 @@ namespace TFE_RenderBackend
             tex->Release();
             return NULL;
         }
-        // Source pitch is width*4 (tight); XGSwizzleRect writes to dst in
-        // swizzled order. Dest pitch arg is unused for swizzled outputs.
-        XGSwizzleRect(s_stage, width * 4, NULL,
-                      lr.pBits, width, height, NULL, 4);
+        // 1 byte per pixel; XGSwizzleRect handles the swizzle layout.
+        XGSwizzleRect(s_stage, texW, NULL,
+                      lr.pBits, texW, texH, NULL, 1);
         tex->UnlockRect(0);
 
         s_texCache[s_texCacheCount].key = key;
@@ -882,62 +967,29 @@ namespace TFE_RenderBackend
         if (!s_loggedFirstTex)
         {
             s_loggedFirstTex = true;
-            TFE_XboxLogf("GPU", "Phase 3 first texture upload: %ux%u, cache=%u",
-                         width, height, s_texCacheCount);
+            TFE_XboxLogf("GPU", "Phase 3 first texture upload: %ux%u (gpu %ux%u), cache=%u",
+                         width, height, texW, texH, s_texCacheCount);
+        }
+        // Log every 64-entry milestone so we can see growth without spam.
+        if ((s_texCacheCount & 63) == 0)
+        {
+            TFE_XboxLogf("GPU", "texture cache at %u / %u entries",
+                         s_texCacheCount, (u32)XBOX_TEX_CACHE_CAP);
         }
         return (GpuTextureHandle)tex;
     }
 
-    GpuTextureHandle gpuGetOrUploadRgbaTexture(const void* key,
-                                               const u32* pixelsRgba,
-                                               u32 width, u32 height)
-    {
-        if (!s_deviceReady || !key || !pixelsRgba || !width || !height) return NULL;
-        for (u32 i = 0; i < s_texCacheCount; i++)
-        {
-            if (s_texCache[i].key == key) return (GpuTextureHandle)s_texCache[i].tex;
-        }
-        if (s_texCacheCount >= XBOX_TEX_CACHE_CAP) return NULL;
-
-        IDirect3DTexture8* tex = NULL;
-        HRESULT hr = s_device->CreateTexture(width, height, 1, 0,
-                                             D3DFMT_A8R8G8B8,
-                                             0, &tex);
-        if (FAILED(hr) || !tex)
-        {
-            TFE_XboxLogf("GPU", "sprite CreateTexture %ux%u failed hr=0x%08x", width, height, hr);
-            return NULL;
-        }
-        D3DLOCKED_RECT lr;
-        hr = tex->LockRect(0, &lr, NULL, 0);
-        if (FAILED(hr))
-        {
-            tex->Release();
-            return NULL;
-        }
-        XGSwizzleRect(pixelsRgba, width * 4, NULL,
-                      lr.pBits, width, height, NULL, 4);
-        tex->UnlockRect(0);
-
-        s_texCache[s_texCacheCount].key = key;
-        s_texCache[s_texCacheCount].tex = tex;
-        s_texCacheCount++;
-
-        static bool s_loggedFirstSprite = false;
-        if (!s_loggedFirstSprite)
-        {
-            s_loggedFirstSprite = true;
-            TFE_XboxLogf("GPU", "Phase 8 first sprite upload: %ux%u, cache=%u",
-                         width, height, s_texCacheCount);
-        }
-        return (GpuTextureHandle)tex;
-    }
+    // gpuGetOrUploadRgbaTexture removed in Phase 11. Sprite uploads now
+    // also use the P8 path via gpuGetOrUploadIndexedTexture - hardware
+    // palette handles the index->RGBA expansion at sample time.
 
     void gpuDrawAlphaTestedTrisWorld(const f32 viewMtx[16], const f32 projMtx[16],
                                      GpuTextureHandle tex,
                                      const GpuTexVert* verts, u32 triCount)
     {
         if (!s_deviceReady || !s_gpuSceneOpen || !verts || triCount == 0) return;
+        ensureP8PaletteSynced();
+        if (s_p8Palette) s_device->SetPalette(0, s_p8Palette);
 
         D3DMATRIX view; memcpy(&view, viewMtx, sizeof(view));
         D3DMATRIX proj; memcpy(&proj, projMtx, sizeof(proj));
@@ -986,6 +1038,8 @@ namespace TFE_RenderBackend
                                   GpuTextureHandle tex,
                                   const GpuTexVert* verts, u32 triCount)
     {
+        ensureP8PaletteSynced();
+        if (s_p8Palette) s_device->SetPalette(0, s_p8Palette);
         if (!s_deviceReady || !s_gpuSceneOpen || !verts || triCount == 0) return;
 
         D3DMATRIX view; memcpy(&view, viewMtx, sizeof(view));

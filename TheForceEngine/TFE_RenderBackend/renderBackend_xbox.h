@@ -73,15 +73,6 @@ namespace TFE_RenderBackend
                                   GpuTextureHandle tex,
                                   const GpuTexVert* verts, u32 triCount);
 
-    // Phase 8 sprite path. Upload a pre-built RGBA pixel array (caller
-    // does the RLE decode + palette expand) as a swizzled A8R8G8B8
-    // texture. Width and height must be powers of two. Returns NULL on
-    // cache full / CreateTexture failure. Cache is shared with the wall
-    // path - sprite/wall keys differ so collisions don't happen.
-    GpuTextureHandle gpuGetOrUploadRgbaTexture(const void* key,
-                                               const u32* pixelsRgba,
-                                               u32 width, u32 height);
-
     // Draw textured triangles with alpha test (alpha < 1 -> discard).
     // For sprite billboards where palette-index-0 pixels were uploaded
     // with alpha = 0. Z-test on, Z-write on (so sprites occlude each

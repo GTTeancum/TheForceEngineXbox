@@ -316,7 +316,7 @@ namespace TFE_Jedi
 		if (!texPtr || !*texPtr) return;
 		TextureData* tex = *texPtr;
 		if (!tex->image || tex->compressed != 0) return;
-		if (!isPow2(tex->width) || !isPow2(tex->height)) return;
+		// pow2 not required - backend upscales as needed.
 		if (sector->wallCount < 3) return;
 
 		// ---- Step 1: build vertex array + identify loop boundaries.
@@ -538,9 +538,10 @@ namespace TFE_Jedi
 	                              fixed16_16 texHeightFx,
 	                              u32 color)
 	{
+		// Phase 11: pow2 check dropped. The backend now upscales non-pow2
+		// source textures to next-pow2 internally during palette expand.
 		const bool texUsable =
-			tex && tex->image && tex->compressed == 0 &&
-			isPow2(tex->width) && isPow2(tex->height);
+			tex && tex->image && tex->compressed == 0;
 
 		if (texUsable)
 		{
@@ -602,6 +603,14 @@ namespace TFE_Jedi
 	enum { XBOX_MAX_CELL_PIXELS = 256 * 256 };
 	static u32 s_cellStage[XBOX_MAX_CELL_PIXELS];
 
+	// Phase 11: produce raw 8-bit indices in a tight row-major buffer
+	// of the cell's actual size and hand off to the shared P8 upload
+	// path. The hardware palette (set by ensureP8PaletteSynced) does
+	// the index->RGBA expansion at sample time. Index 0 (DF transparent
+	// colour) becomes alpha=0 via the palette, so the alpha-tested
+	// sprite draw discards transparent pixels.
+	static u8 s_cellIdxStage[XBOX_MAX_CELL_PIXELS];
+
 	static TFE_RenderBackend::GpuTextureHandle
 	xboxUploadWaxCell(WaxCell* cell, const void* waxBase, u32* outTexW, u32* outTexH)
 	{
@@ -609,20 +618,18 @@ namespace TFE_Jedi
 
 		const u32 cellW = (u32)cell->sizeX;
 		const u32 cellH = (u32)cell->sizeY;
-		const u32 texW  = nextPow2(cellW);
-		const u32 texH  = nextPow2(cellH);
-		if (texW * texH > XBOX_MAX_CELL_PIXELS) return NULL;
+		if (cellW * cellH > XBOX_MAX_CELL_PIXELS) return NULL;
 
-		// Build the linear RGBA buffer. Clear to zero (alpha=0) first so
-		// the pow2 padding is invisible after the alpha test.
-		memset(s_cellStage, 0, texW * texH * sizeof(u32));
-
-		const u32* pal = TFE_RenderBackend::getPalette();
 		const u8*  imageData = (const u8*)cell + sizeof(WaxCell);
 		const u32* columnOffset = (const u32*)((const u8*)waxBase + cell->columnOffset);
 		const u8*  imageStart = (cell->compressed == 1)
 		                      ? imageData + (cell->sizeX * sizeof(u32))
 		                      : imageData;
+
+		// s_cellIdxStage is row-major [cellH][cellW] of indices. Default
+		// to 0 (transparent) so unused regions discard via alpha test
+		// even if the pow2-pad upscale picks them up.
+		memset(s_cellIdxStage, 0, cellW * cellH);
 
 		u8 colBuf[1024];
 		for (u32 x = 0; x < cellW; x++)
@@ -640,21 +647,41 @@ namespace TFE_Jedi
 				column = imageStart + columnOffset[x];
 			}
 			for (u32 y = 0; y < cellH; y++)
-			{
-				const u8 idx = column[y];
-				if (idx == 0) continue;  // transparent
-				// pal[] is s_paletteCpu, ALREADY in 0xAARRGGBB layout
-				// (renderBackend::setPalette swaps R/B at receive time
-				// for D3D's A8R8G8B8 format). Don't re-swap; just copy
-				// the 24-bit colour and force alpha to 0xFF.
-				s_cellStage[y * texW + x] = (pal[idx] & 0x00FFFFFFu) | 0xFF000000u;
-			}
+				s_cellIdxStage[y * cellW + x] = column[y];
 		}
 
+		// The upload function pads to pow2 internally; report the
+		// rounded-up dimensions back to the caller for UV math.
+		u32 texW = 1, texH = 1;
+		while (texW < cellW) texW <<= 1;
+		while (texH < cellH) texH <<= 1;
 		if (outTexW) *outTexW = texW;
 		if (outTexH) *outTexH = texH;
-		return TFE_RenderBackend::gpuGetOrUploadRgbaTexture(
-			cell, s_cellStage, texW, texH);
+		return TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
+			cell, s_cellIdxStage, cellW, cellH, /*columnMajor*/false);
+	}
+
+	// Phase 11 diagnostic counters - accumulate per draw frame, dump
+	// when the totals change a lot (sector switch / interesting event)
+	// or every N frames so we have steady signal without log spam.
+	struct XboxObjStats
+	{
+		u32 sprites, frames, models, others;     // by type
+		u32 nullObj, behindCam, noFrame, noCell; // skip reasons
+		u32 zeroSize, uploadFail, drawn;
+	};
+	static XboxObjStats s_objStats;
+	static u32 s_objStatsFrame = 0;
+
+	static inline void xboxObjStatsReset() { memset(&s_objStats, 0, sizeof(s_objStats)); }
+
+	static void xboxObjStatsDump()
+	{
+		TFE_System::logWrite(LOG_MSG, "GPU",
+			"objects: spr=%u fme=%u mdl=%u oth=%u | drawn=%u skip{behindCam=%u noFrame=%u noCell=%u zero=%u up=%u null=%u}",
+			s_objStats.sprites, s_objStats.frames, s_objStats.models, s_objStats.others,
+			s_objStats.drawn, s_objStats.behindCam, s_objStats.noFrame, s_objStats.noCell,
+			s_objStats.zeroSize, s_objStats.uploadFail, s_objStats.nullObj);
 	}
 
 	// Phase 8: draw every visible sprite/frame object in `sector` as a
@@ -675,8 +702,16 @@ namespace TFE_Jedi
 		for (s32 i = 0; i < sector->objectCount; i++)
 		{
 			SecObject* obj = sector->objectList[i];
-			if (!obj) continue;
-			if (obj->type != OBJ_TYPE_SPRITE && obj->type != OBJ_TYPE_FRAME) continue;
+			if (!obj) { s_objStats.nullObj++; continue; }
+
+			// Categorise.
+			switch (obj->type)
+			{
+				case OBJ_TYPE_SPRITE: s_objStats.sprites++; break;
+				case OBJ_TYPE_FRAME:  s_objStats.frames++;  break;
+				case OBJ_TYPE_3D:     s_objStats.models++;  continue;  // Phase 13
+				default:              s_objStats.others++;  continue;
+			}
 
 			// Resolve the WaxFrame for this object's current anim/view/frame.
 			WaxFrame* frame = NULL;
@@ -702,7 +737,7 @@ namespace TFE_Jedi
 				// view 0 if the picked slot is empty.
 				WaxView* view = WAX_ViewPtr(wax, anim, viewIdx);
 				if (!view) view = WAX_ViewPtr(wax, anim, 0);
-				if (!view) continue;
+				if (!view) { s_objStats.noFrame++; continue; }
 
 				frame = WAX_FramePtr(wax, view, obj->frame & 0x1f);
 				waxBase = wax;
@@ -714,55 +749,83 @@ namespace TFE_Jedi
 				// is stored as an absolute offset into the frame's buffer.
 				waxBase = obj->fme;
 			}
-			if (!frame) continue;
+			if (!frame) { s_objStats.noFrame++; continue; }
 			WaxCell* cell = WAX_CellPtr(waxBase, frame);
-			if (!cell) continue;
+			if (!cell) { s_objStats.noCell++; continue; }
 
 			u32 texW = 0, texH = 0;
 			TFE_RenderBackend::GpuTextureHandle tex =
 				xboxUploadWaxCell(cell, waxBase, &texW, &texH);
-			if (!tex) continue;
+			if (!tex) { s_objStats.uploadFail++; continue; }
 
 			const f32 px = fixedToF(obj->posWS.x);
 			const f32 py = fixedToF(obj->posWS.y);
 			const f32 pz = fixedToF(obj->posWS.z);
-			const f32 wHalf = fixedToF(obj->worldWidth) * 0.5f;
-			const f32 hFull = fixedToF(obj->worldHeight);
 
-			// In TFE -Y up: sprite bottom sits at posWS.y, top is
-			// posWS.y - hFull (smaller y = higher up).
-			const f32 yb = py;
-			const f32 yt = py - hFull;
+			// Quad sizing + anchor come from the FRAME, not the object.
+			// obj->worldWidth/Height are collision sizes (often 0 for
+			// pickups/projectiles); render size lives on the WaxFrame.
+			// Per upstream sprite_drawFrame (rwallFloat.cpp:2225):
+			//   x0_view = viewX - offsetX,   x1 = x0 + widthWS
+			//   y0_view = viewY - (heightWS - offsetY)
+			//   y1_view = y0 + heightWS = viewY + offsetY
+			// In TFE -Y up world: posY - hWS + ofY is the upper Y
+			// (head), posY + ofY is the lower Y (feet).
+			const f32 wWS = fixedToF(frame->widthWS);
+			const f32 hWS = fixedToF(frame->heightWS);
+			const f32 ofX = fixedToF(frame->offsetX);
+			const f32 ofY = fixedToF(frame->offsetY);
+			if (wWS <= 0.0f || hWS <= 0.0f) { s_objStats.zeroSize++; continue; }
 
-			// CLAMP UVs - cell occupies the [0, cellW/texW]x[0, cellH/texH]
-			// sub-rect of the pow2 texture; padding lies outside that.
-			const f32 uMax = (f32)cell->sizeX / (f32)texW;
-			const f32 vMax = (f32)cell->sizeY / (f32)texH;
+			// Cheap behind-camera cull (XZ-plane forward dot with the
+			// view direction). Avoids submitting sprites the GPU would
+			// reject after transform anyway, and stops draws against
+			// extremely-close objects from blowing the near plane.
+			const f32 dxC = px - s_cameraPos.x;
+			const f32 dzC = pz - s_cameraPos.z;
+			f32 fyaw_s, fyaw_c;
+			TFE_Jedi::sinCosFlt(-s_xboxLastYaw, &fyaw_s, &fyaw_c);
+			const f32 forwardDot = dxC * (-fyaw_s) + dzC * fyaw_c;
+			if (forwardDot < 0.05f) { s_objStats.behindCam++; continue; }
 
-			// WAX cells store column data bottom-up - column[0] is the
-			// sprite's feet, column[cellH-1] is the head. So the bottom
-			// vertex (feet) gets v=0 and the top vertex (head) gets
-			// v=vMax. Reversed from BM wall textures which are top-down.
+			// World corners. Sprite extends along camera-right by wWS,
+			// shifted by -ofX along right.
+			const f32 sxL = px - ofX * rx;
+			const f32 szL = pz - ofX * rz;
+			const f32 sxR = sxL + wWS * rx;
+			const f32 szR = szL + wWS * rz;
+			const f32 yt  = py - hWS + ofY;
+			const f32 yb  = py + ofY;
+
+			// Phase 11: the P8 upload nearest-neighbour-scales the cell
+			// up to a pow2 texture (the whole pow2 surface ends up
+			// containing the full sprite, not a sub-rect with padding
+			// as the earlier Phase 8 code assumed). UVs span the full
+			// [0,1] range. Sampling cell->sizeX/texW etc. here was
+			// clipping off the top portion of every sprite ("torso
+			// down only" symptom).
+			f32 uL = 0.0f, uR = 1.0f;
+			const f32 vB = 1.0f;
+			if (frame->flip) { const f32 t = uL; uL = uR; uR = t; }
+			(void)texW; (void)texH;
+
+			// WAX cells stored column bottom-up: bottom vertex v=0,
+			// top vertex v=vB.
 			TFE_RenderBackend::GpuTexVert v[6];
-			// Bottom-left (feet):
-			v[0].x = px - wHalf * rx; v[0].y = yb; v[0].z = pz - wHalf * rz;
-			v[0].color = sectorColor; v[0].u = 0.0f; v[0].v = 0.0f;
-			// Top-left (head):
-			v[1].x = px - wHalf * rx; v[1].y = yt; v[1].z = pz - wHalf * rz;
-			v[1].color = sectorColor; v[1].u = 0.0f; v[1].v = vMax;
-			// Top-right (head):
-			v[2].x = px + wHalf * rx; v[2].y = yt; v[2].z = pz + wHalf * rz;
-			v[2].color = sectorColor; v[2].u = uMax; v[2].v = vMax;
-			// Bottom-left (feet):
+			v[0].x = sxL; v[0].y = yb; v[0].z = szL;
+			v[0].color = sectorColor; v[0].u = uL; v[0].v = 0.0f;
+			v[1].x = sxL; v[1].y = yt; v[1].z = szL;
+			v[1].color = sectorColor; v[1].u = uL; v[1].v = vB;
+			v[2].x = sxR; v[2].y = yt; v[2].z = szR;
+			v[2].color = sectorColor; v[2].u = uR; v[2].v = vB;
 			v[3] = v[0];
-			// Top-right (head):
 			v[4] = v[2];
-			// Bottom-right (feet):
-			v[5].x = px + wHalf * rx; v[5].y = yb; v[5].z = pz + wHalf * rz;
-			v[5].color = sectorColor; v[5].u = uMax; v[5].v = 0.0f;
+			v[5].x = sxR; v[5].y = yb; v[5].z = szR;
+			v[5].color = sectorColor; v[5].u = uR; v[5].v = 0.0f;
 
 			TFE_RenderBackend::gpuDrawAlphaTestedTrisWorld(
 				s_xboxViewMtx, s_xboxProjMtx, tex, v, 2);
+			s_objStats.drawn++;
 		}
 	}
 
@@ -778,7 +841,7 @@ namespace TFE_Jedi
 		if (!w->signTex || !*w->signTex) return;
 		TextureData* tex = *w->signTex;
 		if (!tex->image || tex->compressed != 0) return;
-		if (!isPow2(tex->width) || !isPow2(tex->height)) return;
+		// pow2 not required - backend upscales.
 		if (w->midTexelHeight <= 0 || w->texelLength <= 0) return;
 
 		// Sign U range along the wall (in texels along its length).
@@ -922,6 +985,9 @@ namespace TFE_Jedi
 		static RSector* s_visitQueue[XBOX_VISIT_CAP];
 		u32 head = 0, tail = 0;
 
+		xboxObjStatsReset();
+		s_objStatsFrame++;
+
 		s_visitQueue[tail++] = startSector;
 		startSector->prevDrawFrame = TFE_Jedi::s_drawFrame;
 
@@ -951,6 +1017,10 @@ namespace TFE_Jedi
 				s_visitQueue[tail++] = next;
 			}
 		}
+
+		// Per-frame object/cache stats. Dump every 120th draw frame
+		// (~2s at 60Hz mission tick) so we have steady signal.
+		if ((s_objStatsFrame % 120) == 1) xboxObjStatsDump();
 
 		// One log line each time the player walks into a new starting
 		// sector, plus how many sectors the traversal reached.
