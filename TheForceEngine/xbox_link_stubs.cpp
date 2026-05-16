@@ -337,66 +337,109 @@ namespace TFE_Jedi
 	// (nextSector != NULL) are skipped so the player can see through
 	// them into the next sector. The traversal in draw() pushes those
 	// next sectors onto the visit queue.
+	// Emit one wall quad (two textured tris) spanning [yTop, yBot] in
+	// world-Y between (x0,z0) and (x1,z1). texHeightFx is the wall
+	// portion's height in fixed16_16 texels (DF's per-portion height
+	// values: mid/top/bot TexelHeight). Falls back to a hashed-colour
+	// quad if the texture can't be uploaded.
+	static void xboxEmitWallQuad(s32 secId, s32 wallIdx,
+	                              f32 x0, f32 z0, f32 x1, f32 z1,
+	                              f32 yTop, f32 yBot,
+	                              TextureData* tex,
+	                              fixed16_16 texelLengthFx,
+	                              fixed16_16 texHeightFx,
+	                              u32 color)
+	{
+		const bool texUsable =
+			tex && tex->image && tex->compressed == 0 &&
+			isPow2(tex->width) && isPow2(tex->height);
+
+		if (texUsable)
+		{
+			const f32 texelLen = fixedToF(texelLengthFx);
+			const f32 texH     = fixedToF(texHeightFx);
+			const f32 uMax = texelLen / (f32)tex->width;
+			const f32 vMax = texH     / (f32)tex->height;
+
+			TFE_RenderBackend::GpuTextureHandle gpuTex =
+				TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
+					tex, tex->image, tex->width, tex->height, /*columnMajor*/true);
+
+			TFE_RenderBackend::GpuTexVert tv[6];
+			tv[0].x = x0; tv[0].y = yBot; tv[0].z = z0; tv[0].color = color; tv[0].u = 0.0f; tv[0].v = vMax;
+			tv[1].x = x0; tv[1].y = yTop; tv[1].z = z0; tv[1].color = color; tv[1].u = 0.0f; tv[1].v = 0.0f;
+			tv[2].x = x1; tv[2].y = yTop; tv[2].z = z1; tv[2].color = color; tv[2].u = uMax; tv[2].v = 0.0f;
+			tv[3].x = x0; tv[3].y = yBot; tv[3].z = z0; tv[3].color = color; tv[3].u = 0.0f; tv[3].v = vMax;
+			tv[4].x = x1; tv[4].y = yTop; tv[4].z = z1; tv[4].color = color; tv[4].u = uMax; tv[4].v = 0.0f;
+			tv[5].x = x1; tv[5].y = yBot; tv[5].z = z1; tv[5].color = color; tv[5].u = uMax; tv[5].v = vMax;
+
+			TFE_RenderBackend::gpuDrawTexturedTrisWorld(
+				s_xboxViewMtx, s_xboxProjMtx, gpuTex, tv, 2);
+		}
+		else
+		{
+			const u32 c = wallColor(wallIdx, secId);
+			TFE_RenderBackend::GpuColorVert cv[6];
+			cv[0].x = x0; cv[0].y = yBot; cv[0].z = z0; cv[0].color = c;
+			cv[1].x = x0; cv[1].y = yTop; cv[1].z = z0; cv[1].color = c;
+			cv[2].x = x1; cv[2].y = yTop; cv[2].z = z1; cv[2].color = c;
+			cv[3].x = x0; cv[3].y = yBot; cv[3].z = z0; cv[3].color = c;
+			cv[4].x = x1; cv[4].y = yTop; cv[4].z = z1; cv[4].color = c;
+			cv[5].x = x1; cv[5].y = yBot; cv[5].z = z1; cv[5].color = c;
+
+			TFE_RenderBackend::gpuDrawColoredTrisWorld(
+				s_xboxViewMtx, s_xboxProjMtx, cv, 2);
+		}
+	}
+
 	static void xboxDrawSectorWalls(RSector* sector)
 	{
 		const f32 floorY = fixedToF(sector->floorHeight);
 		const f32 ceilY  = fixedToF(sector->ceilingHeight);
-		const f32 yt = ceilY;
-		const f32 yb = floorY;
-		const u32 col  = ambientToColor(sector->ambient);
-
-		TFE_RenderBackend::GpuTexVert   tv[6];
-		TFE_RenderBackend::GpuColorVert cv[6];
+		const u32 col    = ambientToColor(sector->ambient);
 
 		for (s32 i = 0; i < sector->wallCount; i++)
 		{
 			RWall* w = &sector->walls[i];
 			if (!w->w0 || !w->w1) continue;
-			if (w->nextSector) continue;     // Phase 4: skip portal walls.
 
 			const f32 x0 = fixedToF(w->w0->x);
 			const f32 z0 = fixedToF(w->w0->z);
 			const f32 x1 = fixedToF(w->w1->x);
 			const f32 z1 = fixedToF(w->w1->z);
 
-			TextureData* tex = w->midTex;
-			const bool texUsable =
-				tex && tex->image && tex->compressed == 0 &&
-				isPow2(tex->width) && isPow2(tex->height);
-
-			if (texUsable)
+			if (!w->nextSector)
 			{
-				const f32 texelLen = fixedToF(w->texelLength);
-				const f32 midHt    = fixedToF(w->midTexelHeight);
-				const f32 uMax = texelLen / (f32)tex->width;
-				const f32 vMax = midHt    / (f32)tex->height;
-
-				TFE_RenderBackend::GpuTextureHandle gpuTex =
-					TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
-						tex, tex->image, tex->width, tex->height, /*columnMajor*/true);
-
-				tv[0].x = x0; tv[0].y = yb; tv[0].z = z0; tv[0].color = col; tv[0].u = 0.0f; tv[0].v = vMax;
-				tv[1].x = x0; tv[1].y = yt; tv[1].z = z0; tv[1].color = col; tv[1].u = 0.0f; tv[1].v = 0.0f;
-				tv[2].x = x1; tv[2].y = yt; tv[2].z = z1; tv[2].color = col; tv[2].u = uMax; tv[2].v = 0.0f;
-				tv[3].x = x0; tv[3].y = yb; tv[3].z = z0; tv[3].color = col; tv[3].u = 0.0f; tv[3].v = vMax;
-				tv[4].x = x1; tv[4].y = yt; tv[4].z = z1; tv[4].color = col; tv[4].u = uMax; tv[4].v = 0.0f;
-				tv[5].x = x1; tv[5].y = yb; tv[5].z = z1; tv[5].color = col; tv[5].u = uMax; tv[5].v = vMax;
-
-				TFE_RenderBackend::gpuDrawTexturedTrisWorld(
-					s_xboxViewMtx, s_xboxProjMtx, gpuTex, tv, 2);
+				// Solid wall - one mid quad full floor-to-ceiling.
+				xboxEmitWallQuad(sector->id, i, x0, z0, x1, z1,
+					ceilY, floorY,
+					w->midTex, w->texelLength, w->midTexelHeight, col);
+				continue;
 			}
-			else
-			{
-				const u32 c = wallColor(i, sector->id);
-				cv[0].x = x0; cv[0].y = yb; cv[0].z = z0; cv[0].color = c;
-				cv[1].x = x0; cv[1].y = yt; cv[1].z = z0; cv[1].color = c;
-				cv[2].x = x1; cv[2].y = yt; cv[2].z = z1; cv[2].color = c;
-				cv[3].x = x0; cv[3].y = yb; cv[3].z = z0; cv[3].color = c;
-				cv[4].x = x1; cv[4].y = yt; cv[4].z = z1; cv[4].color = c;
-				cv[5].x = x1; cv[5].y = yb; cv[5].z = z1; cv[5].color = c;
 
-				TFE_RenderBackend::gpuDrawColoredTrisWorld(
-					s_xboxViewMtx, s_xboxProjMtx, cv, 2);
+			// Phase 7: portal wall. Skip the middle (we look through),
+			// but draw the top sliver if our ceiling sits higher than
+			// the next sector's, and the bot sliver if our floor sits
+			// lower. JEDI's WDF_TOP/WDF_BOT flags already encode this.
+			RSector* next = w->nextSector;
+			const f32 nextCeil  = fixedToF(next->ceilingHeight);
+			const f32 nextFloor = fixedToF(next->floorHeight);
+
+			if (w->drawFlags & WDF_TOP)
+			{
+				// Sliver from our ceiling (yTop=ceilY) down to next
+				// sector's ceiling (yBot=nextCeil). In TFE -Y up:
+				// nextCeil is numerically greater (lower) than ceilY.
+				xboxEmitWallQuad(sector->id, i, x0, z0, x1, z1,
+					ceilY, nextCeil,
+					w->topTex, w->texelLength, w->topTexelHeight, col);
+			}
+			if (w->drawFlags & WDF_BOT)
+			{
+				// Sliver from next sector's floor down to ours.
+				xboxEmitWallQuad(sector->id, i, x0, z0, x1, z1,
+					nextFloor, floorY,
+					w->botTex, w->texelLength, w->botTexelHeight, col);
 			}
 		}
 	}
