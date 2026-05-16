@@ -163,13 +163,7 @@ namespace TFE_InputXbox
 
     void pollInput()
     {
-        // Heartbeat once a second so we can confirm pollInput is actually being
-        // called every frame from the main loop.
-        if ((s_pollCounter++ % 60) == 0)
-        {
-            TFE_XboxLogf("InputXbox", "poll tick=%d hController=%p",
-                s_pollCounter - 1, s_hController);
-        }
+        s_pollCounter++;
 
         // Lazy XInputOpen. XInitDevices kicks off USB enumeration
         // asynchronously, so the very first poll can race the host stack and
@@ -231,27 +225,6 @@ namespace TFE_InputXbox
 
         const XINPUT_GAMEPAD& pad  = state.Gamepad;
         const XINPUT_GAMEPAD& prev = s_prevState.Gamepad;
-
-        // Raw state dump once a second. Confirms XInputGetState is returning
-        // live data and shows what the hardware is actually reporting. Uses %d
-        // only - %f hangs MSVC 2005 vsprintf on the Xbox.
-        if ((s_pollCounter % 60) == 1)
-        {
-            TFE_XboxLogf("InputXbox",
-                "raw pkt=%lu wBtn=0x%04x LX=%d LY=%d RX=%d RY=%d "
-                "A=%d B=%d X=%d Y=%d BLK=%d WHT=%d LT=%d RT=%d",
-                state.dwPacketNumber, (unsigned)pad.wButtons,
-                (int)pad.sThumbLX, (int)pad.sThumbLY,
-                (int)pad.sThumbRX, (int)pad.sThumbRY,
-                (int)pad.bAnalogButtons[XINPUT_GAMEPAD_A],
-                (int)pad.bAnalogButtons[XINPUT_GAMEPAD_B],
-                (int)pad.bAnalogButtons[XINPUT_GAMEPAD_X],
-                (int)pad.bAnalogButtons[XINPUT_GAMEPAD_Y],
-                (int)pad.bAnalogButtons[XINPUT_GAMEPAD_BLACK],
-                (int)pad.bAnalogButtons[XINPUT_GAMEPAD_WHITE],
-                (int)pad.bAnalogButtons[XINPUT_GAMEPAD_LEFT_TRIGGER],
-                (int)pad.bAnalogButtons[XINPUT_GAMEPAD_RIGHT_TRIGGER]);
-        }
 
         // ---------------------------------------------------------------
         // Analog sticks

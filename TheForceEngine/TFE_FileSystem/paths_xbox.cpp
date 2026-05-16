@@ -288,7 +288,6 @@ namespace TFE_Paths
                 strcasecmp(mapping->fileName.c_str(), fileName) == 0)
             {
                 strcpy(outPath->path, mapping->realPath.c_str());
-                TFE_XboxLogf("Paths", "getFilePath mapping hit %s -> %s", fileName, outPath->path);
                 return true;
             }
         }
@@ -305,7 +304,6 @@ namespace TFE_Paths
             if (file.exists(fullName))
             {
                 strncpy(outPath->path, fullName, TFE_MAX_PATH);
-                TFE_XboxLogf("Paths", "getFilePath file hit %s -> %s", fileName, outPath->path);
                 return true;
             }
         }
@@ -322,13 +320,10 @@ namespace TFE_Paths
             {
                 outPath->archive = *archive;
                 outPath->index = index;
-                TFE_XboxLogf("Paths", "getFilePath archive hit %s index=%u", fileName, index);
                 return true;
             }
         }
 
-        TFE_XboxLogf("Paths", "getFilePath miss %s searchPaths=%u archives=%u mappings=%u",
-            fileName ? fileName : "", (u32)s_searchPaths.size(), (u32)s_localArchives.size(), (u32)s_fileMappings.size());
         return false;
     }
 

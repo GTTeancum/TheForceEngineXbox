@@ -326,21 +326,6 @@ namespace TFE_RenderBackend
         for (u32 i = 0; i < pixels; i++)
             s_expandBuf[i] = s_paletteCpu[src[i]];
 
-        // Diagnostic: every ~240 frames sample a few framebuffer indices and
-        // their expanded XRGB values so we can prove the game is writing
-        // non-trivial content (and the expand path is sane) without spamming.
-        if (s_vdispCalls < 3 || (s_vdispCalls % 240) == 0)
-        {
-            const u32 mid = (s_vdispHeight / 2) * s_vdispWidth + (s_vdispWidth / 2);
-            const u32 q   = (s_vdispHeight / 4) * s_vdispWidth + (s_vdispWidth / 4);
-            TFE_XboxLogf("VDISP", "updateVirtualDisplay #%d size=%u tex=%p surf=%p"
-                                   " idx[0]=%u[8]=%u[mid]=%u[q]=%u"
-                                   " px[mid]=0x%08x px[q]=0x%08x",
-                s_vdispCalls, (unsigned)size, s_vdispTex, s_vdispSurf,
-                (unsigned)src[0], (unsigned)src[8],
-                (unsigned)src[mid], (unsigned)src[q],
-                s_expandBuf[mid], s_expandBuf[q]);
-        }
         s_vdispCalls++;
 
         // Lock, copy, unlock.
@@ -503,15 +488,12 @@ namespace TFE_RenderBackend
 
             HRESULT hr = s_device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof(PresentQuadVert));
 
-            // Log first few presents so we can tell if the draw is failing.
-            static int s_swapLog = 0;
-            if (s_swapLog < 3 || (s_swapLog % 240) == 0)
+            // Log only on failure - success is the steady state.
+            if (FAILED(hr))
             {
-                TFE_XboxLogf("VDISP", "swap #%d DrawPrimitiveUP hr=0x%08x dest=%ld,%ld,%ld,%ld",
-                    s_swapLog, hr,
-                    s_destRect.left, s_destRect.top, s_destRect.right, s_destRect.bottom);
+                TFE_XboxLogf("VDISP", "DrawPrimitiveUP FAILED hr=0x%08x dest=%ld,%ld,%ld,%ld",
+                    hr, s_destRect.left, s_destRect.top, s_destRect.right, s_destRect.bottom);
             }
-            s_swapLog++;
 
             s_device->SetTexture(0, NULL);
         }

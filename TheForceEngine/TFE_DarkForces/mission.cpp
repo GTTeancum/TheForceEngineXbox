@@ -391,9 +391,6 @@ namespace TFE_DarkForces
 	{
 		task_begin;
 		{
-#ifdef _XBOX
-			TFE_XboxLogf("Mission", "mission_startTaskFunc enter loadingFromSave=%d", (int)s_loadingFromSave);
-#endif
 			// TFE-specific
 			mission_addCheatCommands();
 			CCMD("spawnEnemy", console_spawnEnemy, 2, "spawnEnemy(waxName, enemyTypeName) - spawns an enemy 8 units away in the player direction. Example: spawnEnemy offcfin.wax i_officer");
@@ -426,11 +423,6 @@ namespace TFE_DarkForces
 				s_loadingScreenStart = s_curTick;
 				{
 					const char* levelName = agent_getLevelName();
-#ifdef _XBOX
-					TFE_XboxLogf("Mission", "level_load name=%s diff=%d agentId=%d",
-						levelName ? levelName : "(null)",
-						(int)s_agentData[s_agentId].difficulty, s_agentId);
-#endif
 					// For now always load medium difficulty since it cannot be selected.
 					if (level_load(levelName, s_agentData[s_agentId].difficulty))
 					{
@@ -447,20 +439,11 @@ namespace TFE_DarkForces
 						setSkyParallax(s_levelState.parallax0, s_levelState.parallax1);
 						s_missionMode = MISSION_MODE_MAIN;
 						s_gamePaused = JFALSE;
-#ifdef _XBOX
-						TFE_XboxLogf("Mission", "level loaded OK - gamePaused=0 missionMode=MAIN");
-#endif
 						mission_createRenderDisplay();
 						hud_startup(JFALSE);
 
 						reticle_enable(true);
 					}
-#ifdef _XBOX
-					else
-					{
-						TFE_XboxLogf("Mission", "level_load FAILED - gamePaused stays true");
-					}
-#endif
 					s_flatLighting = JFALSE;
 					// Note: I am not sure why this is there but it overrides all player settings
 					// By default the player load disables night vision so it won't carry over from previous maps.

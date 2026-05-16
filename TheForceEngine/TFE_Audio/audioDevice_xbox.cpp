@@ -237,19 +237,11 @@ namespace TFE_AudioDevice
     {
         if (!s_dsBuf || !s_callback) return;
 
-        static int s_pumpCounter = 0;
-        const bool trace = (s_pumpCounter < 5);
-        if (trace) TFE_XboxLogf("AudioPump", "tick=%d enter queued=%lu started=%d",
-            s_pumpCounter, (unsigned long)s_queuedBytes, s_started);
-
         streamUpdateQueued();
-        if (trace) TFE_XboxLogf("AudioPump", "tick=%d after streamUpdateQueued queued=%lu",
-            s_pumpCounter, (unsigned long)s_queuedBytes);
 
         // Fill until the ring is mostly full (one block of headroom). We may
         // call the callback multiple times per pump if we're catching up.
         int safety = 8;   // cap iterations so a runaway callback can't hang
-        int iters  = 0;
         while (safety-- > 0)
         {
             DWORD writable;
@@ -260,41 +252,26 @@ namespace TFE_AudioDevice
 
             if (writable < AUDIO_CHUNK_PCM_BYTES) break;
 
-            if (trace) TFE_XboxLogf("AudioPump", "tick=%d iter=%d before callback writable=%lu",
-                s_pumpCounter, iters, (unsigned long)writable);
-
             // Pull one chunk of FLOAT samples from the TFE mixer, then
             // convert to s16 PCM for DirectSound.
             memset(s_mixBufF32, 0, AUDIO_CHUNK_FLT_BYTES);
             s_callback(s_callbackData, (unsigned char*)s_mixBufF32, AUDIO_CHUNK_FLT_BYTES);
-
-            if (trace) TFE_XboxLogf("AudioPump", "tick=%d iter=%d after callback",
-                s_pumpCounter, iters);
-
             floatToS16(s_mixBufF32, s_mixBufS16, AUDIO_FRAME_SAMPLES * AUDIO_CHANNELS);
             streamWrite((const unsigned char*)s_mixBufS16, AUDIO_CHUNK_PCM_BYTES);
-
-            if (trace) TFE_XboxLogf("AudioPump", "tick=%d iter=%d after write queued=%lu",
-                s_pumpCounter, iters, (unsigned long)s_queuedBytes);
-            iters++;
         }
 
         // Once enough data is queued, kick off looping playback.
         if (!s_started && s_queuedBytes >= s_prefillBytes)
         {
-            if (trace) TFE_XboxLogf("AudioPump", "tick=%d before Play", s_pumpCounter);
             s_dsBuf->SetCurrentPosition(0);
             HRESULT hr = s_dsBuf->Play(0, 0, DSBPLAY_LOOPING);
             s_started      = SUCCEEDED(hr) ? 1 : 0;
             s_lastPlayPos  = 0;
             s_playPosValid = s_started;
-            TFE_XboxLogf("AudioDevice", "Play(LOOPING) hr=0x%08x queued=%lu started=%d",
-                hr, (unsigned long)s_queuedBytes, s_started);
+            TFE_System::logWrite(LOG_MSG, "AudioDevice",
+                "DirectSound playback %s (queued=%lu)",
+                s_started ? "started" : "FAILED", (unsigned long)s_queuedBytes);
         }
-
-        if (trace) TFE_XboxLogf("AudioPump", "tick=%d exit iters=%d queued=%lu",
-            s_pumpCounter, iters, (unsigned long)s_queuedBytes);
-        s_pumpCounter++;
     }
 
     // ---------------------------------------------------------------------------

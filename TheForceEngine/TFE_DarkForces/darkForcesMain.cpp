@@ -600,26 +600,6 @@ namespace TFE_DarkForces
 	{
 		updateTime();
 
-#ifdef _XBOX
-		// State-machine heartbeat: log current state every ~60 ticks so we
-		// can see where the boot is parked when input isn't reaching gameplay.
-		{
-			static int s_loopHb = 0;
-			if ((s_loopHb++ % 60) == 0)
-			{
-				TFE_XboxLogf("DFLoop", "tick=%d state=%d cutsceneIdx=%d levelIdx=%d startLevel=%d invalidLevel=%d cutscenesEnabled=%d taskCount=%d",
-					s_loopHb - 1,
-					(int)s_runGameState.state,
-					s_runGameState.cutsceneIndex,
-					s_runGameState.levelIndex,
-					s_runGameState.startLevel,
-					(int)s_invalidLevelIndex,
-					(int)s_runGameState.cutscenesEnabled,
-					(int)TFE_Jedi::task_getCount());
-			}
-		}
-#endif
-
 		switch (s_runGameState.state)
 		{
 		case GSTATE_STARTUP_CUTSCENES:
@@ -660,9 +640,6 @@ namespace TFE_DarkForces
 
 			if (levelSelected)
 			{
-#ifdef _XBOX
-				TFE_XboxLogf("DFLoop", "AGENT_MENU levelSelected levelIndex=%d", s_runGameState.levelIndex);
-#endif
 				s_invalidLevelIndex = JTRUE;
 				for (s32 i = 0; i < TFE_ARRAYSIZE(s_cutsceneData); i++)
 				{
@@ -670,9 +647,6 @@ namespace TFE_DarkForces
 					{
 						s_runGameState.cutsceneIndex = i;
 						s_invalidLevelIndex = JFALSE;
-#ifdef _XBOX
-						TFE_XboxLogf("DFLoop", "AGENT_MENU cutsceneData match i=%d", i);
-#endif
 						break;
 					}
 				}
@@ -808,23 +782,13 @@ namespace TFE_DarkForces
 
 	void startNextMode()
 	{
-#ifdef _XBOX
-		TFE_XboxLogf("DFLoop", "startNextMode entry cutsceneIdx=%d invalidLevel=%d abortLevel=%d",
-			s_runGameState.cutsceneIndex, (int)s_invalidLevelIndex, (int)s_runGameState.abortLevel);
-#endif
 		if (s_invalidLevelIndex || s_runGameState.abortLevel)
 		{
-#ifdef _XBOX
-			TFE_XboxLogf("DFLoop", "startNextMode -> GSTATE_AGENT_MENU (invalid/abort)");
-#endif
 			s_runGameState.state = GSTATE_AGENT_MENU;
 			return;
 		}
 
 		GameMode mode = s_cutsceneData[s_runGameState.cutsceneIndex].nextGameMode;
-#ifdef _XBOX
-		TFE_XboxLogf("DFLoop", "startNextMode mode=%d (0=END 1=CUT 2=BRIEF 3=MISSION)", (int)mode);
-#endif
 		switch (mode)
 		{
 		case GMODE_END:
