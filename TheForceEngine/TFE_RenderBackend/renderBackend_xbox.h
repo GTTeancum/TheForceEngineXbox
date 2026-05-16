@@ -72,6 +72,24 @@ namespace TFE_RenderBackend
     void gpuDrawTexturedTrisWorld(const f32 viewMtx[16], const f32 projMtx[16],
                                   GpuTextureHandle tex,
                                   const GpuTexVert* verts, u32 triCount);
+
+    // Phase 8 sprite path. Upload a pre-built RGBA pixel array (caller
+    // does the RLE decode + palette expand) as a swizzled A8R8G8B8
+    // texture. Width and height must be powers of two. Returns NULL on
+    // cache full / CreateTexture failure. Cache is shared with the wall
+    // path - sprite/wall keys differ so collisions don't happen.
+    GpuTextureHandle gpuGetOrUploadRgbaTexture(const void* key,
+                                               const u32* pixelsRgba,
+                                               u32 width, u32 height);
+
+    // Draw textured triangles with alpha test (alpha < 1 -> discard).
+    // For sprite billboards where palette-index-0 pixels were uploaded
+    // with alpha = 0. Z-test on, Z-write on (so sprites occlude each
+    // other correctly; transparent pixels still don't write Z because
+    // they're discarded before the depth stage).
+    void gpuDrawAlphaTestedTrisWorld(const f32 viewMtx[16], const f32 projMtx[16],
+                                     GpuTextureHandle tex,
+                                     const GpuTexVert* verts, u32 triCount);
 }
 
 #endif // _XBOX

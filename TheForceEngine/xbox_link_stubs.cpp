@@ -19,7 +19,9 @@
 #include <TFE_Jedi/Renderer/RClassic_GPU/screenDrawGPU.h>
 #include <TFE_Jedi/Level/rsector.h>
 #include <TFE_Jedi/Level/rwall.h>
+#include <TFE_Jedi/Level/robjData.h>
 #include <TFE_Jedi/Renderer/rcommon.h>
+#include <TFE_Asset/spriteAsset_Jedi.h>
 #include <TFE_RenderBackend/renderBackend_xbox.h>
 #include <TFE_ForceScript/forceScript.h>
 #include <TFE_DarkForces/Landru/lsystem.h>
@@ -392,6 +394,192 @@ namespace TFE_Jedi
 		}
 	}
 
+	// Round up to the next power of two. Sprite cells aren't generally
+	// pow2 so we pad to the nearest size and CLAMP the UVs to [0, cellW/W].
+	static inline u32 nextPow2(u32 v)
+	{
+		u32 r = 1;
+		while (r < v) r <<= 1;
+		return r;
+	}
+
+	// Phase 8: upload a WAX/FME cell into an alpha-tested GPU texture.
+	// Cells are column-major 8-bit indexed (RLE-compressed when
+	// cell->compressed != 0). Palette index 0 is the DF transparent
+	// colour - we put alpha = 0 there, every other index becomes the
+	// fully-opaque palette colour.
+	//
+	// Cells aren't generally power-of-two; we pad to the next pow2 with
+	// alpha = 0 padding and the billboard UV math uses (cellW/texW,
+	// cellH/texH) as the right/bottom UV with CLAMP addressing so the
+	// padding never gets sampled.
+	enum { XBOX_MAX_CELL_PIXELS = 256 * 256 };
+	static u32 s_cellStage[XBOX_MAX_CELL_PIXELS];
+
+	static TFE_RenderBackend::GpuTextureHandle
+	xboxUploadWaxCell(WaxCell* cell, const void* waxBase, u32* outTexW, u32* outTexH)
+	{
+		if (!cell || cell->sizeX <= 0 || cell->sizeY <= 0) return NULL;
+
+		const u32 cellW = (u32)cell->sizeX;
+		const u32 cellH = (u32)cell->sizeY;
+		const u32 texW  = nextPow2(cellW);
+		const u32 texH  = nextPow2(cellH);
+		if (texW * texH > XBOX_MAX_CELL_PIXELS) return NULL;
+
+		// Build the linear RGBA buffer. Clear to zero (alpha=0) first so
+		// the pow2 padding is invisible after the alpha test.
+		memset(s_cellStage, 0, texW * texH * sizeof(u32));
+
+		const u32* pal = TFE_RenderBackend::getPalette();
+		const u8*  imageData = (const u8*)cell + sizeof(WaxCell);
+		const u32* columnOffset = (const u32*)((const u8*)waxBase + cell->columnOffset);
+		const u8*  imageStart = (cell->compressed == 1)
+		                      ? imageData + (cell->sizeX * sizeof(u32))
+		                      : imageData;
+
+		u8 colBuf[1024];
+		for (u32 x = 0; x < cellW; x++)
+		{
+			const u8* column;
+			if (cell->compressed == 1)
+			{
+				const u8* colPtr = (const u8*)cell + columnOffset[x];
+				if (cellH > sizeof(colBuf)) continue;
+				TFE_Jedi::sprite_decompressColumn(colPtr, colBuf, (s32)cellH);
+				column = colBuf;
+			}
+			else
+			{
+				column = imageStart + columnOffset[x];
+			}
+			for (u32 y = 0; y < cellH; y++)
+			{
+				const u8 idx = column[y];
+				if (idx == 0) continue;  // transparent
+				// pal[] is s_paletteCpu, ALREADY in 0xAARRGGBB layout
+				// (renderBackend::setPalette swaps R/B at receive time
+				// for D3D's A8R8G8B8 format). Don't re-swap; just copy
+				// the 24-bit colour and force alpha to 0xFF.
+				s_cellStage[y * texW + x] = (pal[idx] & 0x00FFFFFFu) | 0xFF000000u;
+			}
+		}
+
+		if (outTexW) *outTexW = texW;
+		if (outTexH) *outTexH = texH;
+		return TFE_RenderBackend::gpuGetOrUploadRgbaTexture(
+			cell, s_cellStage, texW, texH);
+	}
+
+	// Phase 8: draw every visible sprite/frame object in `sector` as a
+	// camera-facing billboard.
+	static void xboxDrawSectorObjects(RSector* sector)
+	{
+		if (!sector->objectList || sector->objectCount <= 0) return;
+
+		// Camera right vector matches the view-matrix's right basis row.
+		// computeCameraTransform built it as (cos(-yaw), 0, sin(-yaw))
+		// so the billboard expands ALONG that vector either side of the
+		// object's posWS.
+		f32 sy, cy;
+		TFE_Jedi::sinCosFlt(-s_xboxLastYaw, &sy, &cy);
+		const f32 rx = cy, rz = sy;
+		const u32 sectorColor = ambientToColor(sector->ambient);
+
+		for (s32 i = 0; i < sector->objectCount; i++)
+		{
+			SecObject* obj = sector->objectList[i];
+			if (!obj) continue;
+			if (obj->type != OBJ_TYPE_SPRITE && obj->type != OBJ_TYPE_FRAME) continue;
+
+			// Resolve the WaxFrame for this object's current anim/view/frame.
+			WaxFrame* frame = NULL;
+			void*     waxBase = NULL;
+			if (obj->type == OBJ_TYPE_SPRITE && obj->wax)
+			{
+				Wax* wax = obj->wax;
+				WaxAnim* anim = WAX_AnimPtr(wax, obj->anim & 0x1f);
+				if (!anim) continue;
+
+				// 32-bucket view selection (matches RClassic_Float).
+				// Angle from object to camera in angle14 units; subtract
+				// the object's own yaw to get a relative angle; shift down
+				// by 9 (16384 / 512 = 32) and mask to wrap.
+				const f32 dx = s_cameraPos.x - fixedToF(obj->posWS.x);
+				const f32 dz = s_cameraPos.z - fixedToF(obj->posWS.z);
+				const s32 ang = TFE_Jedi::vec2ToAngle(dx, dz);
+				s32 angleDiff = ((ang - (s32)obj->yaw) >> 9) & 31;
+				s32 viewIdx = 31 - angleDiff;
+
+				// Many waxes only have a subset of the 32 view slots
+				// populated (8-view sprites are common). Fall back to
+				// view 0 if the picked slot is empty.
+				WaxView* view = WAX_ViewPtr(wax, anim, viewIdx);
+				if (!view) view = WAX_ViewPtr(wax, anim, 0);
+				if (!view) continue;
+
+				frame = WAX_FramePtr(wax, view, obj->frame & 0x1f);
+				waxBase = wax;
+			}
+			else if (obj->type == OBJ_TYPE_FRAME && obj->fme)
+			{
+				frame = obj->fme;
+				// FME cell is sized off the frame itself; cell->columnOffset
+				// is stored as an absolute offset into the frame's buffer.
+				waxBase = obj->fme;
+			}
+			if (!frame) continue;
+			WaxCell* cell = WAX_CellPtr(waxBase, frame);
+			if (!cell) continue;
+
+			u32 texW = 0, texH = 0;
+			TFE_RenderBackend::GpuTextureHandle tex =
+				xboxUploadWaxCell(cell, waxBase, &texW, &texH);
+			if (!tex) continue;
+
+			const f32 px = fixedToF(obj->posWS.x);
+			const f32 py = fixedToF(obj->posWS.y);
+			const f32 pz = fixedToF(obj->posWS.z);
+			const f32 wHalf = fixedToF(obj->worldWidth) * 0.5f;
+			const f32 hFull = fixedToF(obj->worldHeight);
+
+			// In TFE -Y up: sprite bottom sits at posWS.y, top is
+			// posWS.y - hFull (smaller y = higher up).
+			const f32 yb = py;
+			const f32 yt = py - hFull;
+
+			// CLAMP UVs - cell occupies the [0, cellW/texW]x[0, cellH/texH]
+			// sub-rect of the pow2 texture; padding lies outside that.
+			const f32 uMax = (f32)cell->sizeX / (f32)texW;
+			const f32 vMax = (f32)cell->sizeY / (f32)texH;
+
+			// WAX cells store column data bottom-up - column[0] is the
+			// sprite's feet, column[cellH-1] is the head. So the bottom
+			// vertex (feet) gets v=0 and the top vertex (head) gets
+			// v=vMax. Reversed from BM wall textures which are top-down.
+			TFE_RenderBackend::GpuTexVert v[6];
+			// Bottom-left (feet):
+			v[0].x = px - wHalf * rx; v[0].y = yb; v[0].z = pz - wHalf * rz;
+			v[0].color = sectorColor; v[0].u = 0.0f; v[0].v = 0.0f;
+			// Top-left (head):
+			v[1].x = px - wHalf * rx; v[1].y = yt; v[1].z = pz - wHalf * rz;
+			v[1].color = sectorColor; v[1].u = 0.0f; v[1].v = vMax;
+			// Top-right (head):
+			v[2].x = px + wHalf * rx; v[2].y = yt; v[2].z = pz + wHalf * rz;
+			v[2].color = sectorColor; v[2].u = uMax; v[2].v = vMax;
+			// Bottom-left (feet):
+			v[3] = v[0];
+			// Top-right (head):
+			v[4] = v[2];
+			// Bottom-right (feet):
+			v[5].x = px + wHalf * rx; v[5].y = yb; v[5].z = pz + wHalf * rz;
+			v[5].color = sectorColor; v[5].u = uMax; v[5].v = 0.0f;
+
+			TFE_RenderBackend::gpuDrawAlphaTestedTrisWorld(
+				s_xboxViewMtx, s_xboxProjMtx, tex, v, 2);
+		}
+	}
+
 	static void xboxDrawSectorWalls(RSector* sector)
 	{
 		const f32 floorY = fixedToF(sector->floorHeight);
@@ -480,6 +668,7 @@ namespace TFE_Jedi
 			xboxDrawSectorWalls(sec);
 			xboxDrawSectorFlat(sec, sec->floorHeight,   sec->floorTex, sec->floorOffset);
 			xboxDrawSectorFlat(sec, sec->ceilingHeight, sec->ceilTex,  sec->ceilOffset);
+			xboxDrawSectorObjects(sec);
 			visited++;
 
 			// Queue every neighbour reachable through an adjoin we

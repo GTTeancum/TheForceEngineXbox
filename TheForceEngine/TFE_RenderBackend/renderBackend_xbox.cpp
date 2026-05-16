@@ -896,6 +896,100 @@ namespace TFE_RenderBackend
         return (GpuTextureHandle)tex;
     }
 
+    GpuTextureHandle gpuGetOrUploadRgbaTexture(const void* key,
+                                               const u32* pixelsRgba,
+                                               u32 width, u32 height)
+    {
+        if (!s_deviceReady || !key || !pixelsRgba || !width || !height) return NULL;
+        for (u32 i = 0; i < s_texCacheCount; i++)
+        {
+            if (s_texCache[i].key == key) return (GpuTextureHandle)s_texCache[i].tex;
+        }
+        if (s_texCacheCount >= XBOX_TEX_CACHE_CAP) return NULL;
+
+        IDirect3DTexture8* tex = NULL;
+        HRESULT hr = s_device->CreateTexture(width, height, 1, 0,
+                                             D3DFMT_A8R8G8B8,
+                                             0, &tex);
+        if (FAILED(hr) || !tex)
+        {
+            TFE_XboxLogf("GPU", "sprite CreateTexture %ux%u failed hr=0x%08x", width, height, hr);
+            return NULL;
+        }
+        D3DLOCKED_RECT lr;
+        hr = tex->LockRect(0, &lr, NULL, 0);
+        if (FAILED(hr))
+        {
+            tex->Release();
+            return NULL;
+        }
+        XGSwizzleRect(pixelsRgba, width * 4, NULL,
+                      lr.pBits, width, height, NULL, 4);
+        tex->UnlockRect(0);
+
+        s_texCache[s_texCacheCount].key = key;
+        s_texCache[s_texCacheCount].tex = tex;
+        s_texCacheCount++;
+
+        static bool s_loggedFirstSprite = false;
+        if (!s_loggedFirstSprite)
+        {
+            s_loggedFirstSprite = true;
+            TFE_XboxLogf("GPU", "Phase 8 first sprite upload: %ux%u, cache=%u",
+                         width, height, s_texCacheCount);
+        }
+        return (GpuTextureHandle)tex;
+    }
+
+    void gpuDrawAlphaTestedTrisWorld(const f32 viewMtx[16], const f32 projMtx[16],
+                                     GpuTextureHandle tex,
+                                     const GpuTexVert* verts, u32 triCount)
+    {
+        if (!s_deviceReady || !s_gpuSceneOpen || !verts || triCount == 0) return;
+
+        D3DMATRIX view; memcpy(&view, viewMtx, sizeof(view));
+        D3DMATRIX proj; memcpy(&proj, projMtx, sizeof(proj));
+        D3DMATRIX world; memset(&world, 0, sizeof(world));
+        world._11 = world._22 = world._33 = world._44 = 1.0f;
+
+        s_device->SetTransform(D3DTS_PROJECTION, &proj);
+        s_device->SetTransform(D3DTS_VIEW,       &view);
+        s_device->SetTransform(D3DTS_WORLD,      &world);
+
+        s_device->SetRenderState(D3DRS_LIGHTING,         FALSE);
+        s_device->SetRenderState(D3DRS_ZENABLE,          TRUE);
+        s_device->SetRenderState(D3DRS_ZWRITEENABLE,     TRUE);
+        s_device->SetRenderState(D3DRS_ZFUNC,            D3DCMP_LESSEQUAL);
+        s_device->SetRenderState(D3DRS_CULLMODE,         D3DCULL_NONE);
+        s_device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        s_device->SetRenderState(D3DRS_FOGENABLE,        FALSE);
+        // Alpha test: keep pixels whose alpha > 0. Sprite uploads put
+        // alpha=0 on palette-index-0 pixels (the DF transparency colour).
+        s_device->SetRenderState(D3DRS_ALPHATESTENABLE,  TRUE);
+        s_device->SetRenderState(D3DRS_ALPHAREF,         0x80);
+        s_device->SetRenderState(D3DRS_ALPHAFUNC,        D3DCMP_GREATEREQUAL);
+
+        s_device->SetTexture(0, (IDirect3DTexture8*)tex);
+        s_device->SetTextureStageState(0, D3DTSS_COLOROP,   D3DTOP_MODULATE);
+        s_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        s_device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+        s_device->SetTextureStageState(0, D3DTSS_ALPHAOP,   D3DTOP_SELECTARG1);
+        s_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        s_device->SetTextureStageState(0, D3DTSS_MAGFILTER, D3DTEXF_POINT);
+        s_device->SetTextureStageState(0, D3DTSS_MINFILTER, D3DTEXF_POINT);
+        s_device->SetTextureStageState(0, D3DTSS_MIPFILTER, D3DTEXF_NONE);
+        s_device->SetTextureStageState(0, D3DTSS_ADDRESSU,  D3DTADDRESS_CLAMP);
+        s_device->SetTextureStageState(0, D3DTSS_ADDRESSV,  D3DTADDRESS_CLAMP);
+        s_device->SetTextureStageState(1, D3DTSS_COLOROP,   D3DTOP_DISABLE);
+        s_device->SetTextureStageState(1, D3DTSS_ALPHAOP,   D3DTOP_DISABLE);
+
+        s_device->SetVertexShader(D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+        s_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, triCount, verts, sizeof(GpuTexVert));
+
+        // Restore alpha test off so subsequent opaque draws aren't affected.
+        s_device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    }
+
     void gpuDrawTexturedTrisWorld(const f32 viewMtx[16], const f32 projMtx[16],
                                   GpuTextureHandle tex,
                                   const GpuTexVert* verts, u32 triCount)
