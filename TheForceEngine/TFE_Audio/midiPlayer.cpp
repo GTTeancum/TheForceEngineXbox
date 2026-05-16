@@ -222,7 +222,17 @@ namespace TFE_MidiPlayer
 						res = false;
 					}
 				}
+#ifdef _XBOX
+				TFE_System::logWrite(LOG_MSG, "Midi", "device created type=%d canRender=%d",
+					(int)s_midiDevice->getType(), s_midiDevice->canRender() ? 1 : 0);
+#endif
 			}
+#ifdef _XBOX
+			else
+			{
+				TFE_System::logWrite(LOG_ERROR, "Midi", "allocateMidiDevice returned NULL");
+			}
+#endif
 		}
 		SDL_UnlockMutex(s_deviceChangeMutex);
 
@@ -531,6 +541,20 @@ namespace TFE_MidiPlayer
 			s_channelSrcVolume[channelIndex] = arg2;
 			msg[2] = u8(s_channelSrcVolume[channelIndex] * s_masterVolumeScaled);
 		}
+#ifdef _XBOX
+		// One-shot: log the first NOTE_ON we ever receive so we can tell
+		// whether iMuse is actually requesting music playback.
+		if (msgType == MID_NOTE_ON && arg2 != 0)
+		{
+			static bool s_loggedFirstNote = false;
+			if (!s_loggedFirstNote)
+			{
+				s_loggedFirstNote = true;
+				TFE_System::logWrite(LOG_MSG, "Midi", "First NOTE_ON received: ch=%u key=%u vel=%u device=%p",
+					(unsigned)(type & 0x0f), (unsigned)arg1, (unsigned)arg2, s_midiDevice);
+			}
+		}
+#endif
 		if (s_midiDevice) { s_midiDevice->message(msg, len); }
 
 		// Record currently playing instruments and the note-on times.
@@ -626,6 +650,15 @@ namespace TFE_MidiPlayer
 			// Process the midi callback, if it exists.
 			if (s_midiCallback.callback && !isPaused)
 			{
+#ifdef _XBOX
+				static bool s_loggedFirstCallback = false;
+				if (!s_loggedFirstCallback)
+				{
+					s_loggedFirstCallback = true;
+					TFE_System::logWrite(LOG_MSG, "Midi", "midi thread firing first callback (timeStep=%d us)",
+						(int)(s_midiCallback.timeStep * 1000000.0));
+				}
+#endif
 				s_midiCallback.accumulator += TFE_System::updateThreadLocal(&localTimeCallback);
 				while (s_midiCallback.callback && s_midiCallback.accumulator >= s_midiCallback.timeStep)
 				{
