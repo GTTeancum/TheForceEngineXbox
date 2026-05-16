@@ -81,6 +81,12 @@ namespace TFE_RenderBackend
     static bool s_vsync        = false;
     static bool s_widescreen   = false;
     static bool s_deviceReady  = false;
+    // GPU render-target mode: when set, swap() clears to magenta and skips
+    // the 8-bit-vdisp blit. Phase 0 of the RClassic_GPU/D3D8 port - magenta
+    // is the visible signal that the renderer=1 path is being taken end to
+    // end. Becomes false again as soon as the GPU renderer draws real
+    // geometry.
+    static bool s_vdispGpuMode = false;
 
     // Destination rect on back buffer (letterbox/pillarbox).
     static RECT s_destRect;
@@ -295,6 +301,11 @@ namespace TFE_RenderBackend
         s_vdispWidth3d  = vdispInfo.width3d;
         s_displayMode   = vdispInfo.mode;
         s_widescreen    = (vdispInfo.flags & VDISP_WIDESCREEN) != 0;
+        s_vdispGpuMode  = (vdispInfo.flags & VDISP_RENDER_TARGET) != 0;
+        if (s_vdispGpuMode)
+        {
+            TFE_XboxLogf("VDISP", "GPU render-target mode active (Phase 0: magenta clear, no world geometry)");
+        }
 
         computeDestRect();
 
@@ -415,11 +426,14 @@ namespace TFE_RenderBackend
         // OpenJKDF2 fakeglx.cpp:1829-1844. xquake same. Mercs same.
         // We allocated D3DFMT_D24S8 in the present params; partial-clear
         // leaves it undefined which the HLE Present path crashes on.
+        // Magenta clear in GPU mode is a Phase 0 marker - any pixel that
+        // stays magenta means the GPU renderer did not draw there yet.
+        const D3DCOLOR clearColor = s_vdispGpuMode ? D3DCOLOR_XRGB(255, 0, 255) : 0;
         s_device->Clear(0, NULL,
                         D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL,
-                        0, 1.0f, 0);
+                        clearColor, 1.0f, 0);
 
-        if (blitVirtualDisplay && s_vdispTex)
+        if (blitVirtualDisplay && s_vdispTex && !s_vdispGpuMode)
         {
             // Fixed-function pipeline: just sample the texture, no lighting,
             // no depth test, no culling, no blending.

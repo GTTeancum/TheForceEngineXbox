@@ -256,7 +256,13 @@ void __cdecl main()
     graphics->gameResolution.x = 320;
     graphics->gameResolution.z = 200;
     graphics->widescreen = false;
-    graphics->rendererIndex = 0;  // RENDERER_SOFTWARE
+    // Phase 0 of the RClassic_GPU/D3D8 port: flip to RENDERER_HARDWARE so
+    // jediRenderer takes the TSR_CLASSIC_GPU branch. The Xbox GPU stubs in
+    // xbox_link_stubs.cpp still draw no world geometry; renderBackend_xbox
+    // detects VDISP_RENDER_TARGET and clears the back buffer to magenta as
+    // the visible confirmation that the path is being taken end to end.
+    // Flip back to 0 to fall through to the software path while debugging.
+    graphics->rendererIndex = 1;  // RENDERER_HARDWARE (Phase 0: magenta)
     graphics->colorMode = (ColorMode)0;  // COLORMODE_8BIT
     graphics->useMipmapping = false;
     TFE_System::logWrite(LOG_MSG, "Main",
