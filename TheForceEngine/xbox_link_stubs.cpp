@@ -1375,13 +1375,12 @@ namespace TFE_Jedi
 			xboxDrawSectorFlat(sec, sec->floorHeight,   sec->floorTex, sec->floorOffset);
 		if (!(sec->flags1 & SEC_FLAGS1_EXTERIOR))
 			xboxDrawSectorFlat(sec, sec->ceilingHeight, sec->ceilTex,  sec->ceilOffset);
-		// Objects (sprites/3D) draw on every visit, not just the first.
-		// Phase 12 had a firstVisit gate here to dedupe sprites - that
-		// caused enemies/corpses to flicker because portal traversal
-		// order changes per frame, so a corpse "lived" in whichever
-		// portal-visit happened first. Drawing per-visit relies on the
-		// z-test to dedupe pixel-identical sprite billboards, which is
-		// the same behaviour as upstream's rsectorGPU.
+		// Objects draw per-visit, matching upstream's traverseSector
+		// pattern (rsectorGPU.cpp:1705 calls addSectorObjects here).
+		// This causes per-frame flicker on enemies/corpses in adjacent
+		// sectors because the recursive portal-frustum clip is FP-edge
+		// sensitive. Phase 14 fixes it the upstream way: per-object
+		// portal-frustum stamp + display list + CPU clip per object.
 		xboxDrawSectorObjects(sec);
 
 		for (s32 i = 0; i < sec->wallCount; i++)
