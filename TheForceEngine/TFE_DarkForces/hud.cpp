@@ -7,6 +7,9 @@
 #include "util.h"
 #include "player.h"
 #include "weapon.h"
+#ifdef _XBOX
+#include <TFE_Game/reticle.h>
+#endif
 #include <TFE_FileSystem/paths.h>
 #include <TFE_System/system.h>
 #include <TFE_Settings/settings.h>
@@ -1223,6 +1226,38 @@ namespace TFE_DarkForces
 				blitTextureToScreenScaled(s_hudCapRight, &rect, floor16(intToFixed16(x0) + mul16(intToFixed16(s_hudStatusR->width - 1), hudScaleX)), y0Scaled, hudScaleX, hudScaleY, framebuffer);
 			}
 		}
+
+#ifdef _XBOX
+		// Phase 13 - simple software crosshair. TFE_PostProcess overlay
+		// (used by reticle_*) isn't compiled on Xbox; draw directly into
+		// the 320x200 paletted framebuffer at screen centre when
+		// reticle_enabled() is true.
+		//
+		// Shape: bracket-style cross, 4 pixels per arm extending out
+		// from the centre with the inner 3 pixels hollow. Arms at
+		// dx/dy in {-3,-2,+2,+3}. Palette index 0x70 is a mid-grey in
+		// DF's default ramp. Apparent ~50% coverage via stipple - we
+		// draw every other pixel of each arm. (Real per-pixel alpha
+		// would need a backend ALPHABLEND path - the current overlay
+		// blit is alpha-tested only.)
+		if (reticle_enabled() && framebuffer)
+		{
+			ScreenRect* uiRect = vfb_getScreenRect(VFB_RECT_UI);
+			const s32 w  = uiRect ? (uiRect->right - uiRect->left + 1) : 320;
+			const s32 h  = uiRect ? (uiRect->bot   - uiRect->top  + 1) : 200;
+			const s32 cx = w / 2;
+			const s32 cy = h / 2;
+			const u8  c  = 0x70;            // mid grey
+			static const s32 armOffsets[4] = { -3, -2, 2, 3 };
+			for (s32 i = 0; i < 4; i++)
+			{
+				const s32 px = cx + armOffsets[i];
+				if (px >= 0 && px < w) framebuffer[cy * w + px] = c;
+				const s32 py = cy + armOffsets[i];
+				if (py >= 0 && py < h) framebuffer[py * w + cx] = c;
+			}
+		}
+#endif
 	}
 
 	///////////////////////////////////////////

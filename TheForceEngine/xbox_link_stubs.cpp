@@ -23,6 +23,7 @@
 #include <TFE_Jedi/Level/robjData.h>
 #include <TFE_Jedi/Renderer/rcommon.h>
 #include <TFE_Asset/spriteAsset_Jedi.h>
+#include <TFE_Asset/modelAsset_jedi.h>
 #include <TFE_RenderBackend/renderBackend_xbox.h>
 #include <TFE_ForceScript/forceScript.h>
 #include <TFE_DarkForces/Landru/lsystem.h>
@@ -485,6 +486,10 @@ namespace TFE_Jedi
 		u32 sprites, frames, models, others;
 		u32 nullObj, behindCam, noFrame, noCell;
 		u32 zeroSize, uploadFail, drawn;
+		// Phase 13 corpse-debug split.
+		u32 corpses;         // sprites with ETFLAG_CORPSE seen
+		u32 corpsesDrawn;    // " " that made it through the pipeline
+		u32 noWax, noAnim, noView;
 	};
 	static XboxObjStats s_objStats;
 	static u32 s_objStatsFrame = 0;
@@ -904,10 +909,145 @@ namespace TFE_Jedi
 	static void xboxObjStatsDump()
 	{
 		TFE_System::logWrite(LOG_MSG, "GPU",
-			"objects: spr=%u fme=%u mdl=%u oth=%u | drawn=%u skip{behindCam=%u noFrame=%u noCell=%u zero=%u up=%u null=%u}",
+			"objects: spr=%u fme=%u mdl=%u oth=%u | drawn=%u skip{behindCam=%u noWax=%u noAnim=%u noView=%u noFrame=%u noCell=%u zero=%u up=%u null=%u} corpses{seen=%u drawn=%u}",
 			s_objStats.sprites, s_objStats.frames, s_objStats.models, s_objStats.others,
-			s_objStats.drawn, s_objStats.behindCam, s_objStats.noFrame, s_objStats.noCell,
-			s_objStats.zeroSize, s_objStats.uploadFail, s_objStats.nullObj);
+			s_objStats.drawn, s_objStats.behindCam, s_objStats.noWax, s_objStats.noAnim, s_objStats.noView,
+			s_objStats.noFrame, s_objStats.noCell, s_objStats.zeroSize, s_objStats.uploadFail, s_objStats.nullObj,
+			s_objStats.corpses, s_objStats.corpsesDrawn);
+	}
+
+	// Phase 13 - JEDI 3DO model render.
+	//
+	// Each OBJ_TYPE_3D has a JediModel (obj->model). Verts are model-
+	// local fixed16_16; obj->transform is a 3x3 rotation, obj->posWS is
+	// translation. We transform on CPU to world space, then submit one
+	// draw call per polygon (per-poly texture varies, so batching is
+	// awkward; SECBASE shows ~7 models per frame so per-poly is fine).
+	//
+	// UV format per modelAsset_jedi.cpp:870: stored as mul16(uv_norm,
+	// texDim), i.e. fixed16_16 in pixel units. Normalise to [0..1] by
+	// dividing by texDim AFTER fixedToF.
+	//
+	// Shading modes covered: PSHADE_TEXTURE, PSHADE_GOURAUD_TEXTURE
+	// (treated as plain textured - no per-vertex lighting yet). FLAT /
+	// GOURAUD without texture are skipped (rare in DF; mostly debug
+	// shapes). Per-sector ambient is applied via diffuse modulate, same
+	// as walls/flats.
+	enum {
+		XBOX_MODEL_MAX_VERTS    = 512,                       // 3DO cap is 500
+		XBOX_MODEL_MAX_POLY_TRI = 8,                         // worst-case fan from one poly
+		XBOX_MODEL_MAX_OUT_TRIS = XBOX_MODEL_MAX_POLY_TRI * 4
+	};
+	static Vec3f s_modelVertsWS[XBOX_MODEL_MAX_VERTS];
+	static TFE_RenderBackend::GpuTexVert s_modelTriBuf[XBOX_MODEL_MAX_OUT_TRIS * 3];
+
+	static void xboxDrawModel(SecObject* obj, RSector* sector)
+	{
+		JediModel* model = obj->model;
+		if (!model || model->polygonCount <= 0 || model->vertexCount <= 0) return;
+		if (model->vertexCount > XBOX_MODEL_MAX_VERTS) return;
+
+		// Build world-space verts: ws = R * local + pos, where R is the
+		// row-major 3x3 obj->transform (rotateVectorM3x3 convention).
+		const f32 R0 = fixedToF(obj->transform[0]);
+		const f32 R1 = fixedToF(obj->transform[1]);
+		const f32 R2 = fixedToF(obj->transform[2]);
+		const f32 R3 = fixedToF(obj->transform[3]);
+		const f32 R4 = fixedToF(obj->transform[4]);
+		const f32 R5 = fixedToF(obj->transform[5]);
+		const f32 R6 = fixedToF(obj->transform[6]);
+		const f32 R7 = fixedToF(obj->transform[7]);
+		const f32 R8 = fixedToF(obj->transform[8]);
+		const f32 tx = fixedToF(obj->posWS.x);
+		const f32 ty = fixedToF(obj->posWS.y);
+		const f32 tz = fixedToF(obj->posWS.z);
+
+		for (s32 v = 0; v < model->vertexCount; v++)
+		{
+			const vec3& mv = model->vertices[v];
+			const f32 lx = fixedToF(mv.x);
+			const f32 ly = fixedToF(mv.y);
+			const f32 lz = fixedToF(mv.z);
+			s_modelVertsWS[v].x = R0*lx + R1*ly + R2*lz + tx;
+			s_modelVertsWS[v].y = R3*lx + R4*ly + R5*lz + ty;
+			s_modelVertsWS[v].z = R6*lx + R7*ly + R8*lz + tz;
+		}
+
+		const u32 color = ambientToColor(sector->ambient);
+
+		// Fullbright objects (e.g. blaster bolts) ignore sector ambient.
+		const bool fullBright = (obj->flags & OBJ_FLAG_FULLBRIGHT) != 0;
+
+		for (s32 p = 0; p < model->polygonCount; p++)
+		{
+			const JmPolygon& poly = model->polygons[p];
+			if (poly.vertexCount < 3 || !poly.indices) continue;
+
+			const bool textured = (poly.shading & PSHADE_TEXTURE) && poly.texture && poly.uv;
+
+			// Resolve texture + per-vertex color depending on shading mode.
+			TFE_RenderBackend::GpuTextureHandle gpuTex = NULL;
+			u32 polyColor = color;
+			f32 invTexW = 0.0f, invTexH = 0.0f;
+
+			if (textured)
+			{
+				TextureData* tex = poly.texture;
+				if (!tex->image || tex->compressed != 0) continue;
+				gpuTex = TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
+					tex, tex->image, tex->width, tex->height, /*columnMajor*/true);
+				if (!gpuTex) continue;
+				invTexW = 1.0f / (f32)tex->width;
+				invTexH = 1.0f / (f32)tex->height;
+				if (fullBright) polyColor = 0xFFFFFFFFu;
+			}
+			else
+			{
+				// PSHADE_FLAT (or GOURAUD without texture). The polygon
+				// carries a palette index in poly.color - look it up in
+				// the current DF palette. NULL tex routes the backend's
+				// stage 0 to COLORARG1=DIFFUSE, so the per-vert color
+				// drives the pixel directly. This is the bolt path
+				// (wrbolt.3do has no textures - colored geometry only).
+				const u8 palIdx = (u8)(poly.color & 0xFF);
+				polyColor = TFE_RenderBackend::gpuPaletteEntryRGBA(palIdx);
+			}
+
+			// Fan-triangulate (poly vertices are CW or CCW per source).
+			u32 outCount = 0;
+			const s32 maxFan = (poly.vertexCount - 2);
+			for (s32 j = 0; j < maxFan; j++)
+			{
+				if (outCount + 3 > XBOX_MODEL_MAX_OUT_TRIS * 3) break;
+				const s32 ix[3] = { 0, j + 1, j + 2 };
+				for (s32 k = 0; k < 3; k++)
+				{
+					const s32 vi = poly.indices[ix[k]];
+					if (vi < 0 || vi >= model->vertexCount) { outCount = 0; break; }
+					TFE_RenderBackend::GpuTexVert& o = s_modelTriBuf[outCount++];
+					o.x = s_modelVertsWS[vi].x;
+					o.y = s_modelVertsWS[vi].y;
+					o.z = s_modelVertsWS[vi].z;
+					o.color = polyColor;
+					if (textured)
+					{
+						o.u = fixedToF(poly.uv[ix[k]].x) * invTexW;
+						o.v = fixedToF(poly.uv[ix[k]].y) * invTexH;
+					}
+					else
+					{
+						o.u = 0.0f; o.v = 0.0f;
+					}
+				}
+			}
+
+			const u32 tris = outCount / 3;
+			if (tris == 0) continue;
+			TFE_RenderBackend::gpuDrawTexturedTrisWorld(
+				s_xboxViewMtx, s_xboxProjMtx, gpuTex, s_modelTriBuf, tris);
+		}
+
+		s_objStats.drawn++;
 	}
 
 	// Phase 8: draw every visible sprite/frame object in `sector` as a
@@ -935,36 +1075,51 @@ namespace TFE_Jedi
 			{
 				case OBJ_TYPE_SPRITE: s_objStats.sprites++; break;
 				case OBJ_TYPE_FRAME:  s_objStats.frames++;  break;
-				case OBJ_TYPE_3D:     s_objStats.models++;  continue;  // Phase 13
+				case OBJ_TYPE_3D:
+					s_objStats.models++;
+					// Render every 3D obj unconditionally. Earlier I gated
+					// on OBJ_FLAG_NEEDS_TRANSFORM to mirror upstream, but
+					// some short-lived objects (blaster bolts) don't keep
+					// that flag set every tick and end up invisible. The
+					// transform field is still valid - it just isn't
+					// "freshly computed" - so re-using it for one frame
+					// is harmless.
+					xboxDrawModel(obj, sector);
+					continue;
 				default:              s_objStats.others++;  continue;
 			}
 
 			// Resolve the WaxFrame for this object's current anim/view/frame.
 			WaxFrame* frame = NULL;
 			void*     waxBase = NULL;
-			if (obj->type == OBJ_TYPE_SPRITE && obj->wax)
+			const bool isCorpse = (obj->entityFlags & ETFLAG_CORPSE) != 0;
+			if (isCorpse) s_objStats.corpses++;
+
+			if (obj->type == OBJ_TYPE_SPRITE)
 			{
+				if (!obj->wax) { s_objStats.noWax++; continue; }
 				Wax* wax = obj->wax;
+
+				// Anim slot. Try the configured anim, then fall back to
+				// 0 (idle) for corpses/dead actors whose dead-anim slot
+				// is unpopulated on some wax variants.
 				WaxAnim* anim = WAX_AnimPtr(wax, obj->anim & 0x1f);
-				if (!anim) continue;
+				if (!anim) anim = WAX_AnimPtr(wax, 0);
+				if (!anim) { s_objStats.noAnim++; continue; }
 
 				// 32-bucket view selection (matches RClassic_Float).
-				// Angle from object to camera in angle14 units; subtract
-				// the object's own yaw to get a relative angle; shift down
-				// by 9 (16384 / 512 = 32) and mask to wrap.
 				const f32 dx = s_cameraPos.x - fixedToF(obj->posWS.x);
 				const f32 dz = s_cameraPos.z - fixedToF(obj->posWS.z);
 				const s32 ang = TFE_Jedi::vec2ToAngle(dx, dz);
 				s32 angleDiff = ((ang - (s32)obj->yaw) >> 9) & 31;
 				s32 viewIdx = 31 - angleDiff;
 
-				// Many waxes only have a subset of the 32 view slots
-				// populated (8-view sprites are common). Fall back to
-				// view 0 if the picked slot is empty.
 				WaxView* view = WAX_ViewPtr(wax, anim, viewIdx);
 				if (!view) view = WAX_ViewPtr(wax, anim, 0);
-				if (!view) { s_objStats.noFrame++; continue; }
+				if (!view) { s_objStats.noView++; continue; }
 
+				// Frame index can legally be 0..(anim->frameCount-1).
+				// 0x1f mask is fine since DF caps anims at 32 frames.
 				frame = WAX_FramePtr(wax, view, obj->frame & 0x1f);
 				waxBase = wax;
 			}
@@ -1052,6 +1207,7 @@ namespace TFE_Jedi
 			TFE_RenderBackend::gpuDrawAlphaTestedTrisWorld(
 				s_xboxViewMtx, s_xboxProjMtx, tex, v, 2);
 			s_objStats.drawn++;
+			if (isCorpse) s_objStats.corpsesDrawn++;
 		}
 	}
 
@@ -1219,7 +1375,14 @@ namespace TFE_Jedi
 			xboxDrawSectorFlat(sec, sec->floorHeight,   sec->floorTex, sec->floorOffset);
 		if (!(sec->flags1 & SEC_FLAGS1_EXTERIOR))
 			xboxDrawSectorFlat(sec, sec->ceilingHeight, sec->ceilTex,  sec->ceilOffset);
-		if (firstVisit) xboxDrawSectorObjects(sec);
+		// Objects (sprites/3D) draw on every visit, not just the first.
+		// Phase 12 had a firstVisit gate here to dedupe sprites - that
+		// caused enemies/corpses to flicker because portal traversal
+		// order changes per frame, so a corpse "lived" in whichever
+		// portal-visit happened first. Drawing per-visit relies on the
+		// z-test to dedupe pixel-identical sprite billboards, which is
+		// the same behaviour as upstream's rsectorGPU.
+		xboxDrawSectorObjects(sec);
 
 		for (s32 i = 0; i < sec->wallCount; i++)
 		{

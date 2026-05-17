@@ -769,6 +769,15 @@ namespace TFE_RenderBackend
     // upload + texture palette state would add a state-change axis we
     // don't need yet. Palette FX (vision modifiers etc.) will require
     // re-uploading and are handled by gpuInvalidateTextureCache().
+
+    // Phase 13: palette lookup for the 3DO model path (flat-shaded
+    // polygons). s_paletteCpu is XRGB in memory; convert to D3DCOLOR
+    // (0xAARRGGBB) with alpha forced opaque.
+    u32 gpuPaletteEntryRGBA(u8 index)
+    {
+        const u32 xrgb = s_paletteCpu[index];
+        return 0xFF000000u | (xrgb & 0x00FFFFFFu);
+    }
     // -----------------------------------------------------------------------
     // Cache cap sized for SECBASE: ~150 wall+flat textures + per-frame
     // sprite cells (enemies have ~5 anims x 32 views x ~5 frames ~= 800

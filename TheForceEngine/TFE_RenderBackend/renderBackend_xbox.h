@@ -81,6 +81,11 @@ namespace TFE_RenderBackend
     void gpuDrawAlphaTestedTrisWorld(const f32 viewMtx[16], const f32 projMtx[16],
                                      GpuTextureHandle tex,
                                      const GpuTexVert* verts, u32 triCount);
+
+    // Look up the current palette entry as a D3DCOLOR (0xAARRGGBB).
+    // Used by the 3DO model path for PSHADE_FLAT polygons which carry
+    // only a palette index (no texture). Alpha is forced to 0xFF.
+    u32 gpuPaletteEntryRGBA(u8 index);
 }
 
 #endif // _XBOX

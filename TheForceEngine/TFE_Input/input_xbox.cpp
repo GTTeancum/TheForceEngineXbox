@@ -44,6 +44,29 @@
 // Deadzone threshold (0-32767)
 // ---------------------------------------------------------------------------
 #define XINPUT_DEADZONE_STICK    8000
+
+// ---------------------------------------------------------------------
+// Right-stick look tuning (Phase 13 staging - rollback toggles).
+// Flip either to 0 to fall back to the pre-Phase-12 behaviour.
+//
+//   XBOX_LOOK_Y_INVERT   1 = pushing the stick UP makes the camera
+//                            LOOK UP (typical console FPS, also matches
+//                            mouse convention on Xbox).
+//                        0 = pushing UP makes the camera LOOK DOWN
+//                            (the original Phase 11 behaviour - it was
+//                            flipping the raw stick Y to compensate
+//                            for a different convention elsewhere).
+//
+//   XBOX_LOOK_ANALOG     1 = smaller deadzone + quadratic curve so
+//                            small stick pushes give small look speeds
+//                            and the full range is usable.
+//                        0 = original 8000 deadzone + linear ramp,
+//                            which feels stepped because crossing the
+//                            deadzone snaps to a non-trivial speed.
+// ---------------------------------------------------------------------
+#define XBOX_LOOK_Y_INVERT       1
+#define XBOX_LOOK_ANALOG         1
+#define XBOX_LOOK_DEADZONE       3000  // used only when XBOX_LOOK_ANALOG=1
 #define XINPUT_DEADZONE_TRIGGER  30      // out of 255
 
 // ---------------------------------------------------------------------------
@@ -233,9 +256,32 @@ namespace TFE_InputXbox
         const f32 ly = applyDeadzone(pad.sThumbLY,  XINPUT_DEADZONE_STICK);
         TFE_Input::setAxis(AXIS_LEFT_X,  lx);
         TFE_Input::setAxis(AXIS_LEFT_Y,  ly);
-        TFE_Input::setAxis(AXIS_RIGHT_X, applyDeadzone(pad.sThumbRX,  XINPUT_DEADZONE_STICK));
-        // Invert Y so stick-up = look up (matches mouse convention).
-        TFE_Input::setAxis(AXIS_RIGHT_Y, -applyDeadzone(pad.sThumbRY, XINPUT_DEADZONE_STICK));
+        // Right stick - look. Deadzone + curve controlled by the
+        // XBOX_LOOK_* toggles above. Old behavior is kept available
+        // by flipping the toggles to 0.
+#if XBOX_LOOK_ANALOG
+        // Smaller deadzone + quadratic curve. sign(x)*x*x keeps full
+        // range [-1,1] but compresses small inputs so a gentle nudge
+        // gives a gentle look-speed.
+        f32 rx = applyDeadzone(pad.sThumbRX, XBOX_LOOK_DEADZONE);
+        f32 ry = applyDeadzone(pad.sThumbRY, XBOX_LOOK_DEADZONE);
+        rx = (rx < 0.0f ? -1.0f : 1.0f) * rx * rx;
+        ry = (ry < 0.0f ? -1.0f : 1.0f) * ry * ry;
+#else
+        // Original Phase 11 behavior: big deadzone, linear ramp.
+        f32 rx = applyDeadzone(pad.sThumbRX, XINPUT_DEADZONE_STICK);
+        f32 ry = applyDeadzone(pad.sThumbRY, XINPUT_DEADZONE_STICK);
+#endif
+        TFE_Input::setAxis(AXIS_RIGHT_X, rx);
+#if XBOX_LOOK_Y_INVERT
+        // Stick UP -> look UP. Raw XInput RY is +ve when pushed up,
+        // and player.cpp adds AA_LOOK_VERT to s_playerPitch where +ve
+        // pitch = look up - so DON'T negate.
+        TFE_Input::setAxis(AXIS_RIGHT_Y, ry);
+#else
+        // Pre-Phase-12 behavior: negate.
+        TFE_Input::setAxis(AXIS_RIGHT_Y, -ry);
+#endif
 
         // ---------------------------------------------------------------
         // Synthesized mouse cursor from left stick.
