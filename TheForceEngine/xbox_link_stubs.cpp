@@ -9,6 +9,7 @@
 #ifdef _XBOX
 
 #include <TFE_System/types.h>
+#include <TFE_System/math.h>
 #include <TFE_Jedi/Math/fixedPoint.h>
 #include <TFE_Jedi/Math/core_math.h>
 #include <TFE_Jedi/Renderer/screenDraw.h>
@@ -112,6 +113,172 @@ namespace TFE_Jedi
 	static s32 s_xboxViewW = 320;
 	static s32 s_xboxViewH = 200;
 	static f32 s_xboxLastYaw = 0.0f, s_xboxLastPitch = 0.0f;
+
+	// =====================================================================
+	// Phase 12.A - Frustum helpers, ported 1:1 from upstream
+	// TFE_Jedi/Renderer/RClassic_GPU/frustum.cpp (TheForceEngine-ORIGINAL).
+	//
+	// Used for CPU-side Sutherland-Hodgman clipping. NV2A's D3D8 FF pipeline
+	// has no user clip planes (the Xbox D3D8 only exposes depth clipping),
+	// so we do the equivalent of upstream's gl_ClipDistance on the CPU.
+	//
+	// Nothing in this block is called yet - this commit just lands the
+	// helpers so 12.B/12.C can wire them up incrementally.
+	// =====================================================================
+	enum { XBOX_FRUSTUM_STACK_SIZE = 64, XBOX_FRUSTUM_PLANE_MAX = 32 };
+	static const f32 c_xboxPlaneEps = 0.0001f;
+
+	struct XboxFrustum
+	{
+		u32   planeCount;
+		Vec4f planes[XBOX_FRUSTUM_PLANE_MAX];
+	};
+	struct XboxPolygon
+	{
+		s32   vertexCount;
+		Vec3f vtx[XBOX_FRUSTUM_PLANE_MAX];
+	};
+
+	static XboxFrustum s_xboxFrustumStack[XBOX_FRUSTUM_STACK_SIZE];
+	static u32         s_xboxFrustumStackPtr = 0;
+
+	static inline f32 xboxFrustum_planeDist(const Vec4f* plane, const Vec3f* pos)
+	{
+		return plane->x*pos->x + plane->y*pos->y + plane->z*pos->z + plane->w;
+	}
+
+	static inline void xboxFrustum_copy(const XboxFrustum* src, XboxFrustum* dst)
+	{
+		dst->planeCount = src->planeCount;
+		for (u32 i = 0; i < src->planeCount; i++) dst->planes[i] = src->planes[i];
+	}
+
+	static inline void xboxFrustum_clearStack() { s_xboxFrustumStackPtr = 0; }
+
+	static inline void xboxFrustum_push(const XboxFrustum* f)
+	{
+		if (s_xboxFrustumStackPtr >= XBOX_FRUSTUM_STACK_SIZE) return;
+		xboxFrustum_copy(f, &s_xboxFrustumStack[s_xboxFrustumStackPtr++]);
+	}
+
+	static inline void xboxFrustum_pop()
+	{
+		if (s_xboxFrustumStackPtr > 0) s_xboxFrustumStackPtr--;
+	}
+
+	static inline XboxFrustum* xboxFrustum_getBack()
+	{
+		return (s_xboxFrustumStackPtr > 0) ? &s_xboxFrustumStack[s_xboxFrustumStackPtr - 1] : NULL;
+	}
+
+	// Build side planes through camera + polygon edges, plus a near plane
+	// from the polygon's own plane. Matches upstream frustum_buildFromPolygon.
+	static void xboxFrustum_buildFromPolygon(const XboxPolygon* polygon, XboxFrustum* out)
+	{
+		const s32 count = polygon->vertexCount;
+		out->planeCount = 0;
+
+		// Sides: each edge becomes a plane through the camera.
+		for (s32 i = 0; i < count && out->planeCount < XBOX_FRUSTUM_PLANE_MAX - 1; i++)
+		{
+			const s32 e0 = i, e1 = (i + 1) % count;
+			Vec3f S = { polygon->vtx[e0].x - s_cameraPos.x,
+			            polygon->vtx[e0].y - s_cameraPos.y,
+			            polygon->vtx[e0].z - s_cameraPos.z };
+			Vec3f T = { polygon->vtx[e1].x - s_cameraPos.x,
+			            polygon->vtx[e1].y - s_cameraPos.y,
+			            polygon->vtx[e1].z - s_cameraPos.z };
+			Vec3f N = TFE_Math::cross(&S, &T);
+			if (TFE_Math::dot(&N, &N) <= 0.0f) continue;
+			N = TFE_Math::normalize(&N);
+			const f32 d = -TFE_Math::dot(&N, &s_cameraPos);
+			Vec4f p = { N.x, N.y, N.z, d };
+			out->planes[out->planeCount++] = p;
+		}
+
+		// Near plane: the polygon's own plane.
+		if (count >= 3 && out->planeCount < XBOX_FRUSTUM_PLANE_MAX)
+		{
+			const Vec3f& O = polygon->vtx[0];
+			Vec3f S = { polygon->vtx[1].x - O.x, polygon->vtx[1].y - O.y, polygon->vtx[1].z - O.z };
+			Vec3f T = { polygon->vtx[2].x - O.x, polygon->vtx[2].y - O.y, polygon->vtx[2].z - O.z };
+			Vec3f N = TFE_Math::cross(&S, &T);
+			if (TFE_Math::dot(&N, &N) > 0.0f)
+			{
+				N = TFE_Math::normalize(&N);
+				const f32 d = -TFE_Math::dot(&N, &O);
+				Vec4f p = { N.x, N.y, N.z, d };
+				out->planes[out->planeCount++] = p;
+			}
+		}
+	}
+
+	// Generalised Sutherland-Hodgman: clip an arbitrary input polygon
+	// against a list of planes. Keeps verts with planeDist >= -eps.
+	// Returns true if the clipped polygon has >= 3 vertices.
+	static bool xboxFrustum_clipPolyToPlanes(const Vec3f* inVtx, s32 inN,
+	                                          const Vec4f* planes, s32 planeCount,
+	                                          XboxPolygon* out)
+	{
+		if (inN < 3 || inN > XBOX_FRUSTUM_PLANE_MAX) return false;
+
+		XboxPolygon scratch[2];
+		XboxPolygon* cur  = &scratch[0];
+		XboxPolygon* next = &scratch[1];
+
+		cur->vertexCount = inN;
+		for (s32 i = 0; i < inN; i++) cur->vtx[i] = inVtx[i];
+
+		f32 vtxDist[XBOX_FRUSTUM_PLANE_MAX];
+		const Vec4f* plane = planes;
+		for (s32 p = 0; p < planeCount; p++, plane++)
+		{
+			s32 positive = 0, negative = 0;
+			next->vertexCount = 0;
+
+			for (s32 v = 0; v < cur->vertexCount; v++)
+			{
+				vtxDist[v] = xboxFrustum_planeDist(plane, &cur->vtx[v]);
+				if (vtxDist[v] >=  c_xboxPlaneEps) positive++;
+				else if (vtxDist[v] <= -c_xboxPlaneEps) negative++;
+				else vtxDist[v] = 0.0f;
+			}
+
+			if (positive == cur->vertexCount) continue;     // wholly inside
+			if (negative == cur->vertexCount) return false; // wholly outside
+
+			for (s32 v = 0; v < cur->vertexCount; v++)
+			{
+				const s32 a = v;
+				const s32 b = (v + 1) % cur->vertexCount;
+				const f32 d0 = vtxDist[a], d1 = vtxDist[b];
+
+				if (d0 < 0.0f && d1 < 0.0f) continue;
+				if (d0 >= 0.0f && d1 >= 0.0f)
+				{
+					if (next->vertexCount < XBOX_FRUSTUM_PLANE_MAX)
+						next->vtx[next->vertexCount++] = cur->vtx[a];
+					continue;
+				}
+
+				const f32 t = -d0 / (d1 - d0);
+				Vec3f isect = { (1.0f - t)*cur->vtx[a].x + t*cur->vtx[b].x,
+				                (1.0f - t)*cur->vtx[a].y + t*cur->vtx[b].y,
+				                (1.0f - t)*cur->vtx[a].z + t*cur->vtx[b].z };
+				if (d0 > 0.0f && next->vertexCount < XBOX_FRUSTUM_PLANE_MAX)
+					next->vtx[next->vertexCount++] = cur->vtx[a];
+				if (t < 1.0f && next->vertexCount < XBOX_FRUSTUM_PLANE_MAX)
+					next->vtx[next->vertexCount++] = isect;
+			}
+
+			XboxPolygon* tmp = cur; cur = next; next = tmp;
+			if (cur->vertexCount < 3) return false;
+		}
+
+		out->vertexCount = cur->vertexCount;
+		for (s32 i = 0; i < out->vertexCount; i++) out->vtx[i] = cur->vtx[i];
+		return true;
+	}
 
 	static inline void xboxIdentity4(f32 m[16])
 	{
@@ -309,6 +476,18 @@ namespace TFE_Jedi
 		}
 		return a;
 	}
+
+	// Phase 11 diagnostic counters - definition hoisted ahead of
+	// xboxDrawSectorFlat so the flat path can write its fields. The
+	// reset/dump helpers stay further down with the object code.
+	struct XboxObjStats
+	{
+		u32 sprites, frames, models, others;
+		u32 nullObj, behindCam, noFrame, noCell;
+		u32 zeroSize, uploadFail, drawn;
+	};
+	static XboxObjStats s_objStats;
+	static u32 s_objStatsFrame = 0;
 
 	static void xboxDrawSectorFlat(RSector* sector, fixed16_16 heightFx,
 	                               TextureData** texPtr, vec2_fixed offset)
@@ -517,8 +696,67 @@ namespace TFE_Jedi
 			TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
 				tex, tex->image, tex->width, tex->height, /*columnMajor*/true);
 
+		// Phase 12.C - Per-flat frustum clip (CPU Sutherland-Hodgman).
+		// The traversal in TFE_Sectors_GPU::draw stamps a portal frustum
+		// onto the frustum stack before each recursion; here we clip every
+		// flat triangle against the current back frustum so co-planar
+		// flats from neighbouring sectors only paint the screen area
+		// visible through the chain of portals we walked. That eliminates
+		// the corridor z-fight without changing the wall draw path.
+		//
+		// Flats are constant-Y with a linear (x+ox)*uMul / (z+oz)*vMul UV
+		// mapping, so clip-generated verts get correct UVs by recomputing
+		// from XZ rather than barycentric interpolation. Colour is a
+		// per-sector ambient constant.
+		const XboxFrustum* curF = xboxFrustum_getBack();
+		if (!curF || curF->planeCount == 0)
+		{
+			// Start sector (no portal cone) - submit unchanged.
+			TFE_RenderBackend::gpuDrawTexturedTrisWorld(
+				s_xboxViewMtx, s_xboxProjMtx, gpuTex, s_flatVerts, tris);
+			return;
+		}
+
+		static TFE_RenderBackend::GpuTexVert s_flatClipBuf[XBOX_MAX_FLAT_VERTS * 2];
+		u32 clipOutCount = 0;
+		const u32 clipOutCap = sizeof(s_flatClipBuf) / sizeof(s_flatClipBuf[0]);
+
+		for (u32 t = 0; t < tris && clipOutCount + 3 <= clipOutCap; t++)
+		{
+			const TFE_RenderBackend::GpuTexVert& va = s_flatVerts[t * 3 + 0];
+			const TFE_RenderBackend::GpuTexVert& vb = s_flatVerts[t * 3 + 1];
+			const TFE_RenderBackend::GpuTexVert& vc = s_flatVerts[t * 3 + 2];
+			Vec3f triPos[3] = {
+				{ va.x, va.y, va.z },
+				{ vb.x, vb.y, vb.z },
+				{ vc.x, vc.y, vc.z }
+			};
+			XboxPolygon clipped;
+			if (!xboxFrustum_clipPolyToPlanes(triPos, 3, curF->planes,
+			                                  (s32)curF->planeCount, &clipped)) continue;
+			if (clipped.vertexCount < 3) continue;
+
+			// Fan-triangulate the (convex) clip output from vertex 0.
+			for (s32 j = 1; j + 1 < clipped.vertexCount; j++)
+			{
+				if (clipOutCount + 3 > clipOutCap) break;
+				const s32 ix[3] = { 0, j, j + 1 };
+				for (s32 k = 0; k < 3; k++)
+				{
+					const Vec3f& p = clipped.vtx[ix[k]];
+					TFE_RenderBackend::GpuTexVert& o = s_flatClipBuf[clipOutCount++];
+					o.x = p.x; o.y = y; o.z = p.z;
+					o.color = col;
+					o.u = (p.x + ox) * uMul;
+					o.v = (p.z + oz) * vMul;
+				}
+			}
+		}
+
+		const u32 clipTris = clipOutCount / 3;
+		if (clipTris == 0) return;
 		TFE_RenderBackend::gpuDrawTexturedTrisWorld(
-			s_xboxViewMtx, s_xboxProjMtx, gpuTex, s_flatVerts, tris);
+			s_xboxViewMtx, s_xboxProjMtx, gpuTex, s_flatClipBuf, clipTris);
 	}
 
 	// Draw every solid wall (no nextSector) of `sector`. Adjoin walls
@@ -660,18 +898,6 @@ namespace TFE_Jedi
 		return TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
 			cell, s_cellIdxStage, cellW, cellH, /*columnMajor*/false);
 	}
-
-	// Phase 11 diagnostic counters - accumulate per draw frame, dump
-	// when the totals change a lot (sector switch / interesting event)
-	// or every N frames so we have steady signal without log spam.
-	struct XboxObjStats
-	{
-		u32 sprites, frames, models, others;     // by type
-		u32 nullObj, behindCam, noFrame, noCell; // skip reasons
-		u32 zeroSize, uploadFail, drawn;
-	};
-	static XboxObjStats s_objStats;
-	static u32 s_objStatsFrame = 0;
 
 	static inline void xboxObjStatsReset() { memset(&s_objStats, 0, sizeof(s_objStats)); }
 
@@ -964,59 +1190,112 @@ namespace TFE_Jedi
 	void TFE_Sectors_GPU::destroy()             {}
 	void TFE_Sectors_GPU::reset()               {}
 	void TFE_Sectors_GPU::prepare()             {}
+	// Phase 12.B/C - upstream-grounded recursive traversal.
+	// Mirrors traverseSector / traverseScene in
+	// TheForceEngine-ORIGINAL/.../RClassic_GPU/rsectorGPU.cpp.
+	//
+	// Walls + sprites still draw immediately (unclipped, same as Phase 11).
+	// Flats are CPU-clipped against the current frustum at draw time (see
+	// xboxDrawSectorFlat) - that's where the corridor z-fight gets fixed.
+	//
+	// Per-sector OBJECT draw is gated by sec->prevDrawFrame so sprites
+	// don't render twice when a sector is visited through two portals.
+	// (Walls/flats are still re-drawn per visit; their geometry is what
+	// changes between visits because the frustum stack differs.)
+	enum { XBOX_TRAVERSE_MAX_DEPTH = 32, XBOX_MAX_PORTAL_TRAVERSALS = 512 };
+	static u32 s_xboxPortalsTraversed = 0;
+	static u32 s_xboxVisitedThisFrame = 0;
+
+	static void xboxTraverseSector(RSector* sec, s32 depth)
+	{
+		if (!sec || sec->wallCount <= 0 || depth > XBOX_TRAVERSE_MAX_DEPTH) return;
+
+		const bool firstVisit = (sec->prevDrawFrame != TFE_Jedi::s_drawFrame);
+		sec->prevDrawFrame = TFE_Jedi::s_drawFrame;
+		if (firstVisit) s_xboxVisitedThisFrame++;
+
+		xboxDrawSectorWalls(sec);
+		if (!(sec->flags1 & SEC_FLAGS1_PIT))
+			xboxDrawSectorFlat(sec, sec->floorHeight,   sec->floorTex, sec->floorOffset);
+		if (!(sec->flags1 & SEC_FLAGS1_EXTERIOR))
+			xboxDrawSectorFlat(sec, sec->ceilingHeight, sec->ceilTex,  sec->ceilOffset);
+		if (firstVisit) xboxDrawSectorObjects(sec);
+
+		for (s32 i = 0; i < sec->wallCount; i++)
+		{
+			if (s_xboxPortalsTraversed >= XBOX_MAX_PORTAL_TRAVERSALS) break;
+			RWall* w = &sec->walls[i];
+			RSector* next = w->nextSector;
+			if (!next || !w->w0 || !w->w1) continue;
+			// Skip the portal we entered THIS sector through. Parent
+			// stamps its wall before recursing; we skip when we see
+			// the matching stamp.
+			if (w->drawFrame == TFE_Jedi::s_drawFrame) continue;
+
+			// Portal quad in world space - the OPEN vertical span shared
+			// by both sectors. TFE -Y up: ceiling has the smaller Y, so
+			// the more restrictive (lower) ceiling is MAX(ceilA,ceilB)
+			// and the more restrictive floor is MIN(floorA,floorB).
+			const fixed16_16 topFx = (sec->ceilingHeight > next->ceilingHeight)
+			                       ? sec->ceilingHeight : next->ceilingHeight;
+			const fixed16_16 botFx = (sec->floorHeight   < next->floorHeight)
+			                       ? sec->floorHeight   : next->floorHeight;
+			if (topFx >= botFx) continue;  // closed (degenerate)
+
+			const f32 px0 = fixedToF(w->w0->x), pz0 = fixedToF(w->w0->z);
+			const f32 px1 = fixedToF(w->w1->x), pz1 = fixedToF(w->w1->z);
+			const f32 pyt = fixedToF(topFx);
+			const f32 pyb = fixedToF(botFx);
+
+			// CCW from camera looking through the portal from cur into next.
+			Vec3f portalVerts[4];
+			portalVerts[0].x = px0; portalVerts[0].y = pyb; portalVerts[0].z = pz0;
+			portalVerts[1].x = px0; portalVerts[1].y = pyt; portalVerts[1].z = pz0;
+			portalVerts[2].x = px1; portalVerts[2].y = pyt; portalVerts[2].z = pz1;
+			portalVerts[3].x = px1; portalVerts[3].y = pyb; portalVerts[3].z = pz1;
+
+			// Clip the portal against the current frustum so the child
+			// frustum is the intersection of cur + raw-portal cone.
+			XboxPolygon clippedPortal;
+			const XboxFrustum* curF = xboxFrustum_getBack();
+			if (curF && curF->planeCount > 0)
+			{
+				if (!xboxFrustum_clipPolyToPlanes(portalVerts, 4, curF->planes,
+				                                  (s32)curF->planeCount, &clippedPortal)) continue;
+			}
+			else
+			{
+				clippedPortal.vertexCount = 4;
+				for (s32 k = 0; k < 4; k++) clippedPortal.vtx[k] = portalVerts[k];
+			}
+			if (clippedPortal.vertexCount < 3) continue;
+
+			XboxFrustum childF;
+			xboxFrustum_buildFromPolygon(&clippedPortal, &childF);
+			if (childF.planeCount == 0) continue;
+
+			s_xboxPortalsTraversed++;
+			const s32 savedDrawFrame = w->drawFrame;
+			w->drawFrame = TFE_Jedi::s_drawFrame;
+			xboxFrustum_push(&childF);
+			xboxTraverseSector(next, depth + 1);
+			xboxFrustum_pop();
+			w->drawFrame = savedDrawFrame;
+		}
+	}
+
 	void TFE_Sectors_GPU::draw(RSector* startSector)
 	{
 		if (!startSector || startSector->wallCount <= 0) return;
 
-		// Phase 4: portal traversal.
-		// BFS from the player's current sector. For each visited sector,
-		// draw its solid walls (no nextSector); each adjoin wall queues
-		// its nextSector for later visit. Sectors are visit-stamped with
-		// the global s_drawFrame counter (incremented in jediRenderer
-		// drawWorld right before us) so each sector is drawn at most
-		// once per frame.
-		//
-		// No frustum culling, no portal clipping - the GPU's clipper +
-		// Z-test handle visibility. DF levels have <500 sectors total
-		// and we'll visit at most a connected subgraph reachable through
-		// open adjoins. SECBASE traversal from spawn caps around 40-50
-		// sectors; the 512-entry visit queue is comfortable headroom.
-		enum { XBOX_VISIT_CAP = 512 };
-		static RSector* s_visitQueue[XBOX_VISIT_CAP];
-		u32 head = 0, tail = 0;
-
 		xboxObjStatsReset();
 		s_objStatsFrame++;
+		s_xboxPortalsTraversed = 0;
+		s_xboxVisitedThisFrame = 0;
+		xboxFrustum_clearStack();
 
-		s_visitQueue[tail++] = startSector;
-		startSector->prevDrawFrame = TFE_Jedi::s_drawFrame;
-
-		u32 visited = 0;
-		while (head < tail)
-		{
-			RSector* sec = s_visitQueue[head++];
-			if (!sec || sec->wallCount <= 0) continue;
-
-			xboxDrawSectorWalls(sec);
-			xboxDrawSectorFlat(sec, sec->floorHeight,   sec->floorTex, sec->floorOffset);
-			xboxDrawSectorFlat(sec, sec->ceilingHeight, sec->ceilTex,  sec->ceilOffset);
-			xboxDrawSectorObjects(sec);
-			visited++;
-
-			// Queue every neighbour reachable through an adjoin we
-			// haven't already stamped this frame.
-			for (s32 i = 0; i < sec->wallCount; i++)
-			{
-				RWall* w = &sec->walls[i];
-				RSector* next = w->nextSector;
-				if (!next) continue;
-				if (next->prevDrawFrame == TFE_Jedi::s_drawFrame) continue;
-				if (tail >= XBOX_VISIT_CAP) break;
-
-				next->prevDrawFrame = TFE_Jedi::s_drawFrame;
-				s_visitQueue[tail++] = next;
-			}
-		}
+		xboxTraverseSector(startSector, 0);
+		const u32 visited = s_xboxVisitedThisFrame;
 
 		// Per-frame object/cache stats. Dump every 120th draw frame
 		// (~2s at 60Hz mission tick) so we have steady signal.

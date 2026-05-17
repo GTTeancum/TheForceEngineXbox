@@ -101,8 +101,14 @@ namespace TFE_Input
 		{ IADF_WEAPON_8,     ITYPE_KEYBOARD, { KEY_8 },        KEYMOD_NONE },
 		{ IADF_WEAPON_9,     ITYPE_KEYBOARD, { KEY_9 },        KEYMOD_NONE },
 		{ IADF_WEAPON_10,    ITYPE_KEYBOARD, { KEY_0 },        KEYMOD_NONE },
+		// PC binds primary/secondary fire to the mouse buttons. On Xbox
+		// we mirror the A button to MBUTTON_LEFT so Landru menus can be
+		// clicked; binding fire to MBUTTON_LEFT here would make A both
+		// jump AND fire. Fire stays on the triggers (see lines below).
+#ifndef _XBOX
 		{ IADF_PRIMARY_FIRE,   ITYPE_MOUSE, { MBUTTON_LEFT  }, KEYMOD_NONE },
 		{ IADF_SECONDARY_FIRE, ITYPE_MOUSE, { MBUTTON_RIGHT }, KEYMOD_NONE },
+#endif
 
 		// Saving
 		{ IAS_QUICK_SAVE, ITYPE_KEYBOARD, { KEY_F5 }, KEYMOD_ALT },
@@ -160,11 +166,21 @@ namespace TFE_Input
 	// -----------------------------------------------------------------------
 	void inputMapping_startup()
 	{
+#ifdef _XBOX
+		// Xbox has no remap UI, so always seed from the in-source defaults.
+		// Restoring from disk would re-load stale bindings written by an
+		// earlier build (e.g. the A->MBUTTON_LEFT->PRIMARY_FIRE binding
+		// that made A both jump and fire).
+		inputMapping_resetToDefaults();
+		inputMapping_serialize();
+		return;
+#else
 		if (inputMapping_restore())
 			return;
 
 		inputMapping_resetToDefaults();
 		inputMapping_serialize();
+#endif
 		// Note: s_gameSettings->df_enableRecording expression was a no-op in
 		// original; preserved as comment for reference.
 		// TFE_Settings::getGameSettings()->df_enableRecording;
