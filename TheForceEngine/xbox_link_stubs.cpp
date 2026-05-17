@@ -281,6 +281,87 @@ namespace TFE_Jedi
 		return true;
 	}
 
+	// =====================================================================
+	// Phase 14 step 1 - scaffolding only.
+	//
+	// Per-object portal-frustum snapshot pool, plus empty sprite + model
+	// display lists. Nothing reads from or writes to these yet. Step 2
+	// will route the sprite path through s_xboxSpriteList; step 3 will
+	// route the 3DO model path through s_xboxModelList; each step is its
+	// own commit so a regression can be bisected to the step that
+	// introduced it.
+	// =====================================================================
+	enum { XBOX_PORTAL_PLANE_POOL = 4096 };
+	static Vec4f s_xboxPortalPlanePool[XBOX_PORTAL_PLANE_POOL];
+	static u32   s_xboxPortalPlaneCount = 0;
+
+	struct XboxSpriteListEntry
+	{
+		Vec3f anchor;            // obj->posWS - for the all-or-nothing center-in-frustum test
+		Vec3f cornerBL, cornerTL, cornerTR, cornerBR;
+		u32   color;
+		TFE_RenderBackend::GpuTextureHandle tex;
+		u32   portalInfo;        // (offset << 8) | count into s_xboxPortalPlanePool
+		bool  flipU;
+	};
+	enum { XBOX_SPRITE_LIST_CAP = 512 };
+	static XboxSpriteListEntry s_xboxSpriteList[XBOX_SPRITE_LIST_CAP];
+	static u32 s_xboxSpriteListCount = 0;
+
+	struct XboxModelListEntry
+	{
+		SecObject* obj;
+		u32        color;
+		bool       fullBright;
+		u32        portalInfo;
+	};
+	enum { XBOX_MODEL_LIST_CAP = 256 };
+	static XboxModelListEntry s_xboxModelList[XBOX_MODEL_LIST_CAP];
+	static u32 s_xboxModelListCount = 0;
+
+	// Phase 14 step 2 helpers.
+	static inline void xboxPortalPlanes_clear()
+	{
+		s_xboxPortalPlaneCount = 0;
+	}
+
+	static inline void xboxObjectLists_clear()
+	{
+		s_xboxSpriteListCount = 0;
+		s_xboxModelListCount  = 0;
+	}
+
+	// Snapshot the current back frustum into the plane pool. Returns a
+	// packed (offset<<8) | (count) handle. count 0 means "no clip"
+	// (start sector, where the frustum stack is empty).
+	static u32 xboxPortalPlanes_snapshotBack()
+	{
+		const XboxFrustum* f = xboxFrustum_getBack();
+		if (!f || f->planeCount == 0) return 0;
+
+		const u32 n = (f->planeCount < 255) ? f->planeCount : 255;
+		if (s_xboxPortalPlaneCount + n > XBOX_PORTAL_PLANE_POOL) return 0;
+
+		const u32 offset = s_xboxPortalPlaneCount;
+		for (u32 i = 0; i < n; i++) s_xboxPortalPlanePool[offset + i] = f->planes[i];
+		s_xboxPortalPlaneCount += n;
+		return (offset << 8) | (n & 0xFF);
+	}
+
+	// Test whether a single world-space point is inside every plane in
+	// the given list. Used for the all-or-nothing sprite visibility
+	// decision at flush time.
+	static bool xboxFrustum_pointInside(const Vec3f* p, const Vec4f* planes,
+	                                     s32 planeCount, f32 eps)
+	{
+		for (s32 i = 0; i < planeCount; i++)
+		{
+			const f32 d = xboxFrustum_planeDist(&planes[i], p);
+			if (d < -eps) return false;
+		}
+		return true;
+	}
+
 	static inline void xboxIdentity4(f32 m[16])
 	{
 		memset(m, 0, sizeof(f32) * 16);
@@ -906,6 +987,28 @@ namespace TFE_Jedi
 
 	static inline void xboxObjStatsReset() { memset(&s_objStats, 0, sizeof(s_objStats)); }
 
+	// Perf-window stats: accumulate per-frame counters across the
+	// dump window so we can report avg/peak instead of one snapshot.
+	static u32 s_xboxPerfFrames        = 0;
+	static u32 s_xboxPerfPortalsSum    = 0;
+	static u32 s_xboxPerfPortalsPeak   = 0;
+	static u32 s_xboxPerfUniqueSum     = 0;
+	static u32 s_xboxPerfUniquePeak    = 0;
+	static u32 s_xboxPerfSecDrawsSum   = 0;
+	static u32 s_xboxPerfSecDrawsPeak  = 0;
+	static f64 s_xboxPerfWindowStartT  = 0.0;
+
+	static void xboxPerfTick(u32 portals, u32 uniqueSec, u32 secDraws)
+	{
+		s_xboxPerfFrames++;
+		s_xboxPerfPortalsSum  += portals;
+		s_xboxPerfUniqueSum   += uniqueSec;
+		s_xboxPerfSecDrawsSum += secDraws;
+		if (portals   > s_xboxPerfPortalsPeak)   s_xboxPerfPortalsPeak   = portals;
+		if (uniqueSec > s_xboxPerfUniquePeak)    s_xboxPerfUniquePeak    = uniqueSec;
+		if (secDraws  > s_xboxPerfSecDrawsPeak)  s_xboxPerfSecDrawsPeak  = secDraws;
+	}
+
 	static void xboxObjStatsDump()
 	{
 		TFE_System::logWrite(LOG_MSG, "GPU",
@@ -914,6 +1017,29 @@ namespace TFE_Jedi
 			s_objStats.drawn, s_objStats.behindCam, s_objStats.noWax, s_objStats.noAnim, s_objStats.noView,
 			s_objStats.noFrame, s_objStats.noCell, s_objStats.zeroSize, s_objStats.uploadFail, s_objStats.nullObj,
 			s_objStats.corpses, s_objStats.corpsesDrawn);
+
+		// Perf window: avg / peak portals + sectors, plus FPS over the
+		// elapsed window time. Avoid %f - MSVC 2005 vsprintf on Xbox
+		// hangs - use integer scaling.
+		const f64 now = TFE_System::getTime();
+		const f64 dt  = (s_xboxPerfWindowStartT > 0.0) ? (now - s_xboxPerfWindowStartT) : 0.0;
+		const u32 fpsX100 = (dt > 0.0001 && s_xboxPerfFrames > 0)
+		                  ? (u32)((f64)s_xboxPerfFrames * 100.0 / dt) : 0u;
+		const u32 framesSafe = s_xboxPerfFrames ? s_xboxPerfFrames : 1u;
+
+		TFE_System::logWrite(LOG_MSG, "GPU",
+			"perf: fps=%u.%02u frames=%u | sectors: avgUnique=%u peakUnique=%u avgDraws=%u peakDraws=%u | portals: avg=%u peak=%u (cap=%u)",
+			fpsX100 / 100u, fpsX100 % 100u, s_xboxPerfFrames,
+			s_xboxPerfUniqueSum  / framesSafe, s_xboxPerfUniquePeak,
+			s_xboxPerfSecDrawsSum / framesSafe, s_xboxPerfSecDrawsPeak,
+			s_xboxPerfPortalsSum / framesSafe, s_xboxPerfPortalsPeak,
+			512u);   // matches XBOX_MAX_PORTAL_TRAVERSALS (defined later in file)
+
+		s_xboxPerfFrames = 0;
+		s_xboxPerfPortalsSum = s_xboxPerfPortalsPeak = 0;
+		s_xboxPerfUniqueSum = s_xboxPerfUniquePeak = 0;
+		s_xboxPerfSecDrawsSum = s_xboxPerfSecDrawsPeak = 0;
+		s_xboxPerfWindowStartT = now;
 	}
 
 	// Phase 13 - JEDI 3DO model render.
@@ -936,12 +1062,18 @@ namespace TFE_Jedi
 	enum {
 		XBOX_MODEL_MAX_VERTS    = 512,                       // 3DO cap is 500
 		XBOX_MODEL_MAX_POLY_TRI = 8,                         // worst-case fan from one poly
-		XBOX_MODEL_MAX_OUT_TRIS = XBOX_MODEL_MAX_POLY_TRI * 4
+		// Sized for the vertex-mode batch case (hologram models with
+		// MFLAG_DRAW_VERTICES emit 2 tris per vertex into this same
+		// buffer, batched into a single draw call). 1024 tris * 3 verts
+		// * 24 bytes/vert = 72 KB - fine on Xbox 64 MB. The poly-fill
+		// loop resets outCount per polygon so it never uses more than
+		// XBOX_MODEL_MAX_POLY_TRI * 3 at a time.
+		XBOX_MODEL_MAX_OUT_TRIS = 1024
 	};
 	static Vec3f s_modelVertsWS[XBOX_MODEL_MAX_VERTS];
 	static TFE_RenderBackend::GpuTexVert s_modelTriBuf[XBOX_MODEL_MAX_OUT_TRIS * 3];
 
-	static void xboxDrawModel(SecObject* obj, RSector* sector)
+	static void xboxDrawModel(SecObject* obj, u32 sectorColor, bool fullBright)
 	{
 		JediModel* model = obj->model;
 		if (!model || model->polygonCount <= 0 || model->vertexCount <= 0) return;
@@ -973,10 +1105,63 @@ namespace TFE_Jedi
 			s_modelVertsWS[v].z = R6*lx + R7*ly + R8*lz + tz;
 		}
 
-		const u32 color = ambientToColor(sector->ambient);
+		// Color + fullBright are precomputed at insertion time so a
+		// projectile that crosses a sector boundary between recursion
+		// and flush doesn't lose its captured ambient.
+		const u32 color = sectorColor;
 
-		// Fullbright objects (e.g. blaster bolts) ignore sector ambient.
-		const bool fullBright = (obj->flags & OBJ_FLAG_FULLBRIGHT) != 0;
+		// MFLAG_DRAW_VERTICES (used by hologram models like the
+		// LEC-Imperial Death Star at the end of LEVEL 1): upstream
+		// plots each vertex as a single screen point in the palette
+		// colour from polygons[0].color. Xbox FF equivalent: a tiny
+		// camera-facing quad per vertex. We early-return; no polygon
+		// fill happens for these models.
+		if (model->flags & MFLAG_DRAW_VERTICES)
+		{
+			const u8  vtxPalIdx = (model->polygonCount > 0)
+			                    ? (u8)(model->polygons[0].color & 0xFF) : 0u;
+			const u32 vtxColor  = TFE_RenderBackend::gpuPaletteEntryRGBA(vtxPalIdx);
+
+			const f32 rx = s_xboxViewMtx[0];
+			const f32 rz = s_xboxViewMtx[2];
+			const f32 dotHalfWS = 0.04f;
+
+			// Batch every vertex's quad into one draw call. A naive
+			// per-vertex submit hammers the GPU with hundreds of calls
+			// for a holographic model and tanks frame rate. Reuse the
+			// poly-fill triangle buffer (s_modelTriBuf) - cap at
+			// XBOX_MODEL_MAX_OUT_TRIS triangles total.
+			u32 outCount = 0;
+			const u32 outCap = XBOX_MODEL_MAX_OUT_TRIS * 3;
+			for (s32 v = 0; v < model->vertexCount; v++)
+			{
+				if (outCount + 6 > outCap) break;
+				const Vec3f& P = s_modelVertsWS[v];
+				const f32 hx = rx * dotHalfWS;
+				const f32 hz = rz * dotHalfWS;
+				const f32 hy = dotHalfWS;
+				TFE_RenderBackend::GpuTexVert* o = &s_modelTriBuf[outCount];
+				o[0].x = P.x - hx; o[0].y = P.y - hy; o[0].z = P.z - hz;
+				o[1].x = P.x - hx; o[1].y = P.y + hy; o[1].z = P.z - hz;
+				o[2].x = P.x + hx; o[2].y = P.y + hy; o[2].z = P.z + hz;
+				o[3] = o[0];
+				o[4] = o[2];
+				o[5].x = P.x + hx; o[5].y = P.y - hy; o[5].z = P.z + hz;
+				for (s32 k = 0; k < 6; k++)
+				{
+					o[k].color = vtxColor;
+					o[k].u = 0.0f; o[k].v = 0.0f;
+				}
+				outCount += 6;
+			}
+			const u32 tris = outCount / 3;
+			if (tris > 0)
+			{
+				TFE_RenderBackend::gpuDrawTexturedTrisWorld(
+					s_xboxViewMtx, s_xboxProjMtx, NULL, s_modelTriBuf, tris);
+			}
+			return;
+		}
 
 		for (s32 p = 0; p < model->polygonCount; p++)
 		{
@@ -1077,14 +1262,20 @@ namespace TFE_Jedi
 				case OBJ_TYPE_FRAME:  s_objStats.frames++;  break;
 				case OBJ_TYPE_3D:
 					s_objStats.models++;
-					// Render every 3D obj unconditionally. Earlier I gated
-					// on OBJ_FLAG_NEEDS_TRANSFORM to mirror upstream, but
-					// some short-lived objects (blaster bolts) don't keep
-					// that flag set every tick and end up invisible. The
-					// transform field is still valid - it just isn't
-					// "freshly computed" - so re-using it for one frame
-					// is harmless.
-					xboxDrawModel(obj, sector);
+					// Phase 14 step 3 - enqueue 3DO model for deferred
+					// draw. Same shape as the sprite path: snapshot
+					// portal frustum at insertion (unused for clipping,
+					// kept for symmetry / Phase 15 use), draw at flush.
+					// Rely on the wall z-test for occlusion - same
+					// reasoning as sprites.
+					if (s_xboxModelListCount < XBOX_MODEL_LIST_CAP)
+					{
+						XboxModelListEntry& me = s_xboxModelList[s_xboxModelListCount++];
+						me.obj        = obj;
+						me.color      = ambientToColor(sector->ambient);
+						me.fullBright = (obj->flags & OBJ_FLAG_FULLBRIGHT) != 0;
+						me.portalInfo = xboxPortalPlanes_snapshotBack();
+					}
 					continue;
 				default:              s_objStats.others++;  continue;
 			}
@@ -1190,24 +1381,28 @@ namespace TFE_Jedi
 			if (frame->flip) { const f32 t = uL; uL = uR; uR = t; }
 			(void)texW; (void)texH;
 
-			// WAX cells stored column bottom-up: bottom vertex v=0,
-			// top vertex v=vB.
-			TFE_RenderBackend::GpuTexVert v[6];
-			v[0].x = sxL; v[0].y = yb; v[0].z = szL;
-			v[0].color = sectorColor; v[0].u = uL; v[0].v = 0.0f;
-			v[1].x = sxL; v[1].y = yt; v[1].z = szL;
-			v[1].color = sectorColor; v[1].u = uL; v[1].v = vB;
-			v[2].x = sxR; v[2].y = yt; v[2].z = szR;
-			v[2].color = sectorColor; v[2].u = uR; v[2].v = vB;
-			v[3] = v[0];
-			v[4] = v[2];
-			v[5].x = sxR; v[5].y = yb; v[5].z = szR;
-			v[5].color = sectorColor; v[5].u = uR; v[5].v = 0.0f;
-
-			TFE_RenderBackend::gpuDrawAlphaTestedTrisWorld(
-				s_xboxViewMtx, s_xboxProjMtx, tex, v, 2);
-			s_objStats.drawn++;
-			if (isCorpse) s_objStats.corpsesDrawn++;
+			// Phase 14 step 2 - enqueue sprite for deferred draw.
+			// Anchor = obj->posWS. Snapshot the current back frustum.
+			// Visibility is decided by xboxFlushSpriteList using a
+			// center-vs-frustum test (all-or-nothing - either the
+			// whole sprite quad emits, or it doesn't). UV is fixed at
+			// [0,1] - no per-vertex reconstruction needed since we
+			// never clip the quad geometry.
+			(void)uL; (void)uR; (void)vB;
+			if (s_xboxSpriteListCount < XBOX_SPRITE_LIST_CAP)
+			{
+				XboxSpriteListEntry& e = s_xboxSpriteList[s_xboxSpriteListCount++];
+				e.anchor.x   = px;  e.anchor.y   = py;  e.anchor.z   = pz;
+				e.cornerBL.x = sxL; e.cornerBL.y = yb; e.cornerBL.z = szL;
+				e.cornerTL.x = sxL; e.cornerTL.y = yt; e.cornerTL.z = szL;
+				e.cornerTR.x = sxR; e.cornerTR.y = yt; e.cornerTR.z = szR;
+				e.cornerBR.x = sxR; e.cornerBR.y = yb; e.cornerBR.z = szR;
+				e.color      = sectorColor;
+				e.tex        = tex;
+				e.portalInfo = xboxPortalPlanes_snapshotBack();
+				e.flipU      = (frame->flip != 0);
+				if (isCorpse) s_objStats.corpsesDrawn++;
+			}
 		}
 	}
 
@@ -1227,27 +1422,47 @@ namespace TFE_Jedi
 		if (w->midTexelHeight <= 0 || w->texelLength <= 0) return;
 
 		// Sign U range along the wall (in texels along its length).
+		// signOffset.x lives in the wall TEXTURE'S U coordinate space,
+		// which is shifted by midOffset.x. Upstream's column check is
+		// "uCoord >= signU0" where uCoord = uCoord0 + midOffset.x +
+		// perspective(screenX). For a simple wall (uCoord0 = 0) the
+		// screen position of the sign's left edge satisfies
+		// perspective(X) = signOffset.x - midOffset.x, so the world
+		// fraction along the wall is (signOffset.x - midOffset.x) /
+		// texelLength. Without the midOffset.x subtraction the sign
+		// drifts off the wall texture by midOffset.x texels.
 		const f32 wallTexelLen = fixedToF(w->texelLength);
-		const f32 sigU0Tx = fixedToF(w->signOffset.x);
-		const f32 sigU1Tx = sigU0Tx + (f32)tex->width;
+		const f32 midOfsTx     = fixedToF(w->midOffset.x);
+		const f32 sigU0Tx      = fixedToF(w->signOffset.x) - midOfsTx;
+		const f32 sigU1Tx      = sigU0Tx + (f32)tex->width;
 		const f32 fracL = sigU0Tx / wallTexelLen;
 		const f32 fracR = sigU1Tx / wallTexelLen;
 
-		// Sign Y range (in normalised wall fraction from top down).
-		const f32 wallTexelH = fixedToF(w->midTexelHeight);
-		const f32 sigV0Tx = fixedToF(w->signOffset.z);
-		const f32 sigV1Tx = sigV0Tx + (f32)tex->height;
-		const f32 fracT = sigV0Tx / wallTexelH;
-		const f32 fracB = sigV1Tx / wallTexelH;
+		// Sign Y. Upstream rwallFloat.cpp:877 anchors the sign with its
+		// BOTTOM at (floor_screen + signOffset.z / vCoordStep) and the
+		// sign extends UPWARD by texHeight. signOffset.z is measured
+		// from the FLOOR (positive going down on screen / down the wall
+		// in texel space; typical values are negative so the bottom of
+		// the sign sits above the floor in world space).
+		//
+		// World-space equivalent: texelsToWorld = (floorY - ceilY) /
+		// midTexelHeight (positive because TFE -Y up means floorY >
+		// ceilY). Sign bottom world Y = floorY + signOffset.z * scale
+		// (so a negative offset moves it UP toward the ceiling). Sign
+		// top world Y = sign bottom - texHeight * scale.
+		const f32 wallTexelH    = fixedToF(w->midTexelHeight);
+		const f32 wallWorldH    = floorY - ceilY;
+		const f32 texelsToWorld = (wallTexelH > 0.001f) ? (wallWorldH / wallTexelH) : 0.0f;
+		const f32 sigOffsetW    = fixedToF(w->signOffset.z) * texelsToWorld;
+		const f32 sigTexHW      = (f32)tex->height * texelsToWorld;
 
-		// World positions of the sign quad corners.
 		const f32 dx = x1 - x0, dz = z1 - z0;
 		const f32 sxL = x0 + fracL * dx;
 		const f32 szL = z0 + fracL * dz;
 		const f32 sxR = x0 + fracR * dx;
 		const f32 szR = z0 + fracR * dz;
-		const f32 yT = ceilY + fracT * (floorY - ceilY);
-		const f32 yB = ceilY + fracB * (floorY - ceilY);
+		const f32 yB = floorY + sigOffsetW;   // sign bottom
+		const f32 yT = yB - sigTexHW;         // sign top
 
 		// Bias the sign 0.05 units along the wall normal toward the
 		// room interior. Wall normal in XZ for CCW-wound DF sectors:
@@ -1360,7 +1575,8 @@ namespace TFE_Jedi
 	// changes between visits because the frustum stack differs.)
 	enum { XBOX_TRAVERSE_MAX_DEPTH = 32, XBOX_MAX_PORTAL_TRAVERSALS = 512 };
 	static u32 s_xboxPortalsTraversed = 0;
-	static u32 s_xboxVisitedThisFrame = 0;
+	static u32 s_xboxVisitedThisFrame = 0;   // unique sectors (firstVisit count)
+	static u32 s_xboxSectorDrawsThisFrame = 0; // total entries (incl. duplicates via multi-portal)
 
 	static void xboxTraverseSector(RSector* sec, s32 depth)
 	{
@@ -1369,18 +1585,17 @@ namespace TFE_Jedi
 		const bool firstVisit = (sec->prevDrawFrame != TFE_Jedi::s_drawFrame);
 		sec->prevDrawFrame = TFE_Jedi::s_drawFrame;
 		if (firstVisit) s_xboxVisitedThisFrame++;
+		s_xboxSectorDrawsThisFrame++;
 
 		xboxDrawSectorWalls(sec);
 		if (!(sec->flags1 & SEC_FLAGS1_PIT))
 			xboxDrawSectorFlat(sec, sec->floorHeight,   sec->floorTex, sec->floorOffset);
 		if (!(sec->flags1 & SEC_FLAGS1_EXTERIOR))
 			xboxDrawSectorFlat(sec, sec->ceilingHeight, sec->ceilTex,  sec->ceilOffset);
-		// Objects draw per-visit, matching upstream's traverseSector
-		// pattern (rsectorGPU.cpp:1705 calls addSectorObjects here).
-		// This causes per-frame flicker on enemies/corpses in adjacent
-		// sectors because the recursive portal-frustum clip is FP-edge
-		// sensitive. Phase 14 fixes it the upstream way: per-object
-		// portal-frustum stamp + display list + CPU clip per object.
+		// Objects draw per-visit (each visit enqueues with the portal-
+		// frustum snapshot for its specific path; the display list
+		// flushes per-object) - that's what Phase 14 needs to keep
+		// flicker fixed.
 		xboxDrawSectorObjects(sec);
 
 		for (s32 i = 0; i < sec->wallCount; i++)
@@ -1446,6 +1661,55 @@ namespace TFE_Jedi
 		}
 	}
 
+	// Phase 14 step 2b - sprite list flush.
+	// Every enqueued sprite emits its full quad - no per-sprite portal
+	// visibility test. The wall z-buffer already occludes parts of the
+	// sprite behind level geometry, so the only reason to skip a sprite
+	// would be "its sector isn't visible." But if it got enqueued, its
+	// sector WAS visited (recursion reached it and ran objects). The
+	// earlier center-vs-frustum test had FP variance for sprites sitting
+	// near portal edges - same flicker root cause we're trying to fix.
+	static void xboxFlushSpriteList()
+	{
+		for (u32 i = 0; i < s_xboxSpriteListCount; i++)
+		{
+			const XboxSpriteListEntry& e = s_xboxSpriteList[i];
+
+			const f32 uL = e.flipU ? 1.0f : 0.0f;
+			const f32 uR = e.flipU ? 0.0f : 1.0f;
+
+			TFE_RenderBackend::GpuTexVert v[6];
+			v[0].x = e.cornerBL.x; v[0].y = e.cornerBL.y; v[0].z = e.cornerBL.z;
+			v[0].color = e.color; v[0].u = uL; v[0].v = 0.0f;
+			v[1].x = e.cornerTL.x; v[1].y = e.cornerTL.y; v[1].z = e.cornerTL.z;
+			v[1].color = e.color; v[1].u = uL; v[1].v = 1.0f;
+			v[2].x = e.cornerTR.x; v[2].y = e.cornerTR.y; v[2].z = e.cornerTR.z;
+			v[2].color = e.color; v[2].u = uR; v[2].v = 1.0f;
+			v[3] = v[0];
+			v[4] = v[2];
+			v[5].x = e.cornerBR.x; v[5].y = e.cornerBR.y; v[5].z = e.cornerBR.z;
+			v[5].color = e.color; v[5].u = uR; v[5].v = 0.0f;
+
+			TFE_RenderBackend::gpuDrawAlphaTestedTrisWorld(
+				s_xboxViewMtx, s_xboxProjMtx, e.tex, v, 2);
+			s_objStats.drawn++;
+		}
+	}
+
+	// Phase 14 step 3 - 3DO model list flush.
+	// Same shape as the sprite flush. The per-portal frustum snapshot
+	// is captured but not used for clipping (wall z-test handles
+	// occlusion). Color + fullBright were resolved at insertion time
+	// from the sector the model was in then.
+	static void xboxFlushModelList()
+	{
+		for (u32 i = 0; i < s_xboxModelListCount; i++)
+		{
+			const XboxModelListEntry& e = s_xboxModelList[i];
+			xboxDrawModel(e.obj, e.color, e.fullBright);
+		}
+	}
+
 	void TFE_Sectors_GPU::draw(RSector* startSector)
 	{
 		if (!startSector || startSector->wallCount <= 0) return;
@@ -1454,10 +1718,21 @@ namespace TFE_Jedi
 		s_objStatsFrame++;
 		s_xboxPortalsTraversed = 0;
 		s_xboxVisitedThisFrame = 0;
+		s_xboxSectorDrawsThisFrame = 0;
 		xboxFrustum_clearStack();
+		xboxPortalPlanes_clear();
+		xboxObjectLists_clear();
 
 		xboxTraverseSector(startSector, 0);
 		const u32 visited = s_xboxVisitedThisFrame;
+
+		// Phase 14 step 2 + 3 - deferred sprite and model lists.
+		// Walls + flats already drew during recursion.
+		xboxFlushSpriteList();
+		xboxFlushModelList();
+
+		// Accumulate per-frame perf counters for the dump window.
+		xboxPerfTick(s_xboxPortalsTraversed, s_xboxVisitedThisFrame, s_xboxSectorDrawsThisFrame);
 
 		// Per-frame object/cache stats. Dump every 120th draw frame
 		// (~2s at 60Hz mission tick) so we have steady signal.
