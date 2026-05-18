@@ -1009,13 +1009,21 @@ namespace TFE_Jedi
 			vcolor = wallColor(wallIdx, secId);
 		}
 
+		// V convention matches upstream rwallFloat.cpp:856 / 1505:
+		// V=0 at yBot (the wall portion's BOTTOM edge in world space),
+		// V=vMax at yTop. For a door's top sliver yBot is the door's
+		// rising ceiling, so V=0 is anchored to the moving edge - the
+		// texture follows the door upward just like upstream's column
+		// drawer. Previously had these swapped; tileable wall textures
+		// looked fine, but doors stayed glued to the fixed top edge
+		// instead of sliding with the door.
 		TFE_RenderBackend::GpuTexVert tv[6];
-		tv[0].x = x0; tv[0].y = yBot; tv[0].z = z0; tv[0].color = vcolor; tv[0].u = 0.0f; tv[0].v = vMax;
-		tv[1].x = x0; tv[1].y = yTop; tv[1].z = z0; tv[1].color = vcolor; tv[1].u = 0.0f; tv[1].v = 0.0f;
-		tv[2].x = x1; tv[2].y = yTop; tv[2].z = z1; tv[2].color = vcolor; tv[2].u = uMax; tv[2].v = 0.0f;
-		tv[3].x = x0; tv[3].y = yBot; tv[3].z = z0; tv[3].color = vcolor; tv[3].u = 0.0f; tv[3].v = vMax;
-		tv[4].x = x1; tv[4].y = yTop; tv[4].z = z1; tv[4].color = vcolor; tv[4].u = uMax; tv[4].v = 0.0f;
-		tv[5].x = x1; tv[5].y = yBot; tv[5].z = z1; tv[5].color = vcolor; tv[5].u = uMax; tv[5].v = vMax;
+		tv[0].x = x0; tv[0].y = yBot; tv[0].z = z0; tv[0].color = vcolor; tv[0].u = 0.0f; tv[0].v = 0.0f;
+		tv[1].x = x0; tv[1].y = yTop; tv[1].z = z0; tv[1].color = vcolor; tv[1].u = 0.0f; tv[1].v = vMax;
+		tv[2].x = x1; tv[2].y = yTop; tv[2].z = z1; tv[2].color = vcolor; tv[2].u = uMax; tv[2].v = vMax;
+		tv[3].x = x0; tv[3].y = yBot; tv[3].z = z0; tv[3].color = vcolor; tv[3].u = 0.0f; tv[3].v = 0.0f;
+		tv[4].x = x1; tv[4].y = yTop; tv[4].z = z1; tv[4].color = vcolor; tv[4].u = uMax; tv[4].v = vMax;
+		tv[5].x = x1; tv[5].y = yBot; tv[5].z = z1; tv[5].color = vcolor; tv[5].u = uMax; tv[5].v = 0.0f;
 
 		xboxWallList_appendQuad(gpuTex, tv);
 	}
