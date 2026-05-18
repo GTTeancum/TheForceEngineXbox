@@ -970,21 +970,37 @@ namespace TFE_Jedi
 		TFE_RenderBackend::GpuTextureHandle gpuTex = NULL;
 		u32 vcolor = color;
 		f32 uMax = 0.0f, vMax = 0.0f;
-		f32 vOff = 0.0f;
+		(void)vOffsetFx;
 		if (texUsable)
 		{
 			const f32 texelLen = fixedToF(texelLengthFx);
 			const f32 texH     = fixedToF(texHeightFx);
 			uMax = texelLen / (f32)tex->width;
 			vMax = texH     / (f32)tex->height;
-			// Vertical texture offset for the wall (mid/top/bot). DF's
-			// INF system updates the wall's matching offset.z each tick
-			// as a sector moves (doors, elevators) so the wall texture
-			// stays world-anchored instead of stretching with the wall.
-			// Upstream applies it to V at rwallFloat.cpp:856 / 1287 /
-			// 1505. Offset is in texels (fixed16_16) - normalise to
-			// texture-space and add to both V endpoints.
-			vOff = fixedToF(vOffsetFx) / (f32)tex->height;
+			// Door / elevator scrolling note:
+			// We deliberately do NOT add the wall's matching offset.z
+			// (midOffset.z / topOffset.z / botOffset.z) here. On the GPU
+			// mesh path the texture is already world-anchored: D3D
+			// linearly interpolates V across the quad, and texHeightFx
+			// here is the wall's *current* midTexelHeight / topTexelHeight
+			// / botTexelHeight, recomputed every frame by DF's
+			// wall_computeTexelHeights as the sector moves. The V value
+			// at any fixed world Y on the wall therefore reduces to
+			// (Y - yTop)*8/texH - constant across the door's motion -
+			// so the texture follows the mesh naturally.
+			//
+			// Upstream's software renderer DOES apply the offset because
+			// its per-pixel vCoordStep stretches midTexelHeight across
+			// the on-screen wall height; the offset is the compensation
+			// term that path needs. Notably upstream's
+			// sector_adjustTextureWallOffsets_Floor only ever touches
+			// bot/mid offsets - it never touches topOffset.z - confirming
+			// that top slivers (the typical DF door) are already
+			// mesh-anchored even in upstream.
+			//
+			// TODO: scrolling-texture walls (conveyor belts, etc., flag
+			// WF1_SCROLL_*_TEX) need their own offset application; those
+			// are rare in DF and will be revisited separately.
 			gpuTex = TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
 				tex, tex->image, tex->width, tex->height, /*columnMajor*/true);
 		}
@@ -994,12 +1010,12 @@ namespace TFE_Jedi
 		}
 
 		TFE_RenderBackend::GpuTexVert tv[6];
-		tv[0].x = x0; tv[0].y = yBot; tv[0].z = z0; tv[0].color = vcolor; tv[0].u = 0.0f; tv[0].v = vMax + vOff;
-		tv[1].x = x0; tv[1].y = yTop; tv[1].z = z0; tv[1].color = vcolor; tv[1].u = 0.0f; tv[1].v = 0.0f + vOff;
-		tv[2].x = x1; tv[2].y = yTop; tv[2].z = z1; tv[2].color = vcolor; tv[2].u = uMax; tv[2].v = 0.0f + vOff;
-		tv[3].x = x0; tv[3].y = yBot; tv[3].z = z0; tv[3].color = vcolor; tv[3].u = 0.0f; tv[3].v = vMax + vOff;
-		tv[4].x = x1; tv[4].y = yTop; tv[4].z = z1; tv[4].color = vcolor; tv[4].u = uMax; tv[4].v = 0.0f + vOff;
-		tv[5].x = x1; tv[5].y = yBot; tv[5].z = z1; tv[5].color = vcolor; tv[5].u = uMax; tv[5].v = vMax + vOff;
+		tv[0].x = x0; tv[0].y = yBot; tv[0].z = z0; tv[0].color = vcolor; tv[0].u = 0.0f; tv[0].v = vMax;
+		tv[1].x = x0; tv[1].y = yTop; tv[1].z = z0; tv[1].color = vcolor; tv[1].u = 0.0f; tv[1].v = 0.0f;
+		tv[2].x = x1; tv[2].y = yTop; tv[2].z = z1; tv[2].color = vcolor; tv[2].u = uMax; tv[2].v = 0.0f;
+		tv[3].x = x0; tv[3].y = yBot; tv[3].z = z0; tv[3].color = vcolor; tv[3].u = 0.0f; tv[3].v = vMax;
+		tv[4].x = x1; tv[4].y = yTop; tv[4].z = z1; tv[4].color = vcolor; tv[4].u = uMax; tv[4].v = 0.0f;
+		tv[5].x = x1; tv[5].y = yBot; tv[5].z = z1; tv[5].color = vcolor; tv[5].u = uMax; tv[5].v = vMax;
 
 		xboxWallList_appendQuad(gpuTex, tv);
 	}
