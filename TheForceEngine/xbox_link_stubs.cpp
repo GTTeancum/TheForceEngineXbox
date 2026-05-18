@@ -331,6 +331,92 @@ namespace TFE_Jedi
 		s_xboxModelListCount  = 0;
 	}
 
+	// =====================================================================
+	// Phase 15 - wall display list.
+	//
+	// Upstream sdisplayList_addSegment (sectorDisplayList.cpp) appends
+	// each wall the recursion encounters to a vertex buffer, then flushes
+	// the whole list in a few batched draw calls at end of frame. Walls
+	// re-emitted from multi-portal-path visits cost only a memcpy +
+	// shader-side per-pixel clip; draw-call count stays small.
+	//
+	// On Xbox NV2A FF we can't shader-clip per pixel - but the wall
+	// quads themselves render identical pixels regardless of which portal
+	// reached the sector (z-test handles overdraw). So the equivalent is:
+	// append per visit, batch by texture, submit at end of frame. That
+	// turns ~500 per-visit draw calls in dense areas into ~10-20 per-
+	// texture batches. The vertex buffer carries the duplicates; the GPU
+	// eats them with the depth test.
+	//
+	// Untextured fallback (debug-coloured walls when tex is unusable)
+	// uses NULL tex - the backend routes stage-0 COLORARG1=DIFFUSE so
+	// the per-vertex color drives the pixel directly.
+	// =====================================================================
+	enum {
+		XBOX_WALL_VERT_CAP  = 32768,   // ~ 768 KB at 24 bytes/vert
+		XBOX_WALL_CHUNK_CAP = 2048
+	};
+	struct XboxWallChunk
+	{
+		TFE_RenderBackend::GpuTextureHandle tex;
+		u32 vertStart;
+		u32 vertCount;
+	};
+	static TFE_RenderBackend::GpuTexVert s_xboxWallVerts[XBOX_WALL_VERT_CAP];
+	static u32                           s_xboxWallVertCount = 0;
+	static XboxWallChunk                 s_xboxWallChunks[XBOX_WALL_CHUNK_CAP];
+	static u32                           s_xboxWallChunkCount = 0;
+
+	static inline void xboxWallList_clear()
+	{
+		s_xboxWallVertCount  = 0;
+		s_xboxWallChunkCount = 0;
+	}
+
+	// Append 6 verts (a 2-tri quad). Extends the last chunk if the same
+	// texture is contiguous, otherwise starts a new chunk. The contiguous-
+	// merge case is the common one (xboxEmitWallQuad calls for one wall's
+	// mid+top+bot often share the wall texture).
+	static void xboxWallList_appendQuad(TFE_RenderBackend::GpuTextureHandle tex,
+	                                     const TFE_RenderBackend::GpuTexVert* verts)
+	{
+		if (s_xboxWallVertCount + 6 > XBOX_WALL_VERT_CAP) return;
+
+		if (s_xboxWallChunkCount > 0)
+		{
+			XboxWallChunk& last = s_xboxWallChunks[s_xboxWallChunkCount - 1];
+			if (last.tex == tex && last.vertStart + last.vertCount == s_xboxWallVertCount)
+			{
+				memcpy(&s_xboxWallVerts[s_xboxWallVertCount], verts,
+				       sizeof(TFE_RenderBackend::GpuTexVert) * 6);
+				last.vertCount      += 6;
+				s_xboxWallVertCount += 6;
+				return;
+			}
+		}
+
+		if (s_xboxWallChunkCount >= XBOX_WALL_CHUNK_CAP) return;
+		XboxWallChunk& c = s_xboxWallChunks[s_xboxWallChunkCount++];
+		c.tex       = tex;
+		c.vertStart = s_xboxWallVertCount;
+		c.vertCount = 6;
+		memcpy(&s_xboxWallVerts[s_xboxWallVertCount], verts,
+		       sizeof(TFE_RenderBackend::GpuTexVert) * 6);
+		s_xboxWallVertCount += 6;
+	}
+
+	static void xboxFlushWallList()
+	{
+		for (u32 i = 0; i < s_xboxWallChunkCount; i++)
+		{
+			const XboxWallChunk& c = s_xboxWallChunks[i];
+			const u32 tris = c.vertCount / 3;
+			if (tris == 0) continue;
+			TFE_RenderBackend::gpuDrawTexturedTrisWorld(
+				s_xboxViewMtx, s_xboxProjMtx, c.tex, &s_xboxWallVerts[c.vertStart], tris);
+		}
+	}
+
 	// Snapshot the current back frustum into the plane pool. Returns a
 	// packed (offset<<8) | (count) handle. count 0 means "no clip"
 	// (start sector, where the frustum stack is empty).
@@ -493,9 +579,18 @@ namespace TFE_Jedi
 	// at stage 0. Pure linear mapping for the first cut - DF's actual
 	// light ramp is non-linear (colormap-based) but per-sector flat is
 	// good enough to restore the moody dim/bright contrast.
+	//
+	// Headlamp / weapon flash / level ambient feed in via s_worldAmbient
+	// (set by renderer_setWorldAmbient: stored as MAX_LIGHT_LEVEL - boost,
+	// so subtracting gets the boost value back). DF's lighting takes the
+	// max of per-sector ambient and this global, which is why a sector
+	// at light=4 reads as fully-lit when the headlamp is on at boost=31.
+	// Without this lift the headlamp / blaster muzzle flashes do nothing.
 	static inline u32 ambientToColor(fixed16_16 ambientFx)
 	{
-		s32 level = ambientFx >> 16;       // integer light level
+		s32 level = ambientFx >> 16;       // per-sector light level
+		const s32 worldLift = 31 - TFE_Jedi::s_worldAmbient;  // headlamp / weapon flash / level lift
+		if (worldLift > level) level = worldLift;
 		if (level < 0)  level = 0;
 		if (level > 31) level = 31;
 		// 31 * 8 = 248, close enough to 255 to read as fullbright at max.
@@ -860,6 +955,7 @@ namespace TFE_Jedi
 	                              TextureData* tex,
 	                              fixed16_16 texelLengthFx,
 	                              fixed16_16 texHeightFx,
+	                              fixed16_16 vOffsetFx,
 	                              u32 color)
 	{
 		// Phase 11: pow2 check dropped. The backend now upscales non-pow2
@@ -867,42 +963,45 @@ namespace TFE_Jedi
 		const bool texUsable =
 			tex && tex->image && tex->compressed == 0;
 
+		// Phase 15 - route to the wall display list instead of an
+		// immediate draw. Untextured fallback shares the textured-vertex
+		// path with tex=NULL + per-vertex debug color (the backend's
+		// stage-0 routes COLORARG1=DIFFUSE when tex is NULL).
+		TFE_RenderBackend::GpuTextureHandle gpuTex = NULL;
+		u32 vcolor = color;
+		f32 uMax = 0.0f, vMax = 0.0f;
+		f32 vOff = 0.0f;
 		if (texUsable)
 		{
 			const f32 texelLen = fixedToF(texelLengthFx);
 			const f32 texH     = fixedToF(texHeightFx);
-			const f32 uMax = texelLen / (f32)tex->width;
-			const f32 vMax = texH     / (f32)tex->height;
-
-			TFE_RenderBackend::GpuTextureHandle gpuTex =
-				TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
-					tex, tex->image, tex->width, tex->height, /*columnMajor*/true);
-
-			TFE_RenderBackend::GpuTexVert tv[6];
-			tv[0].x = x0; tv[0].y = yBot; tv[0].z = z0; tv[0].color = color; tv[0].u = 0.0f; tv[0].v = vMax;
-			tv[1].x = x0; tv[1].y = yTop; tv[1].z = z0; tv[1].color = color; tv[1].u = 0.0f; tv[1].v = 0.0f;
-			tv[2].x = x1; tv[2].y = yTop; tv[2].z = z1; tv[2].color = color; tv[2].u = uMax; tv[2].v = 0.0f;
-			tv[3].x = x0; tv[3].y = yBot; tv[3].z = z0; tv[3].color = color; tv[3].u = 0.0f; tv[3].v = vMax;
-			tv[4].x = x1; tv[4].y = yTop; tv[4].z = z1; tv[4].color = color; tv[4].u = uMax; tv[4].v = 0.0f;
-			tv[5].x = x1; tv[5].y = yBot; tv[5].z = z1; tv[5].color = color; tv[5].u = uMax; tv[5].v = vMax;
-
-			TFE_RenderBackend::gpuDrawTexturedTrisWorld(
-				s_xboxViewMtx, s_xboxProjMtx, gpuTex, tv, 2);
+			uMax = texelLen / (f32)tex->width;
+			vMax = texH     / (f32)tex->height;
+			// Vertical texture offset for the wall (mid/top/bot). DF's
+			// INF system updates the wall's matching offset.z each tick
+			// as a sector moves (doors, elevators) so the wall texture
+			// stays world-anchored instead of stretching with the wall.
+			// Upstream applies it to V at rwallFloat.cpp:856 / 1287 /
+			// 1505. Offset is in texels (fixed16_16) - normalise to
+			// texture-space and add to both V endpoints.
+			vOff = fixedToF(vOffsetFx) / (f32)tex->height;
+			gpuTex = TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
+				tex, tex->image, tex->width, tex->height, /*columnMajor*/true);
 		}
 		else
 		{
-			const u32 c = wallColor(wallIdx, secId);
-			TFE_RenderBackend::GpuColorVert cv[6];
-			cv[0].x = x0; cv[0].y = yBot; cv[0].z = z0; cv[0].color = c;
-			cv[1].x = x0; cv[1].y = yTop; cv[1].z = z0; cv[1].color = c;
-			cv[2].x = x1; cv[2].y = yTop; cv[2].z = z1; cv[2].color = c;
-			cv[3].x = x0; cv[3].y = yBot; cv[3].z = z0; cv[3].color = c;
-			cv[4].x = x1; cv[4].y = yTop; cv[4].z = z1; cv[4].color = c;
-			cv[5].x = x1; cv[5].y = yBot; cv[5].z = z1; cv[5].color = c;
-
-			TFE_RenderBackend::gpuDrawColoredTrisWorld(
-				s_xboxViewMtx, s_xboxProjMtx, cv, 2);
+			vcolor = wallColor(wallIdx, secId);
 		}
+
+		TFE_RenderBackend::GpuTexVert tv[6];
+		tv[0].x = x0; tv[0].y = yBot; tv[0].z = z0; tv[0].color = vcolor; tv[0].u = 0.0f; tv[0].v = vMax + vOff;
+		tv[1].x = x0; tv[1].y = yTop; tv[1].z = z0; tv[1].color = vcolor; tv[1].u = 0.0f; tv[1].v = 0.0f + vOff;
+		tv[2].x = x1; tv[2].y = yTop; tv[2].z = z1; tv[2].color = vcolor; tv[2].u = uMax; tv[2].v = 0.0f + vOff;
+		tv[3].x = x0; tv[3].y = yBot; tv[3].z = z0; tv[3].color = vcolor; tv[3].u = 0.0f; tv[3].v = vMax + vOff;
+		tv[4].x = x1; tv[4].y = yTop; tv[4].z = z1; tv[4].color = vcolor; tv[4].u = uMax; tv[4].v = 0.0f + vOff;
+		tv[5].x = x1; tv[5].y = yBot; tv[5].z = z1; tv[5].color = vcolor; tv[5].u = uMax; tv[5].v = vMax + vOff;
+
+		xboxWallList_appendQuad(gpuTex, tv);
 	}
 
 	// Round up to the next power of two. Sprite cells aren't generally
@@ -1521,7 +1620,8 @@ namespace TFE_Jedi
 				// Solid wall - one mid quad full floor-to-ceiling.
 				xboxEmitWallQuad(sector->id, i, x0, z0, x1, z1,
 					ceilY, floorY,
-					w->midTex, w->texelLength, w->midTexelHeight, col);
+					w->midTex, w->texelLength, w->midTexelHeight,
+					w->midOffset.z, col);
 				xboxDrawWallSign(w, x0, z0, x1, z1, ceilY, floorY, col);
 				continue;
 			}
@@ -1541,14 +1641,16 @@ namespace TFE_Jedi
 				// nextCeil is numerically greater (lower) than ceilY.
 				xboxEmitWallQuad(sector->id, i, x0, z0, x1, z1,
 					ceilY, nextCeil,
-					w->topTex, w->texelLength, w->topTexelHeight, col);
+					w->topTex, w->texelLength, w->topTexelHeight,
+					w->topOffset.z, col);
 			}
 			if (w->drawFlags & WDF_BOT)
 			{
 				// Sliver from next sector's floor down to ours.
 				xboxEmitWallQuad(sector->id, i, x0, z0, x1, z1,
 					nextFloor, floorY,
-					w->botTex, w->texelLength, w->botTexelHeight, col);
+					w->botTex, w->texelLength, w->botTexelHeight,
+					w->botOffset.z, col);
 			}
 
 			// Sign overlay (door panels, switches, etc.) - draws on
@@ -1722,12 +1824,18 @@ namespace TFE_Jedi
 		xboxFrustum_clearStack();
 		xboxPortalPlanes_clear();
 		xboxObjectLists_clear();
+		xboxWallList_clear();
 
 		xboxTraverseSector(startSector, 0);
 		const u32 visited = s_xboxVisitedThisFrame;
 
+		// Phase 15 - flush walls first (opaque world geometry), then
+		// objects on top. Flats are still drawn immediately inside the
+		// recursion because they need per-visit portal-frustum clipping
+		// to fix the corridor z-fight (will move to a list with per-
+		// entry clip in a follow-up).
+		xboxFlushWallList();
 		// Phase 14 step 2 + 3 - deferred sprite and model lists.
-		// Walls + flats already drew during recursion.
 		xboxFlushSpriteList();
 		xboxFlushModelList();
 

@@ -82,7 +82,13 @@ namespace TFE_DarkForces
 		s_objectivePickupSnd = sound_load("complete.voc", SOUND_PRIORITY_HIGH5);
 		s_itemPickupSnd     = sound_load("key.voc", SOUND_PRIORITY_MED5);
 
-#ifndef _XBOX
+		// Xbox: pickups.json is loaded at boot from D:\DARK\ via the
+		// same path as the PC build (main_xbox.cpp wires it through
+		// TFE_ExternalData). An earlier port revision gated this loop
+		// behind #ifndef _XBOX, which left s_itemData zeroed - the
+		// result was that every enemy-dropped item (keys, ammo, etc.)
+		// spawned with a NULL WAX/FME and rendered invisible. The path
+		// works on Xbox; the gate was stale.
 		TFE_ExternalData::ExternalPickup* externalPickups = TFE_ExternalData::getExternalPickups();
 		char ext[16];
 		for (s32 i = 0; i < ITEM_COUNT; i++)
@@ -99,11 +105,8 @@ namespace TFE_DarkForces
 				s_itemData[i].frame = TFE_Sprite_Jedi::getFrame(item, POOL_GAME);
 				s_itemData[i].isWax = JFALSE;
 			}
-			// TODO: should we also add support for 3DO dropitems??
+			// TODO: 3DO drop-items still unsupported (no DF item uses them).
 		}
-#else
-		memset(s_itemData, 0, sizeof(s_itemData));
-#endif
 	}
 
 	SecObject* item_create(ItemId itemId)
