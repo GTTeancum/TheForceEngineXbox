@@ -26,8 +26,8 @@ using namespace TFE_Jedi;
 namespace TFE_DarkForces
 {
 	static JBool s_lsystemInit = JFALSE;
-	static LfdArchive s_archive = {};
-	static LfdArchive s_soundFx = {};
+	static LfdArchive s_archive;
+	static LfdArchive s_soundFx;
 	static MemoryRegion* s_lmem = nullptr;
 	static MemoryRegion* s_lscene = nullptr;
 	MemoryRegion* s_alloc = nullptr;

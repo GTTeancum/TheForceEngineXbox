@@ -165,6 +165,7 @@ for %%F in (
     TheForceEngine\TFE_DarkForces\Landru\lmusic.cpp
     TheForceEngine\TFE_DarkForces\Landru\lpalette.cpp
     TheForceEngine\TFE_DarkForces\Landru\lrect.cpp
+    TheForceEngine\TFE_DarkForces\Landru\lsystem.cpp
     TheForceEngine\TFE_DarkForces\Landru\lsound.cpp
     TheForceEngine\TFE_DarkForces\Landru\ltimer.cpp
     TheForceEngine\TFE_DarkForces\Landru\lview.cpp
@@ -281,6 +282,7 @@ for %%F in (
     TheForceEngine\TFE_ExternalData\weaponExternal.cpp
     TheForceEngine\TFE_RenderBackend\renderBackend_xbox.cpp
     TheForceEngine\TFE_RenderBackend\renderState_xbox.cpp
+    TheForceEngine\TFE_RenderShared\quadDraw2d_xbox.cpp
     TheForceEngine\TFE_RenderShared\texturePacker_xbox.cpp
     TheForceEngine\TFE_Settings\settings.cpp
     TheForceEngine\TFE_Settings\windows\registry.cpp

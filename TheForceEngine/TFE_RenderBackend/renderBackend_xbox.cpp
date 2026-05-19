@@ -22,6 +22,7 @@
 #include <TFE_Settings/settings.h>
 #include <TFE_System/system.h>
 #include <TFE_FileSystem/paths.h>
+#include <TFE_Game/saveSystem.h>
 
 #include <xtl.h>
 #include <d3d8.h>
@@ -29,6 +30,10 @@
 #include <string.h>
 #include <assert.h>
 #include <stdio.h>
+
+#include <TFE_DarkForces/GameUI/xboxPauseFont.inc>
+#include <TFE_RenderBackend/xboxStartLogo.inc>
+#include <TFE_RenderBackend/xboxStartFont.inc>
 
 // ---------------------------------------------------------------------------
 // Output resolution
@@ -72,6 +77,7 @@ namespace TFE_RenderBackend
     static IDirect3DDevice8*  s_device     = NULL;
     static IDirect3DTexture8* s_vdispTex   = NULL;   // Virtual display texture (XRGB)
     static IDirect3DSurface8* s_vdispSurf  = NULL;   // Level-0 surface of s_vdispTex
+    static IDirect3DTexture8* s_startTex   = NULL;   // 640x480 start screen texture
 
     static u32 s_vdispWidth  = 320;
     static u32 s_vdispHeight = 200;
@@ -127,6 +133,518 @@ namespace TFE_RenderBackend
     // Max virtual display size: 1280x960 to be safe. ~5MB.
     #define MAX_VDISP_PIXELS (1280 * 960)
     static u32 s_expandBuf[MAX_VDISP_PIXELS];
+
+    static bool s_pauseOverlayEnabled = false;
+    static s32  s_pauseSelection = 0;
+    static s32  s_pauseConfirmSelection = 0;
+    static bool s_pauseConfirmOpen = false;
+    static bool s_startScreenEnabled = false;
+    static s32  s_startSelection = 0;
+    static u32  s_startFrame = 0;
+    static bool s_loadScreenEnabled = false;
+    static s32  s_loadSelection = 0;
+    static u32  s_loadFrame = 0;
+    static const XboxLoadSlotInfo* s_loadSlots = NULL;
+    static s32  s_loadSlotCount = 0;
+
+    static const u32 XPAUSE_GREEN_DARK  = 0xFF003800u;
+    static const u32 XPAUSE_GREEN_MID   = 0xFF00A000u;
+    static const u32 XPAUSE_GREEN_EDGE  = 0xFF16D016u;
+    static const u32 XPAUSE_WHITE       = 0xFFE8E8E8u;
+    static const u32 XPAUSE_GREY        = 0xFF9A9A9Au;
+    static const u32 XPAUSE_GREY_DARK   = 0xFF4C4C4Cu;
+    static const u32 XPAUSE_BLACK       = 0xFF000000u;
+
+    static const s32 XPAUSE_DESIGN_WIDTH  = 640;
+    static const s32 XPAUSE_DESIGN_HEIGHT = 480;
+    static const s32 XPAUSE_PANEL_WIDTH   = 460;
+    static const s32 XPAUSE_PANEL_HEIGHT  = 300;
+    static const s32 XPAUSE_ROW_WIDTH     = 330;
+    static const s32 XPAUSE_ROW_STEP      = 38;
+
+    static inline s32 pauseClamp(s32 v, s32 lo, s32 hi)
+    {
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    static u32 pauseBlend(u32 dst, u32 src, u32 a)
+    {
+        const u32 inv = 255u - a;
+        const u32 rb = (((dst & 0x00FF00FFu) * inv + (src & 0x00FF00FFu) * a) >> 8) & 0x00FF00FFu;
+        const u32 g  = (((dst & 0x0000FF00u) * inv + (src & 0x0000FF00u) * a) >> 8) & 0x0000FF00u;
+        return 0xFF000000u | rb | g;
+    }
+
+    static void pauseFillRect(u32* dst, s32 width, s32 height, s32 x, s32 y, s32 w, s32 h, u32 color)
+    {
+        if (!dst || w <= 0 || h <= 0) return;
+        if (x < 0) { w += x; x = 0; }
+        if (y < 0) { h += y; y = 0; }
+        if (x + w > width)  w = width - x;
+        if (y + h > height) h = height - y;
+        if (w <= 0 || h <= 0) return;
+
+        for (s32 yy = 0; yy < h; yy++)
+        {
+            u32* row = dst + (y + yy) * width + x;
+            for (s32 xx = 0; xx < w; xx++) row[xx] = color;
+        }
+    }
+
+    static void pauseDim(u32* dst, s32 width, s32 height)
+    {
+        const u32 pixels = (u32)(width * height);
+        for (u32 i = 0; i < pixels; i++)
+        {
+            dst[i] = pauseBlend(dst[i] | 0xFF000000u, XPAUSE_BLACK, 96);
+        }
+    }
+
+    static void pauseDrawFrame(u32* dst, s32 width, s32 height, s32 x, s32 y, s32 w, s32 h)
+    {
+        pauseFillRect(dst, width, height, x + 5, y + 5, w, h, XPAUSE_GREY_DARK);
+        pauseFillRect(dst, width, height, x, y, w, h, XPAUSE_GREEN_DARK);
+        pauseFillRect(dst, width, height, x, y, w, 3, XPAUSE_GREY);
+        pauseFillRect(dst, width, height, x, y + h - 3, w, 3, XPAUSE_WHITE);
+        pauseFillRect(dst, width, height, x, y, 3, h, XPAUSE_GREY);
+        pauseFillRect(dst, width, height, x + w - 3, y, 3, h, XPAUSE_WHITE);
+        pauseFillRect(dst, width, height, x + 8, y + 8, w - 16, 2, XPAUSE_WHITE);
+        pauseFillRect(dst, width, height, x + 8, y + h - 10, w - 16, 2, XPAUSE_GREEN_EDGE);
+        pauseFillRect(dst, width, height, x + 8, y + 8, 2, h - 16, XPAUSE_WHITE);
+        pauseFillRect(dst, width, height, x + w - 10, y + 8, 2, h - 16, XPAUSE_GREEN_EDGE);
+    }
+
+    static void pauseDrawTextRaw(u32* dst, s32 width, s32 height, XboxPauseTextId id, s32 x, s32 y, u32 primary, bool shadow)
+    {
+        const XboxPauseTextSprite* s = &c_xboxPauseText[id];
+        const s32 ox = shadow ? 2 : 0;
+        const s32 oy = shadow ? 2 : 0;
+        for (s32 py = 0; py < s->height; py++)
+        {
+            const s32 dy = y + oy + py;
+            if (dy < 0 || dy >= height) continue;
+            for (s32 px = 0; px < s->width; px++)
+            {
+                const u8 cov = s->data[py * s->width + px];
+                if (!cov) continue;
+                const s32 dx = x + ox + px;
+                if (dx < 0 || dx >= width) continue;
+                const u32 src = shadow ? XPAUSE_BLACK : (cov >= 2 ? primary : (primary == XPAUSE_WHITE ? XPAUSE_GREY : XPAUSE_GREY_DARK));
+                const u32 a = shadow ? (u32)(cov * 46) : (u32)(cov * 64);
+                u32* pixel = dst + dy * width + dx;
+                *pixel = pauseBlend(*pixel | 0xFF000000u, src, (u32)pauseClamp((s32)a, 0, 255));
+            }
+        }
+    }
+
+    static void pauseDrawText(u32* dst, s32 width, s32 height, XboxPauseTextId id, s32 x, s32 y, bool selected)
+    {
+        const u32 color = selected ? XPAUSE_WHITE : XPAUSE_GREY;
+        pauseDrawTextRaw(dst, width, height, id, x, y, color, true);
+        pauseDrawTextRaw(dst, width, height, id, x, y, color, false);
+    }
+
+    static void pauseDrawMenuRow(u32* dst, s32 width, s32 height, XboxPauseTextId id, s32 x, s32 y, bool selected)
+    {
+        if (selected)
+        {
+            const XboxPauseTextSprite* s = &c_xboxPauseText[id];
+            const s32 rowW = (id == XPT_NO || id == XPT_YES) ? 115 : XPAUSE_ROW_WIDTH;
+            pauseFillRect(dst, width, height, x - 24, y - 4, rowW, s->height + 8, XPAUSE_GREEN_MID);
+            pauseDrawText(dst, width, height, XPT_ARROW, x - 18, y + ((s->height - c_xboxPauseText[XPT_ARROW].height) >> 1), true);
+        }
+        pauseDrawText(dst, width, height, id, x, y, selected);
+    }
+
+    static void pauseCompositeOverlay()
+    {
+        if (!s_pauseOverlayEnabled || !s_vdispWidth || !s_vdispHeight) return;
+        const s32 width = (s32)s_vdispWidth;
+        const s32 height = (s32)s_vdispHeight;
+        pauseDim(s_expandBuf, width, height);
+
+        const s32 boxW = XPAUSE_PANEL_WIDTH;
+        const s32 boxH = XPAUSE_PANEL_HEIGHT;
+        const s32 originX = (width - XPAUSE_DESIGN_WIDTH) / 2;
+        const s32 originY = (height - XPAUSE_DESIGN_HEIGHT) / 2;
+        const s32 boxX = originX + (XPAUSE_DESIGN_WIDTH - boxW) / 2;
+        const s32 boxY = originY + (XPAUSE_DESIGN_HEIGHT - boxH) / 2;
+        pauseDrawFrame(s_expandBuf, width, height, boxX, boxY, boxW, boxH);
+
+        const s32 rowX = boxX + 105;
+        const s32 firstY = boxY + 30;
+        const s32 step = XPAUSE_ROW_STEP;
+        if (!s_pauseConfirmOpen)
+        {
+            pauseDrawMenuRow(s_expandBuf, width, height, XPT_RESUME,  rowX, firstY + step * 0, s_pauseSelection == 0);
+            pauseDrawMenuRow(s_expandBuf, width, height, XPT_DATAPAD, rowX, firstY + step * 1, s_pauseSelection == 1);
+            pauseDrawMenuRow(s_expandBuf, width, height, XPT_ABORT,   rowX, firstY + step * 2, s_pauseSelection == 2);
+            pauseDrawMenuRow(s_expandBuf, width, height, XPT_RESPAWN, rowX, firstY + step * 3, s_pauseSelection == 3);
+            pauseDrawMenuRow(s_expandBuf, width, height, XPT_OPTIONS, rowX, firstY + step * 4, s_pauseSelection == 4);
+            pauseDrawMenuRow(s_expandBuf, width, height, XPT_CHEAT,   rowX, firstY + step * 5, s_pauseSelection == 5);
+        }
+        else
+        {
+            pauseDrawText(s_expandBuf, width, height, XPT_ARE_YOU_SURE, boxX + boxW / 2 - c_xboxPauseText[XPT_ARE_YOU_SURE].width / 2, boxY + 88, true);
+            pauseDrawMenuRow(s_expandBuf, width, height, XPT_NO,  boxX + boxW / 2 - 90, boxY + 145, s_pauseConfirmSelection == 0);
+            pauseDrawMenuRow(s_expandBuf, width, height, XPT_YES, boxX + boxW / 2 + 35, boxY + 145, s_pauseConfirmSelection == 1);
+        }
+    }
+
+    static u32 startHash(u32 v)
+    {
+        v ^= v >> 16;
+        v *= 0x7feb352du;
+        v ^= v >> 15;
+        v *= 0x846ca68bu;
+        v ^= v >> 16;
+        return v;
+    }
+
+    static void startPutPixel(u32* dst, s32 width, s32 height, s32 x, s32 y, u32 color)
+    {
+        if (!dst || x < 0 || y < 0 || x >= width || y >= height) return;
+        dst[y * width + x] = color;
+    }
+
+    static void startDrawStarfield(u32* dst, s32 width, s32 height, u32 frame)
+    {
+        pauseFillRect(dst, width, height, 0, 0, width, height, 0xFF000000u);
+        const s32 cx = width / 2;
+        const s32 cy = height / 2;
+        for (u32 i = 0; i < 360; i++)
+        {
+            const u32 h = startHash(i * 97u + 13u);
+            const u32 h2 = startHash(h ^ (frame * 1103515245u));
+            const s32 sx = (s32)((h & 2047u) - 1024);
+            const s32 sy = (s32)(((h >> 11) & 2047u) - 1024);
+            const u32 speed = 2u + ((h >> 24) & 5u);
+            const s32 phase = (s32)((((h >> 18) & 255u) + (frame * speed * 7u) / 10u) & 255u);
+            const s32 wobbleX = (s32)((h2 & 7u) - 3);
+            const s32 wobbleY = (s32)(((h2 >> 3) & 7u) - 3);
+            const s32 x = cx + (sx * phase) / 132 + wobbleX;
+            const s32 y = cy + (sy * phase) / 132 + wobbleY;
+            if (x < 0 || y < 0 || x >= width || y >= height) continue;
+
+            const u32 b = 72u + (u32)((phase * 183) / 255);
+            const u32 color = 0xFF000000u | (b << 16) | (b << 8) | b;
+            const s32 size = phase > 218 ? 3 : (phase > 150 ? 2 : 1);
+            pauseFillRect(dst, width, height, x, y, size, size, color);
+            if (phase > 235)
+            {
+                startPutPixel(dst, width, height, x - 1, y, color);
+                startPutPixel(dst, width, height, x + size, y, color);
+                startPutPixel(dst, width, height, x, y - 1, color);
+                startPutPixel(dst, width, height, x, y + size, color);
+            }
+        }
+    }
+
+    static void startDrawLogo(u32* dst, s32 width, s32 height)
+    {
+        const s32 x0 = (width - XBOX_START_LOGO_WIDTH) / 2;
+        const s32 y0 = 34;
+        for (s32 y = 0; y < XBOX_START_LOGO_HEIGHT; y++)
+        {
+            const s32 dy = y0 + y;
+            if (dy < 0 || dy >= height) continue;
+            for (s32 x = 0; x < XBOX_START_LOGO_WIDTH; x++)
+            {
+                const u32 src = c_xboxStartLogo[y * XBOX_START_LOGO_WIDTH + x];
+                const u32 a = src >> 24;
+                if (!a) continue;
+                const s32 dx = x0 + x;
+                if (dx < 0 || dx >= width) continue;
+                u32* pixel = dst + dy * width + dx;
+                *pixel = pauseBlend(*pixel | 0xFF000000u, src | 0xFF000000u, a);
+            }
+        }
+    }
+
+    static void startDrawTextSpriteRaw(u32* dst, s32 width, s32 height, XboxStartTextId id, s32 x, s32 y, u32 primary, bool shadow)
+    {
+        const XboxStartTextSprite* s = &c_xboxStartText[id];
+        const s32 ox = shadow ? 2 : 0;
+        const s32 oy = shadow ? 2 : 0;
+        for (s32 py = 0; py < s->height; py++)
+        {
+            const s32 dy = y + oy + py;
+            if (dy < 0 || dy >= height) continue;
+            for (s32 px = 0; px < s->width; px++)
+            {
+                const u8 cov = s->data[py * s->width + px];
+                if (!cov) continue;
+                const s32 dx = x + ox + px;
+                if (dx < 0 || dx >= width) continue;
+                const u32 src = shadow ? XPAUSE_BLACK : primary;
+                const u32 a = shadow ? (u32)(cov * 44) : (u32)(cov * 64);
+                u32* pixel = dst + dy * width + dx;
+                *pixel = pauseBlend(*pixel | 0xFF000000u, src, (u32)pauseClamp((s32)a, 0, 255));
+            }
+        }
+    }
+
+    static void startDrawTextSprite(u32* dst, s32 width, s32 height, XboxStartTextId id, s32 x, s32 y, u32 color, bool glow)
+    {
+        if (glow)
+        {
+            startDrawTextSpriteRaw(dst, width, height, id, x - 2, y, 0xFF3A0000u, false);
+            startDrawTextSpriteRaw(dst, width, height, id, x + 2, y, 0xFF3A0000u, false);
+            startDrawTextSpriteRaw(dst, width, height, id, x, y - 2, 0xFF3A0000u, false);
+            startDrawTextSpriteRaw(dst, width, height, id, x, y + 2, 0xFF3A0000u, false);
+        }
+        startDrawTextSpriteRaw(dst, width, height, id, x, y, color, true);
+        startDrawTextSpriteRaw(dst, width, height, id, x, y, color, false);
+    }
+
+    static const char* loadGlyphRows(char c, s32 row)
+    {
+        static const char* sp[7] = { "00000","00000","00000","00000","00000","00000","00000" };
+        static const char* dash[7]={ "00000","00000","00000","11111","00000","00000","00000" };
+        static const char* dot[7] = { "00000","00000","00000","00000","00000","01100","01100" };
+        static const char* slash[7]={"00001","00010","00010","00100","01000","01000","10000" };
+        static const char* colon[7]={"00000","01100","01100","00000","01100","01100","00000" };
+        static const char* zero[7]={ "01110","10001","10011","10101","11001","10001","01110" };
+        static const char* one[7] = { "00100","01100","00100","00100","00100","00100","01110" };
+        static const char* two[7] = { "01110","10001","00001","00010","00100","01000","11111" };
+        static const char* three[7]={"11110","00001","00001","01110","00001","00001","11110" };
+        static const char* four[7]= { "00010","00110","01010","10010","11111","00010","00010" };
+        static const char* five[7]= { "11111","10000","10000","11110","00001","00001","11110" };
+        static const char* six[7] = { "01110","10000","10000","11110","10001","10001","01110" };
+        static const char* seven[7]={"11111","00001","00010","00100","01000","01000","01000" };
+        static const char* eight[7]={"01110","10001","10001","01110","10001","10001","01110" };
+        static const char* nine[7]= { "01110","10001","10001","01111","00001","00001","01110" };
+        static const char* a[7]   = { "01110","10001","10001","11111","10001","10001","10001" };
+        static const char* b[7]   = { "11110","10001","10001","11110","10001","10001","11110" };
+        static const char* c_[7]  = { "01111","10000","10000","10000","10000","10000","01111" };
+        static const char* d[7]   = { "11110","10001","10001","10001","10001","10001","11110" };
+        static const char* e[7]   = { "11111","10000","10000","11110","10000","10000","11111" };
+        static const char* f[7]   = { "11111","10000","10000","11110","10000","10000","10000" };
+        static const char* g[7]   = { "01111","10000","10000","10111","10001","10001","01111" };
+        static const char* h[7]   = { "10001","10001","10001","11111","10001","10001","10001" };
+        static const char* i_[7]  = { "11111","00100","00100","00100","00100","00100","11111" };
+        static const char* j[7]   = { "00111","00010","00010","00010","10010","10010","01100" };
+        static const char* k[7]   = { "10001","10010","10100","11000","10100","10010","10001" };
+        static const char* l[7]   = { "10000","10000","10000","10000","10000","10000","11111" };
+        static const char* m[7]   = { "10001","11011","10101","10101","10001","10001","10001" };
+        static const char* n[7]   = { "10001","11001","10101","10011","10001","10001","10001" };
+        static const char* o[7]   = { "01110","10001","10001","10001","10001","10001","01110" };
+        static const char* p[7]   = { "11110","10001","10001","11110","10000","10000","10000" };
+        static const char* q[7]   = { "01110","10001","10001","10001","10101","10010","01101" };
+        static const char* r[7]   = { "11110","10001","10001","11110","10100","10010","10001" };
+        static const char* s[7]   = { "01111","10000","10000","01110","00001","00001","11110" };
+        static const char* t[7]   = { "11111","00100","00100","00100","00100","00100","00100" };
+        static const char* u[7]   = { "10001","10001","10001","10001","10001","10001","01110" };
+        static const char* v[7]   = { "10001","10001","10001","10001","01010","01010","00100" };
+        static const char* w[7]   = { "10001","10001","10001","10101","10101","10101","01010" };
+        static const char* x[7]   = { "10001","01010","00100","00100","00100","01010","10001" };
+        static const char* y[7]   = { "10001","01010","00100","00100","00100","00100","00100" };
+        static const char* z[7]   = { "11111","00001","00010","00100","01000","10000","11111" };
+        const char* const* glyph = sp;
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        switch (c)
+        {
+            case '-': glyph = dash; break; case '.': glyph = dot; break; case '/': glyph = slash; break; case ':': glyph = colon; break;
+            case '0': glyph = zero; break; case '1': glyph = one; break; case '2': glyph = two; break; case '3': glyph = three; break; case '4': glyph = four; break;
+            case '5': glyph = five; break; case '6': glyph = six; break; case '7': glyph = seven; break; case '8': glyph = eight; break; case '9': glyph = nine; break;
+            case 'A': glyph = a; break; case 'B': glyph = b; break; case 'C': glyph = c_; break; case 'D': glyph = d; break; case 'E': glyph = e; break; case 'F': glyph = f; break;
+            case 'G': glyph = g; break; case 'H': glyph = h; break; case 'I': glyph = i_; break; case 'J': glyph = j; break; case 'K': glyph = k; break; case 'L': glyph = l; break;
+            case 'M': glyph = m; break; case 'N': glyph = n; break; case 'O': glyph = o; break; case 'P': glyph = p; break; case 'Q': glyph = q; break; case 'R': glyph = r; break;
+            case 'S': glyph = s; break; case 'T': glyph = t; break; case 'U': glyph = u; break; case 'V': glyph = v; break; case 'W': glyph = w; break; case 'X': glyph = x; break;
+            case 'Y': glyph = y; break; case 'Z': glyph = z; break; default: glyph = sp; break;
+        }
+        return glyph[row];
+    }
+
+    static s32 loadTextWidth(const char* text, s32 scale)
+    {
+        s32 count = 0;
+        while (text && text[count]) count++;
+        return count * 6 * scale;
+    }
+
+    static void loadDrawText(u32* dst, s32 width, s32 height, const char* text, s32 x, s32 y, s32 scale, u32 color)
+    {
+        if (!text) return;
+        s32 cx = x;
+        for (const char* p = text; *p; p++, cx += 6 * scale)
+        {
+            for (s32 row = 0; row < 7; row++)
+            {
+                const char* bits = loadGlyphRows(*p, row);
+                for (s32 col = 0; col < 5; col++)
+                {
+                    if (bits[col] != '1') continue;
+                    pauseFillRect(dst, width, height, cx + col * scale, y + row * scale, scale, scale, color);
+                }
+            }
+        }
+    }
+
+    static void loadDrawTextRight(u32* dst, s32 width, s32 height, const char* text, s32 rightX, s32 y, s32 scale, u32 color)
+    {
+        if (!text) return;
+        loadDrawText(dst, width, height, text, rightX - loadTextWidth(text, scale), y, scale, color);
+    }
+
+    static void loadStrokeRect(u32* dst, s32 width, s32 height, s32 x, s32 y, s32 w, s32 h, u32 color)
+    {
+        pauseFillRect(dst, width, height, x, y, w, 1, color);
+        pauseFillRect(dst, width, height, x, y + h - 1, w, 1, color);
+        pauseFillRect(dst, width, height, x, y, 1, h, color);
+        pauseFillRect(dst, width, height, x + w - 1, y, 1, h, color);
+    }
+
+    static void loadDrawThumb(u32* dst, s32 width, s32 height, const u32* image, s32 x, s32 y, s32 w, s32 h)
+    {
+        if (!image)
+        {
+            pauseFillRect(dst, width, height, x, y, w, h, 0xFF16120Au);
+            for (s32 yy = 0; yy < h; yy += 8)
+            {
+                for (s32 xx = ((yy / 8) & 1) ? 0 : 8; xx < w; xx += 16)
+                    pauseFillRect(dst, width, height, x + xx, y + yy, 8, 8, 0xFF211A0Du);
+            }
+            loadDrawText(dst, width, height, "SAVE THUMBNAIL", x + 35, y + 39, 1, 0xFF8E8B72u);
+            return;
+        }
+        for (s32 yy = 0; yy < h; yy++)
+        {
+            const s32 sy = (yy * TFE_SaveSystem::SAVE_IMAGE_HEIGHT) / h;
+            for (s32 xx = 0; xx < w; xx++)
+            {
+                const s32 sx = (xx * TFE_SaveSystem::SAVE_IMAGE_WIDTH) / w;
+                u32 src = image[sy * TFE_SaveSystem::SAVE_IMAGE_WIDTH + sx] | 0xFF000000u;
+                dst[(y + yy) * width + x + xx] = src;
+            }
+        }
+    }
+
+    static void loadBuildFrame()
+    {
+        startDrawStarfield(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_loadFrame);
+        startDrawTextSprite(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, XST_LOAD_GAME,
+                            (XBOX_OUTPUT_WIDTH - c_xboxStartText[XST_LOAD_GAME].width) / 2, 38,
+                            0xFFFF3030u, true);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "- SELECT A SAVE FILE -",
+                     (XBOX_OUTPUT_WIDTH - loadTextWidth("- SELECT A SAVE FILE -", 1)) / 2, 75, 1, 0xFF8E8B72u);
+
+        const s32 listX = 70;
+        const s32 listY = 112;
+        const s32 rowW = 350;
+        const s32 rowH = 34;
+        const s32 rowStep = 41;
+        for (s32 i = 0; i < 6; i++)
+        {
+            const bool selected = (i == s_loadSelection);
+            const XboxLoadSlotInfo* slot = (s_loadSlots && i < s_loadSlotCount) ? &s_loadSlots[i] : NULL;
+            const bool valid = slot && slot->valid;
+            const s32 y = listY + rowStep * i;
+            const u32 edge = selected ? 0xFF4E4428u : 0xFF2F2817u;
+            const u32 fill = selected ? 0xFF19150Au : 0xFF0C0A05u;
+            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, listX, y, rowW, rowH, fill);
+            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, listX, y, rowW, rowH, edge);
+            char idx[8]; sprintf(idx, "%02d", i + 1);
+            loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, idx, listX + 10, y + 10, 2, selected ? 0xFFFF3030u : 0xFF8E8B72u);
+            if (valid)
+            {
+                loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, slot->saveName, listX + 56, y + 7, 1, selected ? 0xFFFF3030u : 0xFFE0D8B8u);
+                loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, slot->levelName, listX + 206, y + 7, 1, 0xFF8E8B72u);
+                loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, slot->dateTime, listX + 206, y + 20, 1, selected ? 0xFFFF3030u : 0xFFE0D8B8u);
+                if (slot->autosave)
+                {
+                    loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, listX + rowW - 62, y + 5, 54, 12, 0xFF00A000u);
+                    loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "AUTOSAVE", listX + rowW - 59, y + 7, 1, 0xFF33FF33u);
+                }
+            }
+            else
+            {
+                loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "- EMPTY SLOT -", listX + 56, y + 11, 1, 0xFF4F4A34u);
+            }
+        }
+
+        const XboxLoadSlotInfo* selectedSlot = (s_loadSlots && s_loadSelection < s_loadSlotCount) ? &s_loadSlots[s_loadSelection] : NULL;
+        const bool selectedValid = selectedSlot && selectedSlot->valid;
+        const s32 panelX = 435;
+        const s32 panelY = 112;
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, 170, 200, 0xFF0C0A05u);
+        loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, 170, 200, 0xFF4E4428u);
+        loadDrawThumb(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, selectedValid ? selectedSlot->imageData : NULL, panelX + 8, panelY + 8, 154, 87);
+        loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 8, panelY + 8, 154, 87, 0xFF2F2817u);
+        const s32 valueRightX = panelX + 162;
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "MISSION", panelX + 8, panelY + 112, 1, 0xFF8E8B72u);
+        loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, selectedValid ? selectedSlot->levelName : "[ EMPTY ]", valueRightX, panelY + 112, 1, 0xFFFF3030u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "FILE", panelX + 8, panelY + 137, 1, 0xFF8E8B72u);
+        loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, selectedValid ? selectedSlot->fileName : "-", valueRightX, panelY + 137, 1, 0xFFFF3030u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "SAVED", panelX + 8, panelY + 162, 1, 0xFF8E8B72u);
+        loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, selectedValid ? selectedSlot->dateTime : "-", valueRightX, panelY + 162, 1, 0xFFFF3030u);
+
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 484, 344, 70, 31, 0xFF201C12u);
+        loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 484, 344, 70, 31, 0xFF8E8B72u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "BACK", 503, 354, 1, 0xFFE0D8B8u);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 562, 344, 64, 31, selectedValid ? 0xFF261111u : 0xFF16100Au);
+        loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 562, 344, 64, 31, selectedValid ? 0xFFFF3030u : 0xFF4F4A34u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "LOAD", 581, 354, 1, selectedValid ? 0xFFFF3030u : 0xFF4F4A34u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "A LOAD   B BACK", 14, 450, 1, 0xFF8E8B72u);
+    }
+
+    static bool startUploadTexture()
+    {
+        if (!s_deviceReady) return false;
+        if (!s_startTex)
+        {
+            HRESULT hr = s_device->CreateTexture(
+                XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 1, 0,
+                D3DFMT_LIN_A8R8G8B8, D3DPOOL_MANAGED, &s_startTex);
+            if (FAILED(hr))
+            {
+                RB_LOG_ERROR("Create start texture failed hr=0x%08x", hr);
+                return false;
+            }
+        }
+
+        D3DLOCKED_RECT lr;
+        HRESULT hr = s_startTex->LockRect(0, &lr, NULL, 0);
+        if (FAILED(hr))
+        {
+            RB_LOG_ERROR("Lock start texture failed hr=0x%08x", hr);
+            return false;
+        }
+        const u8* srcRow = (const u8*)s_expandBuf;
+        u8* dstRow = (u8*)lr.pBits;
+        const u32 pitch = XBOX_OUTPUT_WIDTH * 4;
+        for (u32 y = 0; y < XBOX_OUTPUT_HEIGHT; y++)
+        {
+            memcpy(dstRow, srcRow, pitch);
+            srcRow += pitch;
+            dstRow += lr.Pitch;
+        }
+        s_startTex->UnlockRect(0);
+        return true;
+    }
+
+    static void startBuildFrame()
+    {
+        startDrawStarfield(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_startFrame);
+        startDrawLogo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT);
+
+        static const XboxStartTextId labels[4] = { XST_START_GAME, XST_LOAD_GAME, XST_START_MOD, XST_OPTIONS };
+        const s32 menuY = 274;
+        const s32 rowStep = 34;
+        for (s32 i = 0; i < 4; i++)
+        {
+            const bool selected = (i == s_startSelection);
+            const u32 color = selected ? 0xFFFF3030u : 0xFF8E8B72u;
+            const s32 textW = c_xboxStartText[labels[i]].width;
+            const s32 x = (XBOX_OUTPUT_WIDTH - textW) / 2;
+            const s32 y = menuY + i * rowStep;
+            startDrawTextSprite(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, labels[i], x, y, color, selected);
+        }
+
+        startDrawTextSprite(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, XST_A_SELECT, 14, 450, 0xFF2DA53Au, false);
+        startDrawTextSprite(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, XST_VERSION,
+                            XBOX_OUTPUT_WIDTH - c_xboxStartText[XST_VERSION].width - 14, 450, 0xFF8E8B72u, false);
+    }
 
     // -----------------------------------------------------------------------
     // Compute destination rect.
@@ -227,7 +745,18 @@ namespace TFE_RenderBackend
         pp.Windowed                     = FALSE;       // must be FALSE on Xbox
         pp.EnableAutoDepthStencil       = TRUE;
         pp.AutoDepthStencilFormat       = D3DFMT_D24S8;
-        pp.SwapEffect                   = D3DSWAPEFFECT_DISCARD;
+        // D3DSWAPEFFECT_COPY (not DISCARD) so the back buffer retains
+        // the just-presented frame after Present(). Upstream's escape-
+        // menu capture path is:
+        //   TFE_RenderBackend::swap(true);   // present current world
+        //   TFE_RenderBackend::copyBackbufferToRenderTarget(rt);
+        // The copy-after-swap only works if Present preserves back
+        // buffer contents. With DISCARD the back buffer is undefined
+        // after Present and the captured RT comes out black.
+        // COPY costs an extra back-to-front blit per frame; on NV2A
+        // at 640x480 that's ~1.2MB of fast video memory bandwidth -
+        // negligible compared to the world render cost.
+        pp.SwapEffect                   = D3DSWAPEFFECT_COPY;
         pp.FullScreen_RefreshRateInHz   = 60;
         pp.hDeviceWindow                = NULL;
         pp.FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
@@ -288,6 +817,7 @@ namespace TFE_RenderBackend
     {
         TFE_XboxLogf("RenderBackend", "destroy begin ready=%d", s_deviceReady ? 1 : 0);
         s_deviceReady = false;
+        if (s_startTex)   { s_startTex->Release();   s_startTex   = NULL; }
         if (s_vdispSurf)  { s_vdispSurf->Release();  s_vdispSurf  = NULL; }
         if (s_vdispTex)   { s_vdispTex->Release();   s_vdispTex   = NULL; }
         if (s_device)     { s_device->Release();      s_device     = NULL; }
@@ -381,6 +911,8 @@ namespace TFE_RenderBackend
                 : ((s_paletteCpu[idx] & 0x00FFFFFFu) | 0xFF000000u);
         }
 
+        pauseCompositeOverlay();
+
         s_vdispCalls++;
 
         // Lock, copy, unlock.
@@ -398,6 +930,30 @@ namespace TFE_RenderBackend
             dstRow += lr.Pitch;
         }
         s_vdispTex->UnlockRect(0);
+    }
+
+    void xboxSetPauseOverlay(bool enabled, s32 selection, s32 confirmSelection, bool confirmOpen)
+    {
+        s_pauseOverlayEnabled = enabled;
+        s_pauseSelection = pauseClamp(selection, 0, 5);
+        s_pauseConfirmSelection = pauseClamp(confirmSelection, 0, 1);
+        s_pauseConfirmOpen = confirmOpen;
+    }
+
+    void xboxSetStartScreen(bool enabled, s32 selection, u32 frame)
+    {
+        s_startScreenEnabled = enabled;
+        s_startSelection = pauseClamp(selection, 0, 3);
+        s_startFrame = frame;
+    }
+
+    void xboxSetLoadScreen(bool enabled, s32 selection, u32 frame, const XboxLoadSlotInfo* slots, s32 slotCount)
+    {
+        s_loadScreenEnabled = enabled;
+        s_loadSelection = pauseClamp(selection, 0, 5);
+        s_loadFrame = frame;
+        s_loadSlots = slots;
+        s_loadSlotCount = pauseClamp(slotCount, 0, 6);
     }
 
     void setPalette(const u32* palette)
@@ -471,8 +1027,9 @@ namespace TFE_RenderBackend
     // alphaTest=true enables the alpha test so palette-index-0 pixels
     // (uploaded with alpha=0 in updateVirtualDisplay) discard - used
     // for the Phase 9 HUD overlay in GPU mode.
-    static void blitVdispQuad(bool alphaTest)
+    static void blitTextureQuad(IDirect3DTexture8* tex, u32 texW, u32 texH, bool alphaTest)
     {
+        if (!tex) return;
         s_device->SetRenderState(D3DRS_LIGHTING,          FALSE);
         s_device->SetRenderState(D3DRS_ZENABLE,           FALSE);
         s_device->SetRenderState(D3DRS_ZWRITEENABLE,      FALSE);
@@ -502,15 +1059,15 @@ namespace TFE_RenderBackend
         s_device->SetTextureStageState(1, D3DTSS_COLOROP,   D3DTOP_DISABLE);
         s_device->SetTextureStageState(1, D3DTSS_ALPHAOP,   D3DTOP_DISABLE);
 
-        s_device->SetTexture(0, s_vdispTex);
+        s_device->SetTexture(0, tex);
         s_device->SetVertexShader(PRESENT_QUAD_FVF);
 
         const f32 l = (f32)s_destRect.left   - 0.5f;
         const f32 t = (f32)s_destRect.top    - 0.5f;
         const f32 r = (f32)s_destRect.right  - 0.5f;
         const f32 b = (f32)s_destRect.bottom - 0.5f;
-        const f32 uMax = (f32)s_vdispWidth;
-        const f32 vMax = (f32)s_vdispHeight;
+        const f32 uMax = (f32)texW;
+        const f32 vMax = (f32)texH;
 
         PresentQuadVert q[4];
         q[0].x = l; q[0].y = t; q[0].z = 0.0f; q[0].rhw = 1.0f; q[0].u = 0.0f; q[0].v = 0.0f;
@@ -522,6 +1079,11 @@ namespace TFE_RenderBackend
         s_device->SetTexture(0, NULL);
 
         if (alphaTest) s_device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    }
+
+    static void blitVdispQuad(bool alphaTest)
+    {
+        blitTextureQuad(s_vdispTex, s_vdispWidth, s_vdispHeight, alphaTest);
     }
 
     void swap(bool blitVirtualDisplay)
@@ -572,7 +1134,26 @@ namespace TFE_RenderBackend
                         D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL,
                         0, 1.0f, 0);
 
-        if (blitVirtualDisplay && s_vdispTex) blitVdispQuad(/*alphaTest*/false);
+        if (s_loadScreenEnabled)
+        {
+            loadBuildFrame();
+            if (startUploadTexture())
+            {
+                blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, /*alphaTest*/false);
+            }
+        }
+        else if (s_startScreenEnabled)
+        {
+            startBuildFrame();
+            if (startUploadTexture())
+            {
+                blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, /*alphaTest*/false);
+            }
+        }
+        else if (blitVirtualDisplay && s_vdispTex)
+        {
+            blitVdispQuad(/*alphaTest*/false);
+        }
 
         s_device->EndScene();
         s_device->Present(NULL, NULL, NULL, NULL);
@@ -673,8 +1254,110 @@ namespace TFE_RenderBackend
                         c, 1.0f, 0);
     }
     void copyToVirtualDisplay(RenderTargetHandle /*src*/)  {}
-    void copyBackbufferToRenderTarget(RenderTargetHandle /*dst*/) {}
-    void captureScreenToMemory(u32* /*mem*/)               {}
+
+    // ---- Render target (real impl) -------------------------------------
+    //
+    // Upstream uses createRenderTarget + copyBackbufferToRenderTarget to
+    // snapshot the world frame when the escape menu opens, then the menu's
+    // screenGPU_addImageQuad blits that captured texture as the backdrop
+    // (with darken + greyscale post applied to the original world frame).
+    //
+    // D3D8 implementation: each handle is an XboxRenderTarget* (typedef
+    // RenderTargetHandle = void*). It owns a D3DUSAGE_RENDERTARGET texture
+    // + its level-0 surface. copyBackbufferToRenderTarget pulls the front-
+    // most back buffer via GetBackBuffer and CopyRects into the RT surface.
+    //
+    // getRenderTargetTexture returns the same handle reinterpreted as
+    // TextureGpu* so screenGPU_addImageQuad can hand it back to us; we
+    // recognise it by a membership check against s_xboxRTRegistry rather
+    // than a struct-internal sentinel (which would race with a stray P8
+    // texture pointer that happens to alias the sentinel field).
+    struct XboxRenderTarget
+    {
+        IDirect3DTexture8* tex;
+        IDirect3DSurface8* surf;
+        u32 width, height;
+    };
+
+    // Fixed-size registry of live render targets. We only ever allocate
+    // one (the escape menu's), but reserve a small array so PDA / agent
+    // menu can co-exist if they ever capture too.
+    enum { XBOX_RT_REGISTRY_MAX = 8 };
+    static XboxRenderTarget* s_xboxRTRegistry[XBOX_RT_REGISTRY_MAX] = { 0 };
+
+    static void xboxRT_registryAdd(XboxRenderTarget* rt)
+    {
+        for (u32 i = 0; i < XBOX_RT_REGISTRY_MAX; i++)
+        {
+            if (!s_xboxRTRegistry[i]) { s_xboxRTRegistry[i] = rt; return; }
+        }
+    }
+    static void xboxRT_registryRemove(XboxRenderTarget* rt)
+    {
+        for (u32 i = 0; i < XBOX_RT_REGISTRY_MAX; i++)
+        {
+            if (s_xboxRTRegistry[i] == rt) { s_xboxRTRegistry[i] = NULL; return; }
+        }
+    }
+    static bool xboxRT_registryContains(const void* p)
+    {
+        for (u32 i = 0; i < XBOX_RT_REGISTRY_MAX; i++)
+        {
+            if ((const void*)s_xboxRTRegistry[i] == p) return true;
+        }
+        return false;
+    }
+
+    void copyBackbufferToRenderTarget(RenderTargetHandle dst)
+    {
+        if (!s_deviceReady || !dst) return;
+        if (!xboxRT_registryContains(dst)) return;
+        XboxRenderTarget* rt = (XboxRenderTarget*)dst;
+        if (!rt->surf) return;
+
+        if (s_gpuSceneOpen)
+        {
+            if (s_vdispTex) blitVdispQuad(/*alphaTest*/true);
+            s_device->EndScene();
+            s_gpuSceneOpen = false;
+        }
+
+        IDirect3DSurface8* back = NULL;
+        HRESULT hr = s_device->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &back);
+        if (FAILED(hr) || !back) return;
+
+        // CopyRects requires identical surface formats on Xbox D3D8.
+        // The RT below is created with D3DFMT_LIN_X8R8G8B8 to match the
+        // back buffer's pp.BackBufferFormat (D3DFMT_X8R8G8B8). On Xbox
+        // back buffers are mandated to be linear (render targets cannot
+        // be swizzled), so the driver treats D3DFMT_X8R8G8B8 as the
+        // linear variant internally - meaning LIN_X8R8G8B8 on the RT is
+        // the correct match. Previous A8R8G8B8 (with alpha channel)
+        // failed silently and left the captured surface black.
+        HRESULT cr = s_device->CopyRects(back, NULL, 0, rt->surf, NULL);
+        RB_LOG_MSG("copyBackbufferToRenderTarget hr=0x%08x rt=%p back=%p", cr, rt, back);
+        back->Release();
+    }
+    void captureScreenToMemory(u32* mem)
+    {
+        if (!mem) return;
+        const u32 outW = XBOX_OUTPUT_WIDTH;
+        const u32 outH = XBOX_OUTPUT_HEIGHT;
+        if (s_vdispWidth == outW && s_vdispHeight == outH)
+        {
+            memcpy(mem, s_expandBuf, outW * outH * sizeof(u32));
+            return;
+        }
+        for (u32 y = 0; y < outH; y++)
+        {
+            const u32 sy = s_vdispHeight ? (y * s_vdispHeight) / outH : 0;
+            for (u32 x = 0; x < outW; x++)
+            {
+                const u32 sx = s_vdispWidth ? (x * s_vdispWidth) / outW : 0;
+                mem[y * outW + x] = s_expandBuf[sy * s_vdispWidth + sx] | 0xFF000000u;
+            }
+        }
+    }
     void queueScreenshot(const char* /*path*/)             {}
     void startGifRecording(const char* /*path*/, bool)     {}
     void stopGifRecording()                                {}
@@ -683,13 +1366,58 @@ namespace TFE_RenderBackend
     void setScissorRect(bool, s32, s32, s32, s32)          {}
 
     // -----------------------------------------------------------------------
-    // Render target stubs
+    // Render target
     // -----------------------------------------------------------------------
-    RenderTargetHandle createRenderTarget(u32 /*w*/, u32 /*h*/, bool /*depth*/)
+    // See note next to copyBackbufferToRenderTarget above.
+    RenderTargetHandle createRenderTarget(u32 w, u32 h, bool /*depth*/)
     {
-        return NULL;
+        if (!s_deviceReady || w == 0 || h == 0) return NULL;
+        XboxRenderTarget* rt = (XboxRenderTarget*)malloc(sizeof(XboxRenderTarget));
+        if (!rt) return NULL;
+        memset(rt, 0, sizeof(*rt));
+        rt->width  = w;
+        rt->height = h;
+
+        // D3DUSAGE_RENDERTARGET + LIN_X8R8G8B8 to match the back buffer's
+        // effective format. CopyRects requires identical formats; the back
+        // buffer is D3DFMT_X8R8G8B8 (linear on Xbox - render targets cannot
+        // be swizzled) so the RT must be LIN_X8R8G8B8. Previously used
+        // LIN_A8R8G8B8 which was a silent format mismatch and left the
+        // captured surface black.
+        HRESULT hr = s_device->CreateTexture(
+            w, h, 1,
+            D3DUSAGE_RENDERTARGET,
+            D3DFMT_LIN_X8R8G8B8,
+            D3DPOOL_DEFAULT,
+            &rt->tex);
+        if (FAILED(hr) || !rt->tex)
+        {
+            RB_LOG_ERROR("createRenderTarget CreateTexture hr=0x%08x", hr);
+            free(rt);
+            return NULL;
+        }
+        hr = rt->tex->GetSurfaceLevel(0, &rt->surf);
+        if (FAILED(hr) || !rt->surf)
+        {
+            RB_LOG_ERROR("createRenderTarget GetSurfaceLevel hr=0x%08x", hr);
+            rt->tex->Release();
+            free(rt);
+            return NULL;
+        }
+        xboxRT_registryAdd(rt);
+        RB_LOG_MSG("createRenderTarget %ux%u handle=%p", w, h, rt);
+        return (RenderTargetHandle)rt;
     }
-    void freeRenderTarget(RenderTargetHandle /*handle*/)            {}
+    void freeRenderTarget(RenderTargetHandle handle)
+    {
+        if (!handle) return;
+        if (!xboxRT_registryContains(handle)) return;
+        XboxRenderTarget* rt = (XboxRenderTarget*)handle;
+        xboxRT_registryRemove(rt);
+        if (rt->surf) { rt->surf->Release(); rt->surf = NULL; }
+        if (rt->tex)  { rt->tex->Release();  rt->tex  = NULL; }
+        free(rt);
+    }
     void bindRenderTarget(RenderTargetHandle /*handle*/)            {}
     void clearRenderTarget(RenderTargetHandle, const f32*, f32)     {}
     void clearRenderTargetDepth(RenderTargetHandle, f32)            {}
@@ -1043,6 +1771,132 @@ namespace TFE_RenderBackend
         s_device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
     }
 
+    // -----------------------------------------------------------------------
+    // gpuDrawScreenQuad - 2D screen-space draw (port of upstream's
+    // screenDrawGPU.cpp screenGPU_blitTextureScaled / addImageQuad).
+    //
+    // Vertices use D3DFVF_XYZRHW (pre-transformed: x/y are raw back-buffer
+    // pixel coords, z/rhw bypass projection). The virtual display rect
+    // (0,0)-(vdispW,vdispH) is mapped linearly to s_destRect on the back
+    // buffer, matching the same mapping blitVdispQuad uses to present the
+    // software framebuffer.
+    //
+    // Two texture cases, distinguished by registry membership:
+    //   - XboxRenderTarget* (from getRenderTargetTexture) -> sample as
+    //     X8R8G8B8 directly, no palette, no alpha test.
+    //   - GpuTextureHandle (P8 cached, from gpuGetOrUploadIndexedTexture)
+    //     -> palette path + alpha test for DELT transparency.
+    void gpuDrawScreenQuad(f32 x0, f32 y0, f32 x1, f32 y1,
+                           f32 u0, f32 v0, f32 u1, f32 v1,
+                           u32 vdispW, u32 vdispH,
+                           GpuTextureHandle tex, bool alphaTest,
+                           u32 topColor, u32 botColor)
+    {
+        if (!s_deviceReady || !s_gpuSceneOpen || vdispW == 0 || vdispH == 0) return;
+
+        // Safe membership check vs the RT registry (no dereferencing of
+        // the unknown pointer until after we know it's one we made).
+        IDirect3DTexture8* d3dTex = NULL;
+        bool isRenderTarget = false;
+        if (tex)
+        {
+            if (xboxRT_registryContains(tex))
+            {
+                XboxRenderTarget* rt = (XboxRenderTarget*)tex;
+                d3dTex = rt->tex;
+                isRenderTarget = (d3dTex != NULL);
+            }
+            else
+            {
+                d3dTex = (IDirect3DTexture8*)tex;
+            }
+        }
+
+        ensureP8PaletteSynced();
+        if (s_p8Palette && !isRenderTarget) s_device->SetPalette(0, s_p8Palette);
+
+        // Map virtual-display coords to back-buffer pixels via s_destRect.
+        // 0.5 sub-pixel offset matches the D3D8 RHW convention (texel
+        // centres land on pixel centres without the half-pixel shift).
+        const f32 dx0 = (f32)s_destRect.left;
+        const f32 dy0 = (f32)s_destRect.top;
+        const f32 dw  = (f32)(s_destRect.right  - s_destRect.left);
+        const f32 dh  = (f32)(s_destRect.bottom - s_destRect.top);
+        const f32 sx  = dw / (f32)vdispW;
+        const f32 sy  = dh / (f32)vdispH;
+        const f32 fx0 = dx0 + x0 * sx - 0.5f;
+        const f32 fy0 = dy0 + y0 * sy - 0.5f;
+        const f32 fx1 = dx0 + x1 * sx - 0.5f;
+        const f32 fy1 = dy0 + y1 * sy - 0.5f;
+
+        // State block. Mirrors blitVdispQuad / the alpha-tested path.
+        s_device->SetRenderState(D3DRS_LIGHTING,         FALSE);
+        s_device->SetRenderState(D3DRS_ZENABLE,          FALSE);
+        s_device->SetRenderState(D3DRS_ZWRITEENABLE,     FALSE);
+        s_device->SetRenderState(D3DRS_CULLMODE,         D3DCULL_NONE);
+        s_device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        s_device->SetRenderState(D3DRS_FOGENABLE,        FALSE);
+        s_device->SetRenderState(D3DRS_ALPHATESTENABLE,  alphaTest ? TRUE : FALSE);
+        if (alphaTest)
+        {
+            s_device->SetRenderState(D3DRS_ALPHAREF,  0x80);
+            s_device->SetRenderState(D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL);
+        }
+
+        s_device->SetTexture(0, d3dTex);
+        // MODULATE so per-vertex DIFFUSE colour tints the texel. With
+        // colour = 0xFFFFFFFF (default) the result is identical to
+        // SELECTARG1; non-white colours produce the per-edge gradient
+        // upstream quadDraw2d_add supports.
+        s_device->SetTextureStageState(0, D3DTSS_COLOROP,   d3dTex ? D3DTOP_MODULATE  : D3DTOP_SELECTARG2);
+        s_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        s_device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+        // Alpha source: TEXTURE for the alpha-test sprite path (palette
+        // index 0 uploads with alpha=0 so it's discarded), DIFFUSE for
+        // the opaque RT path (the RT is captured from a D3DFMT_X8R8G8B8
+        // back buffer whose X channel is undefined - reading alpha from
+        // texture there would be garbage, often 0, which makes the quad
+        // invisible). DIFFUSE alpha is 0xFF from the vertex colour.
+        s_device->SetTextureStageState(0, D3DTSS_ALPHAOP,   D3DTOP_SELECTARG1);
+        s_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, alphaTest ? D3DTA_TEXTURE : D3DTA_DIFFUSE);
+        s_device->SetTextureStageState(0, D3DTSS_MAGFILTER, D3DTEXF_POINT);
+        s_device->SetTextureStageState(0, D3DTSS_MINFILTER, D3DTEXF_POINT);
+        s_device->SetTextureStageState(0, D3DTSS_MIPFILTER, D3DTEXF_NONE);
+        s_device->SetTextureStageState(0, D3DTSS_ADDRESSU,  D3DTADDRESS_CLAMP);
+        s_device->SetTextureStageState(0, D3DTSS_ADDRESSV,  D3DTADDRESS_CLAMP);
+        s_device->SetTextureStageState(1, D3DTSS_COLOROP,   D3DTOP_DISABLE);
+        s_device->SetTextureStageState(1, D3DTSS_ALPHAOP,   D3DTOP_DISABLE);
+
+        // Alpha blending OFF on both paths. Upstream quadDraw2d_draw
+        // enables BLEND_ONE / BLEND_INVSRCALPHA for premultiplied alpha,
+        // but every call site that reaches us is either fully opaque
+        // (RT captured from X8R8G8B8 back buffer) or uses alpha test
+        // (DELT sprite with discard transparency). Blending against an
+        // undefined-alpha RGBA texture produced black on the previous
+        // attempt; turning it off is the simpler correct path.
+        s_device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+
+        struct ScreenVert { f32 x, y, z, rhw; u32 color; f32 u, v; };
+        const u32 SCREEN_FVF = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
+
+        // Quad layout TL, TR, BR, BL — top edge takes topColor, bottom
+        // edge takes botColor (matches upstream quadDraw2d_add lines
+        // 145-148: vert[0/1] get colors[0], vert[2/3] get colors[1]).
+        // Triangle strip order is TL, TR, BL, BR so the diagonal runs
+        // TL -> BR.
+        ScreenVert q[4];
+        q[0].x = fx0; q[0].y = fy0; q[0].z = 0.0f; q[0].rhw = 1.0f; q[0].color = topColor; q[0].u = u0; q[0].v = v0;
+        q[1].x = fx1; q[1].y = fy0; q[1].z = 0.0f; q[1].rhw = 1.0f; q[1].color = topColor; q[1].u = u1; q[1].v = v0;
+        q[2].x = fx0; q[2].y = fy1; q[2].z = 0.0f; q[2].rhw = 1.0f; q[2].color = botColor; q[2].u = u0; q[2].v = v1;
+        q[3].x = fx1; q[3].y = fy1; q[3].z = 0.0f; q[3].rhw = 1.0f; q[3].color = botColor; q[3].u = u1; q[3].v = v1;
+
+        s_device->SetVertexShader(SCREEN_FVF);
+        s_device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof(ScreenVert));
+
+        s_device->SetTexture(0, NULL);
+        if (alphaTest) s_device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    }
+
     void gpuDrawTexturedTrisWorld(const f32 viewMtx[16], const f32 projMtx[16],
                                   GpuTextureHandle tex,
                                   const GpuTexVert* verts, u32 triCount)
@@ -1090,11 +1944,25 @@ namespace TFE_RenderBackend
         s_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, triCount, verts, sizeof(GpuTexVert));
     }
 
-    const TextureGpu* getRenderTargetTexture(RenderTargetHandle /*h*/) { return NULL; }
-    void getRenderTargetDim(RenderTargetHandle /*h*/, u32* w, u32* h)
+    const TextureGpu* getRenderTargetTexture(RenderTargetHandle h)
     {
-        if (w) *w = 0;
-        if (h) *h = 0;
+        // Return the handle itself reinterpreted as TextureGpu* so the
+        // shared GameUI code can pass it back to us through screenGPU_
+        // addImageQuad. gpuDrawScreenQuad detects the XBRT_SENTINEL field
+        // to unwrap back to an IDirect3DTexture8*.
+        return (const TextureGpu*)h;
+    }
+    void getRenderTargetDim(RenderTargetHandle h, u32* w, u32* hOut)
+    {
+        if (!h || !xboxRT_registryContains(h))
+        {
+            if (w)    *w    = 0;
+            if (hOut) *hOut = 0;
+            return;
+        }
+        XboxRenderTarget* rt = (XboxRenderTarget*)h;
+        if (w)    *w    = rt->width;
+        if (hOut) *hOut = rt->height;
     }
 
     // -----------------------------------------------------------------------

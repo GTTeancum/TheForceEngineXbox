@@ -330,7 +330,22 @@ namespace TFE_System
     {
         time_t t = time(NULL);
         struct tm* ct = localtime(&t);
-        strcpy(output, asctime(ct));
+        static const char* monthNames[12] =
+        {
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+        };
+        if (!ct)
+        {
+            strcpy(output, "Jan 01, 2000 00:00");
+            return;
+        }
+        s32 month = ct->tm_mon;
+        if (month < 0) month = 0;
+        if (month > 11) month = 11;
+        sprintf(output, "%s %02d, %04d %02d:%02d",
+            monthNames[month], ct->tm_mday, ct->tm_year + 1900,
+            ct->tm_hour, ct->tm_min);
     }
 
     void getDateTimeStringForFile(char* output)

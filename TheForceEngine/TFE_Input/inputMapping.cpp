@@ -134,7 +134,15 @@ namespace TFE_Input
 		{ IADF_CROUCH, ITYPE_CONTROLLER, { CONTROLLER_BUTTON_X }, KEYMOD_NONE },
 		{ IADF_USE,    ITYPE_CONTROLLER, { CONTROLLER_BUTTON_Y }, KEYMOD_NONE },
 
+#ifdef _XBOX
+		// Original Xbox controller has no GUIDE button; bind the pause/
+		// escape menu to START. main_xbox.cpp still polls Start+Back as
+		// the quit combo before inputMapping runs, so the combo wins and
+		// pressing START alone falls through to here.
+		{ IADF_MENU_TOGGLE, ITYPE_CONTROLLER, { CONTROLLER_BUTTON_START }, KEYMOD_NONE },
+#else
 		{ IADF_MENU_TOGGLE, ITYPE_CONTROLLER, { CONTROLLER_BUTTON_GUIDE }, KEYMOD_NONE },
+#endif
 
 		{ IADF_PRIMARY_FIRE,   ITYPE_CONTROLLER_AXIS, { AXIS_RIGHT_TRIGGER }, KEYMOD_NONE },
 		{ IADF_SECONDARY_FIRE, ITYPE_CONTROLLER_AXIS, { AXIS_LEFT_TRIGGER  }, KEYMOD_NONE },

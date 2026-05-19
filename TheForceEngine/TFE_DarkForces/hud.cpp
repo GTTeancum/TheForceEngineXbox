@@ -205,7 +205,25 @@ namespace TFE_DarkForces
 
 		const char* msgText = msg->text;
 		if (!msgText[0]) { return; }
+#ifdef _XBOX
+		// Mission-complete prompt comes from TEXT.MSG and reads
+		// "Press ESC to end mission" on PC. ESC isn't on the Xbox
+		// controller; substitute the equivalent prompt for our
+		// START-bound pause menu so the player knows what to press.
+		// (PS1 TEXT.MSG happens to ship "Press Start to End Mission"
+		// for ID 462 already - we mirror that wording here.)
+		if (msgId == 461 || msgId == 462)
+		{
+			static const char* k_xboxEndMsg = "Press Start to End Mission";
+			strCopyAndZero((char*)s_hudMessage, k_xboxEndMsg, 80);
+		}
+		else
+		{
+			strCopyAndZero((char*)s_hudMessage, msgText, 80);
+		}
+#else
 		strCopyAndZero((char*)s_hudMessage, msgText, 80);
+#endif
 
 		s_hudMsgExpireTick = s_curTick + ((msg->priority <= HUD_HIGH_PRIORITY) ? HUD_MSG_LONG_DUR : HUD_MSG_SHORT_DUR);
 		s_hudCurrentMsgId  = msgId;

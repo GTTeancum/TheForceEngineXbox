@@ -61,6 +61,10 @@
 // Add texture callbacks.
 #include <TFE_Jedi/Level/levelTextures.h>
 
+#ifdef _XBOX
+extern "C" void TFE_XboxReturnToStartMenu();
+#endif
+
 using namespace TFE_Memory;
 using namespace TFE_Input;
 
@@ -330,18 +334,6 @@ namespace TFE_DarkForces
 		gameStartup();
 		loadAgentAndLevelData();
 		lsystem_init();
-
-#ifdef _XBOX
-		// Skip intro cutscenes on Xbox - Landru cutscene system stubbed.
-		s_runGameState.cutscenesEnabled = JFALSE;
-		// Skip agent menu and go straight to SECBASE (level 1) by feeding
-		// the level name into the *upstream* setInitialLevel() mechanism --
-		// this is exactly what `-lSECBASE` does for PC users via
-		// processCommandLineArgs(). Writing s_runGameState.startLevel = 1
-		// directly here is a bug: setInitialLevel(startLevel="") below would
-		// immediately zero it out (line ~1000: startLevel=0 unconditionally).
-		strcpy(startLevel, "SECBASE");
-#endif
 
 		renderer_init();
 
@@ -625,12 +617,14 @@ namespace TFE_DarkForces
 		case GSTATE_AGENT_MENU:
 		{
 			bool levelSelected = false;
+			bool startLevelSelected = false;
 			if (s_runGameState.startLevel)
 			{
 				s_runGameState.abortLevel = JFALSE;
 				s_runGameState.levelIndex = s_runGameState.startLevel;
 				s_runGameState.startLevel = 0;
 				levelSelected = true;
+				startLevelSelected = true;
 			}
 			else if (!agentMenu_update(&s_runGameState.levelIndex))
 			{
@@ -640,14 +634,21 @@ namespace TFE_DarkForces
 
 			if (levelSelected)
 			{
-				s_invalidLevelIndex = JTRUE;
-				for (s32 i = 0; i < TFE_ARRAYSIZE(s_cutsceneData); i++)
+				if (startLevelSelected)
 				{
-					if (s_cutsceneData[i].levelIndex >= 0 && s_cutsceneData[i].levelIndex == s_runGameState.levelIndex)
+					skipToLevelNextScene(s_runGameState.levelIndex);
+				}
+				else
+				{
+					s_invalidLevelIndex = JTRUE;
+					for (s32 i = 0; i < TFE_ARRAYSIZE(s_cutsceneData); i++)
 					{
-						s_runGameState.cutsceneIndex = i;
-						s_invalidLevelIndex = JFALSE;
-						break;
+						if (s_cutsceneData[i].levelIndex >= 0 && s_cutsceneData[i].levelIndex == s_runGameState.levelIndex)
+						{
+							s_runGameState.cutsceneIndex = i;
+							s_invalidLevelIndex = JFALSE;
+							break;
+						}
 					}
 				}
 
@@ -690,15 +691,26 @@ namespace TFE_DarkForces
 
 				if (abort)
 				{
+#ifdef _XBOX
+					TFE_XboxReturnToStartMenu();
+#else
 					s_invalidLevelIndex = JTRUE;
 					s_runGameState.cutsceneIndex--;
+#endif
 				}
 				else
 				{
 					s_agentData[s_agentId].difficulty = skill;
 					s_runGameState.cutsceneIndex++;
 				}
+#ifdef _XBOX
+				if (!abort)
+				{
+					startNextMode();
+				}
+#else
 				startNextMode();
+#endif
 			}
 		} break;
 		case GSTATE_MISSION:

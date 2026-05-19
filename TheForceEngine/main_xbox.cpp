@@ -39,6 +39,7 @@
 #include <TFE_Audio/audioDevice.h>
 #include <TFE_Audio/midiPlayer.h>
 #include <TFE_RenderBackend/renderBackend.h>
+#include <TFE_RenderBackend/renderBackend_xbox.h>
 #include <TFE_Input/input.h>
 #include <TFE_Input/inputMapping.h>
 #include <TFE_Input/replay.h>
@@ -94,6 +95,24 @@ static bool     s_loop      = true;
 static IGame*   s_curGame   = NULL;
 static AppState s_curState  = APP_STATE_UNINIT;
 static bool     s_soundPaused = false;
+static s32      s_startMenuSelection = 0;
+static u32      s_startMenuFrame = 0;
+static bool     s_startStickUpHeld = false;
+static bool     s_startStickDownHeld = false;
+static s32      s_loadMenuSelection = 0;
+static u32      s_loadMenuFrame = 0;
+static bool     s_loadStickUpHeld = false;
+static bool     s_loadStickDownHeld = false;
+static TFE_SaveSystem::SaveHeader s_loadHeaders[6];
+static TFE_RenderBackend::XboxLoadSlotInfo s_loadSlots[6];
+static char s_loadDateDisplay[6][32];
+static bool s_returnToStartRequested = false;
+
+extern "C" void TFE_XboxReturnToStartMenu()
+{
+    s_returnToStartRequested = true;
+    TFE_System::logWrite(LOG_MSG, "Main", "Return to start menu requested.");
+}
 
 // ---------------------------------------------------------------------------
 // Path helpers
@@ -161,6 +180,195 @@ static void startGame(int argc, const char** argv)
     TFE_Input::enableRelativeMode(true);
     s_curState = APP_STATE_GAME;
     TFE_System::logWrite(LOG_MSG, "Main", "Game started.");
+}
+
+static bool loadGameFromMenu(const char* filename)
+{
+    if (!filename || !filename[0]) return false;
+    if (s_curGame)
+    {
+        freeGame(s_curGame);
+        s_curGame = NULL;
+    }
+
+    TFE_Game* gameInfo = TFE_Settings::getGame();
+    s_curGame = createGame(gameInfo->id);
+    if (!s_curGame)
+    {
+        TFE_System::logWrite(LOG_ERROR, "LoadMenu", "Cannot create game for load.");
+        s_curState = APP_STATE_CANNOT_RUN;
+        return false;
+    }
+    TFE_SaveSystem::setCurrentGame(s_curGame);
+
+    TFE_RenderBackend::xboxSetLoadScreen(false, 0, 0, NULL, 0);
+    const bool loaded = TFE_SaveSystem::loadGame(filename);
+    if (!loaded)
+    {
+        TFE_System::logWrite(LOG_ERROR, "LoadMenu", "load failed '%s'", filename);
+        freeGame(s_curGame);
+        s_curGame = NULL;
+        s_curState = APP_STATE_MENU;
+        TFE_RenderBackend::xboxSetStartScreen(true, s_startMenuSelection, s_startMenuFrame);
+        return false;
+    }
+
+    TFE_Input::enableRelativeMode(true);
+    s_curState = APP_STATE_GAME;
+    TFE_System::logWrite(LOG_MSG, "LoadMenu", "loaded '%s'", filename);
+    return true;
+}
+
+static void refreshLoadSlots()
+{
+    memset(s_loadHeaders, 0, sizeof(s_loadHeaders));
+    memset(s_loadSlots, 0, sizeof(s_loadSlots));
+    memset(s_loadDateDisplay, 0, sizeof(s_loadDateDisplay));
+    for (s32 i = 0; i < 6; i++)
+    {
+        char filename[TFE_MAX_PATH];
+        if (i == 0)
+            strcpy(filename, TFE_SaveSystem::c_quickSaveName);
+        else
+            sprintf(filename, "save%03d.tfe", i - 1);
+
+        const bool valid = TFE_SaveSystem::loadGameHeader(filename, &s_loadHeaders[i]);
+        if (valid)
+        {
+            char dow[8], mon[8];
+            int day = 0, hour = 0, minute = 0, second = 0, year = 0;
+            if (sscanf(s_loadHeaders[i].dateTime, "%7s %7s %d %d:%d:%d %d", dow, mon, &day, &hour, &minute, &second, &year) == 7)
+            {
+                sprintf(s_loadDateDisplay[i], "%s %02d, %04d %02d:%02d", mon, day, year, hour, minute);
+            }
+            else
+            {
+                strncpy(s_loadDateDisplay[i], s_loadHeaders[i].dateTime, 31);
+                s_loadDateDisplay[i][31] = 0;
+            }
+        }
+        s_loadSlots[i].valid = valid;
+        s_loadSlots[i].autosave = (i == 0);
+        s_loadSlots[i].fileName = valid ? s_loadHeaders[i].fileName : filename;
+        s_loadSlots[i].saveName = valid ? s_loadHeaders[i].saveName : "";
+        s_loadSlots[i].dateTime = valid ? s_loadDateDisplay[i] : "";
+        s_loadSlots[i].levelName = valid ? s_loadHeaders[i].levelName : "";
+        s_loadSlots[i].levelId = valid ? s_loadHeaders[i].levelId : "";
+        s_loadSlots[i].imageData = valid ? s_loadHeaders[i].imageData : NULL;
+    }
+    TFE_System::logWrite(LOG_MSG, "LoadMenu", "slots refreshed");
+}
+
+static void startMenuMove(s32 delta)
+{
+    s_startMenuSelection += delta;
+    if (s_startMenuSelection < 0) s_startMenuSelection = 3;
+    if (s_startMenuSelection > 3) s_startMenuSelection = 0;
+    TFE_System::logWrite(LOG_MSG, "StartMenu", "selection=%d", s_startMenuSelection);
+}
+
+static void updateStartMenu()
+{
+    const f32 ly = TFE_Input::getAxis(AXIS_LEFT_Y);
+    const bool stickUp = ly > 0.55f;
+    const bool stickDown = ly < -0.55f;
+
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_UP) ||
+        (stickUp && !s_startStickUpHeld))
+    {
+        startMenuMove(-1);
+    }
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_DOWN) ||
+        (stickDown && !s_startStickDownHeld))
+    {
+        startMenuMove(1);
+    }
+    s_startStickUpHeld = stickUp;
+    s_startStickDownHeld = stickDown;
+
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A) ||
+        TFE_Input::buttonPressed(CONTROLLER_BUTTON_START))
+    {
+        TFE_System::logWrite(LOG_MSG, "StartMenu", "activate selection=%d", s_startMenuSelection);
+        if (s_startMenuSelection == 0)
+        {
+            const char* gameArgv[] = { "tfe_xbox", "-lSECBASE" };
+            TFE_RenderBackend::xboxSetStartScreen(false, 0, 0);
+            TFE_System::logWrite(LOG_MSG, "Main", "Starting Dark Forces from start menu.");
+            startGame(2, gameArgv);
+        }
+        else if (s_startMenuSelection == 1)
+        {
+            refreshLoadSlots();
+            s_curState = APP_STATE_LOAD;
+            s_loadMenuSelection = 0;
+            TFE_RenderBackend::xboxSetStartScreen(false, 0, 0);
+            TFE_RenderBackend::xboxSetLoadScreen(true, s_loadMenuSelection, s_loadMenuFrame, s_loadSlots, 6);
+            TFE_System::logWrite(LOG_MSG, "StartMenu", "opened load screen");
+        }
+        else
+        {
+            TFE_System::logWrite(LOG_WARNING, "StartMenu", "selection %d is not wired yet", s_startMenuSelection);
+        }
+    }
+
+    TFE_RenderBackend::xboxSetStartScreen(s_curState == APP_STATE_MENU, s_startMenuSelection, s_startMenuFrame++);
+}
+
+static void loadMenuMove(s32 delta)
+{
+    s_loadMenuSelection += delta;
+    if (s_loadMenuSelection < 0) s_loadMenuSelection = 5;
+    if (s_loadMenuSelection > 5) s_loadMenuSelection = 0;
+    TFE_System::logWrite(LOG_MSG, "LoadMenu", "selection=%d valid=%d",
+        s_loadMenuSelection, s_loadSlots[s_loadMenuSelection].valid ? 1 : 0);
+}
+
+static void closeLoadMenu()
+{
+    s_curState = APP_STATE_MENU;
+    TFE_RenderBackend::xboxSetLoadScreen(false, 0, 0, NULL, 0);
+    TFE_RenderBackend::xboxSetStartScreen(true, s_startMenuSelection, s_startMenuFrame);
+}
+
+static void updateLoadMenu()
+{
+    const f32 ly = TFE_Input::getAxis(AXIS_LEFT_Y);
+    const bool stickUp = ly > 0.55f;
+    const bool stickDown = ly < -0.55f;
+
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_UP) ||
+        (stickUp && !s_loadStickUpHeld))
+    {
+        loadMenuMove(-1);
+    }
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_DOWN) ||
+        (stickDown && !s_loadStickDownHeld))
+    {
+        loadMenuMove(1);
+    }
+    s_loadStickUpHeld = stickUp;
+    s_loadStickDownHeld = stickDown;
+
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_B) ||
+        TFE_Input::buttonPressed(CONTROLLER_BUTTON_BACK))
+    {
+        closeLoadMenu();
+        return;
+    }
+
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A) ||
+        TFE_Input::buttonPressed(CONTROLLER_BUTTON_START))
+    {
+        if (s_loadSlots[s_loadMenuSelection].valid)
+        {
+            loadGameFromMenu(s_loadSlots[s_loadMenuSelection].fileName);
+            return;
+        }
+        TFE_System::logWrite(LOG_WARNING, "LoadMenu", "empty slot selected=%d", s_loadMenuSelection);
+    }
+
+    TFE_RenderBackend::xboxSetLoadScreen(s_curState == APP_STATE_LOAD, s_loadMenuSelection, s_loadMenuFrame++, s_loadSlots, 6);
 }
 
 // ---------------------------------------------------------------------------
@@ -246,23 +454,18 @@ void __cdecl main()
     // Set source data path from program directory.
     setupSourceDataPath();
 
-    // Override settings for Xbox: always fullscreen, fixed 720p.
+    // Override settings for Xbox: always fullscreen with a native 640x480
+    // game framebuffer presented through the D3D8 backend.
     TFE_Settings_Window* windowSettings = TFE_Settings::getWindowSettings();
     windowSettings->fullscreen = true;
     windowSettings->width      = 1280;
     windowSettings->height     = 720;
 
     TFE_Settings_Graphics* graphics = TFE_Settings::getGraphicsSettings();
-    graphics->gameResolution.x = 320;
-    graphics->gameResolution.z = 200;
+    graphics->gameResolution.x = 640;
+    graphics->gameResolution.z = 480;
     graphics->widescreen = false;
-    // Phase 0 of the RClassic_GPU/D3D8 port: flip to RENDERER_HARDWARE so
-    // jediRenderer takes the TSR_CLASSIC_GPU branch. The Xbox GPU stubs in
-    // xbox_link_stubs.cpp still draw no world geometry; renderBackend_xbox
-    // detects VDISP_RENDER_TARGET and clears the back buffer to magenta as
-    // the visible confirmation that the path is being taken end to end.
-    // Flip back to 0 to fall through to the software path while debugging.
-    graphics->rendererIndex = 1;  // RENDERER_HARDWARE (Phase 0: magenta)
+    graphics->rendererIndex = 0;  // RENDERER_SOFTWARE
     graphics->colorMode = (ColorMode)0;  // COLORMODE_8BIT
     graphics->useMipmapping = false;
     TFE_System::logWrite(LOG_MSG, "Main",
@@ -339,6 +542,7 @@ void __cdecl main()
     game_init();
     inputMapping_startup();
     TFE_SaveSystem::init();
+    TFE_SaveSystem::setCurrentGame(TFE_Settings::getGame()->id);
     TFE_InputXbox::init();
 
     // -----------------------------------------------------------------------
@@ -372,19 +576,14 @@ void __cdecl main()
     TFE_System::logWrite(LOG_MSG, "Main", "Frame limiter set to %d", graphics->frameRateLimit);
 
     // -----------------------------------------------------------------------
-    // Start game immediately (no front-end menu on Xbox)
+    // Start at the Xbox-native menu. The game is created only when the
+    // player chooses Start Game.
     // -----------------------------------------------------------------------
-    const char* gameArgv[] = { "tfe_xbox" };
-    TFE_System::logWrite(LOG_MSG, "Main", "Starting Dark Forces.");
-    startGame(1, gameArgv);
+    s_curState = APP_STATE_MENU;
+    TFE_Input::enableRelativeMode(false);
+    TFE_RenderBackend::xboxSetStartScreen(true, s_startMenuSelection, s_startMenuFrame);
 
-    if (s_curState != APP_STATE_GAME)
-    {
-        TFE_System::logWrite(LOG_CRITICAL, "Main", "Failed to start game - halting.");
-        while (true) { Sleep(1000); }
-    }
-
-    TFE_System::logWrite(LOG_MSG, "Main", "Entering game loop.");
+    TFE_System::logWrite(LOG_MSG, "Main", "Entering app loop at start menu.");
 
     // -----------------------------------------------------------------------
     // Game loop
@@ -404,7 +603,15 @@ void __cdecl main()
             break;
         }
 
-        if (!inputMapping_handleInputs())
+        if (s_curState == APP_STATE_MENU)
+        {
+            updateStartMenu();
+        }
+        else if (s_curState == APP_STATE_LOAD)
+        {
+            updateLoadMenu();
+        }
+        else if (!inputMapping_handleInputs())
         {
             TFE_Input::endFrame();
             inputMapping_endFrame();
@@ -425,7 +632,20 @@ void __cdecl main()
             {
                 TFE_SaveSystem::update();
                 s_curGame->loopGame();
-                endInputFrame = TFE_Jedi::task_run() != 0;
+                if (s_returnToStartRequested)
+                {
+                    freeGame(s_curGame);
+                    s_curGame = NULL;
+                    s_curState = APP_STATE_MENU;
+                    s_returnToStartRequested = false;
+                    TFE_Input::enableRelativeMode(false);
+                    TFE_RenderBackend::xboxSetStartScreen(true, s_startMenuSelection, s_startMenuFrame);
+                    endInputFrame = true;
+                }
+                else
+                {
+                    endInputFrame = TFE_Jedi::task_run() != 0;
+                }
             }
         }
 

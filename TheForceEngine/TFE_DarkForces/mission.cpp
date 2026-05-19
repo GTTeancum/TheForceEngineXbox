@@ -625,6 +625,16 @@ namespace TFE_DarkForces
 			}
 			else
 			{
+#ifdef _XBOX
+				if (escapeMenu_isOpen() && s_missionMode == MISSION_MODE_MAIN && s_playerEye)
+				{
+					player_setupCamera();
+					updateScreensize();
+					drawWorld(s_framebuffer, s_playerEye->sector, s_levelColorMap, s_lightSourceRamp);
+					weapon_draw(s_framebuffer, (DrawRect*)vfb_getScreenRect(VFB_RECT_UI));
+					hud_drawMessage(s_framebuffer);
+				}
+#endif
 				// TFE: Gpu Renderer.
 				Vec3f lumMaskGpu = { 0 };
 				Vec3f palFxGpu = { 0 };
@@ -637,6 +647,7 @@ namespace TFE_DarkForces
 				EscapeMenuAction action = escapeMenu_update();
 				if (action == ESC_RETURN || action == ESC_CONFIG)
 				{
+					TFE_System::logWrite(LOG_MSG, "PauseMenu", "mission handling action=%s", action == ESC_RETURN ? "Return" : "Config");
 					s_gamePaused = JFALSE;
 					TFE_Input::clearAccumulatedMouseMove();
 					task_pause(s_gamePaused);
@@ -650,6 +661,7 @@ namespace TFE_DarkForces
 				}
 				else if (action == ESC_ABORT_OR_NEXT)
 				{
+					TFE_System::logWrite(LOG_MSG, "PauseMenu", "mission handling action=AbortOrNext");
 					s_exitLevel = JTRUE;
 					TFE_Input::clearAccumulatedMouseMove();
 					task_pause(JFALSE);
@@ -657,6 +669,7 @@ namespace TFE_DarkForces
 				}
 				else if (action == ESC_QUIT)
 				{
+					TFE_System::logWrite(LOG_MSG, "PauseMenu", "mission handling action=Quit");
 					saveLevelStatus();
 					if (TFE_Settings::getSystemSettings()->gameQuitExitsToMenu)
 					{
@@ -666,6 +679,30 @@ namespace TFE_DarkForces
 					{
 						TFE_System::postQuitMessage();
 					}
+				}
+				else if (action == ESC_PDA)
+				{
+					TFE_System::logWrite(LOG_MSG, "PauseMenu", "mission handling action=Datapad");
+					mission_pause(JTRUE);
+					pda_start(agent_getLevelName());
+					if (!pda_isOpen())
+					{
+						TFE_System::logWrite(LOG_ERROR, "PauseMenu", "Datapad failed to open; restoring gameplay state");
+						mission_pause(JFALSE);
+						resumeLevelSound();
+						reticle_enable(true);
+						blankScreen();
+					}
+				}
+				else if (action == ESC_RESPAWN)
+				{
+					TFE_System::logWrite(LOG_MSG, "PauseMenu", "mission handling action=Respawn");
+					player_revive();
+					s_gamePaused = JFALSE;
+					TFE_Input::clearAccumulatedMouseMove();
+					task_pause(s_gamePaused);
+					time_pause(s_gamePaused);
+					blankScreen();
 				}
 			}
 			else if (pda_isOpen())

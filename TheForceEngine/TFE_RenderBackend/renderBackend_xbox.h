@@ -12,6 +12,18 @@
 
 namespace TFE_RenderBackend
 {
+    struct XboxLoadSlotInfo
+    {
+        bool valid;
+        bool autosave;
+        const char* fileName;
+        const char* saveName;
+        const char* dateTime;
+        const char* levelName;
+        const char* levelId;
+        const u32* imageData;
+    };
+
     // Single-vertex layout for untextured colored geometry. Matches
     // D3DFVF_XYZ | D3DFVF_DIFFUSE on the wire.
     struct GpuColorVert
@@ -86,6 +98,35 @@ namespace TFE_RenderBackend
     // Used by the 3DO model path for PSHADE_FLAT polygons which carry
     // only a palette index (no texture). Alpha is forced to 0xFF.
     u32 gpuPaletteEntryRGBA(u8 index);
+
+    // -----------------------------------------------------------------------
+    // 2D screen-space draw - used by the escape menu / agent menu / PDA /
+    // any RClassic_GPU UI overlay (upstream screenDrawGPU.cpp). Coordinates
+    // are in virtual-display pixels: (0,0) top-left, (vdispW,vdispH)
+    // bottom-right. The backend scales to the actual back buffer.
+    //
+    // - For DELT/BM sprites uploaded via gpuGetOrUploadIndexedTexture,
+    //   pass alphaTest=true so palette-index-0 (transparent) is discarded.
+    // - For render-target textures captured via copyBackbufferToRenderTarget,
+    //   pass alphaTest=false (every texel is opaque).
+    // - The UV rect is normalised [0,1]; pad to the next power-of-two if
+    //   the source isn't pow2 and pass uMax = origW/padW etc. to crop.
+    // - Must be called between bindVirtualDisplay (BeginScene) and swap
+    //   (EndScene + Present).
+    // - topColor / botColor are D3DCOLOR per-vertex DIFFUSE values that
+    //   MODULATE the texel (default white = identity). Matches upstream
+    //   quadDraw2d_add's per-edge color (top edge takes colors[0], bottom
+    //   edge takes colors[1]).
+    void gpuDrawScreenQuad(f32 x0, f32 y0, f32 x1, f32 y1,
+                           f32 u0, f32 v0, f32 u1, f32 v1,
+                           u32 vdispW, u32 vdispH,
+                           GpuTextureHandle tex, bool alphaTest,
+                           u32 topColor = 0xFFFFFFFFu,
+                           u32 botColor = 0xFFFFFFFFu);
+
+    void xboxSetPauseOverlay(bool enabled, s32 selection, s32 confirmSelection, bool confirmOpen);
+    void xboxSetStartScreen(bool enabled, s32 selection, u32 frame);
+    void xboxSetLoadScreen(bool enabled, s32 selection, u32 frame, const XboxLoadSlotInfo* slots, s32 slotCount);
 }
 
 #endif // _XBOX

@@ -18,6 +18,7 @@
 #include <TFE_Jedi/Renderer/RClassic_GPU/rclassicGPU.h>
 #include <TFE_Jedi/Renderer/RClassic_GPU/rsectorGPU.h>
 #include <TFE_Jedi/Renderer/RClassic_GPU/screenDrawGPU.h>
+#include <TFE_RenderShared/quadDraw2d.h>
 #include <TFE_Jedi/Level/rsector.h>
 #include <TFE_Jedi/Level/rwall.h>
 #include <TFE_Jedi/Level/robjData.h>
@@ -60,36 +61,208 @@ namespace TFE_Jedi
 	// software branches are taken even though the renderer is set to
 	// RENDERER_HARDWARE.
 
-	// screenDrawGPU.h functions
-	void screenGPU_init()    {}
-	void screenGPU_destroy() {}
+	// =====================================================================
+	// screenDrawGPU.h - 2D screen-space draw port.
+	//
+	// Upstream RClassic_GPU/screenDrawGPU.cpp uses a quad-batching system
+	// with shaders (gpu_render_quad.vert/frag) and a texture-packer atlas
+	// to draw the escape menu, agent menu, PDA, and any other UI element
+	// when RENDERER_HARDWARE is selected.
+	//
+	// The Xbox port replaces the shader+atlas pipeline with immediate
+	// D3D8 fixed-function draws via TFE_RenderBackend::gpuDrawScreenQuad
+	// (renderBackend_xbox.cpp). Each TextureData* (DELT/BM frame) is
+	// uploaded once to a P8 D3D8 texture via gpuGetOrUploadIndexedTexture
+	// (keyed by the TextureData pointer, so re-blits hit the cache), then
+	// drawn as a textured screen-space quad with alpha-test for
+	// palette-index-0 transparency.
+	//
+	// The render-target capture (escapeMenu_copyBackground GPU branch)
+	// goes through the real createRenderTarget / copyBackbufferToRenderTarget
+	// implementations in renderBackend_xbox.cpp; getRenderTargetTexture
+	// returns the same handle reinterpreted as TextureGpu*, which we pass
+	// straight back to gpuDrawScreenQuad, which detects the sentinel and
+	// samples it as a plain A8R8G8B8 texture.
+	// =====================================================================
+	// Tracks the virtual-display size set by the most recent
+	// screenGPU_beginQuads / screenGPU_beginImageQuads call. The screenGPU_
+	// blit* functions inherit it (upstream's shader does the same via the
+	// ScaleOffset uniform). Default to 320x200 in case a blit fires before
+	// any explicit begin (defensive; upstream always pairs them).
+	static u32 s_scrGpuW = 320;
+	static u32 s_scrGpuH = 200;
+
+	void screenGPU_init()    { TFE_RenderShared::quadInit(); }
+	void screenGPU_destroy() { TFE_RenderShared::quadDestroy(); }
 
 	void screenGPU_beginLines(u32, u32)      {}
 	void screenGPU_endLines()                {}
-	void screenGPU_beginImageQuads(u32, u32) {}
-	void screenGPU_endImageQuads()           {}
-	void screenGPU_beginQuads(u32, u32)      {}
-	void screenGPU_endQuads()                {}
+
+	// Image quads route through quadDraw2d (upstream RClassic_GPU/
+	// screenDrawGPU.cpp:268-276 does the same). The captured render
+	// target for the pause menu background goes through this path.
+	void screenGPU_beginImageQuads(u32 w, u32 h)
+	{
+		s_scrGpuW = w ? w : 320;
+		s_scrGpuH = h ? h : 200;
+		TFE_RenderShared::quadDraw2d_begin(s_scrGpuW, s_scrGpuH);
+	}
+	void screenGPU_endImageQuads()
+	{
+		TFE_RenderShared::quadDraw2d_draw();
+	}
+
+	// ----- Sprite-quad batch (upstream screenGPU_beginQuads / blit* /
+	// endQuads, lines 185-256 + 416-450 of screenDrawGPU.cpp).
+	//
+	// Upstream stores per-vertex data in s_scrQuads[SCR_MAX_QUAD_COUNT*4],
+	// packs textureId / color / lightLevel into a 32-bit per-vertex
+	// attribute, and flushes everything in one DrawIndexedTriangles in
+	// endQuads after a single shader bind. On Xbox there's no atlas (each
+	// TextureData* uploads to its own D3D8 texture via the existing P8
+	// cache) so we hold the resolved GpuTextureHandle per quad and flush
+	// per-quad in endQuads.
+	//
+	// lightLevel is dropped on the Xbox path - the upstream shader uses it
+	// as a colormap row index for DF-style lit blitting; the only call
+	// site that passes anything other than 31 (fullbright) is the weapon
+	// flash effect which doesn't go through this code path.
+	enum { XBOX_SCR_QUAD_MAX = 1024 };
+	struct XboxScrSpriteQuad
+	{
+		f32 x0, y0, x1, y1;
+		f32 u0, v0, u1, v1;
+		TFE_RenderBackend::GpuTextureHandle tex;
+	};
+	static XboxScrSpriteQuad s_scrSpriteQuads[XBOX_SCR_QUAD_MAX];
+	static u32 s_scrSpriteCount = 0;
+
+	void screenGPU_beginQuads(u32 w, u32 h)
+	{
+		s_scrGpuW = w ? w : 320;
+		s_scrGpuH = h ? h : 200;
+		s_scrSpriteCount = 0;
+	}
+	void screenGPU_endQuads()
+	{
+		// Single flush at end of frame (mirrors upstream endQuads at
+		// lines 202-256, which uploads the batch then issues one
+		// drawIndexedTriangles per draw group).
+		static u32 s_lastReportedCount = 0xFFFFFFFFu;
+		if (s_scrSpriteCount != s_lastReportedCount)
+		{
+			TFE_System::logWrite(LOG_MSG, "GPU", "screenGPU_endQuads flushing %u sprite quads (vdisp %ux%u)",
+				s_scrSpriteCount, s_scrGpuW, s_scrGpuH);
+			s_lastReportedCount = s_scrSpriteCount;
+		}
+		for (u32 i = 0; i < s_scrSpriteCount; i++)
+		{
+			const XboxScrSpriteQuad& q = s_scrSpriteQuads[i];
+			TFE_RenderBackend::gpuDrawScreenQuad(
+				q.x0, q.y0, q.x1, q.y1,
+				q.u0, q.v0, q.u1, q.v1,
+				s_scrGpuW, s_scrGpuH, q.tex, /*alphaTest*/true);
+		}
+		s_scrSpriteCount = 0;
+	}
 
 	void screenGPU_setIndexedColors(u32, const Vec4f*) {}
 	void screenGPU_drawColoredQuad(fixed16_16, fixed16_16, fixed16_16, fixed16_16, u8) {}
-
-	void screenGPU_addImageQuad(s32, s32, s32, s32, TextureGpu*) {}
-	void screenGPU_addImageQuad(s32, s32, s32, s32, f32, f32, TextureGpu*) {}
 
 	void screenGPU_setHudTextureCallbacks(s32, TextureListCallback*, bool) {}
 
 	void screenGPU_drawPoint(ScreenRect*, s32, s32, u8) {}
 	void screenGPU_drawLine(ScreenRect*, s32, s32, s32, s32, u8) {}
 
-	void screenGPU_blitTexture(TextureData*, DrawRect*, s32, s32, JBool, JBool) {}
-	void screenGPU_blitTextureLit(TextureData*, DrawRect*, s32, s32, u8, JBool) {}
-	void screenGPU_blitTextureScaled(TextureData*, DrawRect*, fixed16_16, fixed16_16, fixed16_16, fixed16_16, u8, JBool) {}
+	// Compute UV crop ratio for a non-pow2 source uploaded into a pow2
+	// D3D texture by gpuGetOrUploadIndexedTexture's pad path.
+	static inline void scrGpu_uvMax(s32 srcW, s32 srcH, f32* uMax, f32* vMax)
+	{
+		(void)srcW; (void)srcH;
+		// gpuGetOrUploadIndexedTexture scales non-pow2 sources so the
+		// entire DELT/BM fills the pow2 texture. Sampling src/pow2 here
+		// zooms into the top-left of menu art and stretches it.
+		*uMax = 1.0f;
+		*vMax = 1.0f;
+	}
 
+	static inline void scrGpu_queueBlit(TFE_RenderBackend::GpuTextureHandle tex,
+	                                     f32 x0, f32 y0, f32 x1, f32 y1,
+	                                     f32 uMax, f32 vMax)
+	{
+		if (s_scrSpriteCount >= XBOX_SCR_QUAD_MAX) return;
+		XboxScrSpriteQuad& q = s_scrSpriteQuads[s_scrSpriteCount++];
+		q.x0 = x0; q.y0 = y0; q.x1 = x1; q.y1 = y1;
+		q.u0 = 0.0f; q.v0 = 0.0f; q.u1 = uMax; q.v1 = vMax;
+		q.tex = tex;
+	}
+
+	// TextureData* version (DELT / BM frames). DELT pixel layout is
+	// ROW-major after delt_loadDeltIntoFrame; pass columnMajor=false.
+	// Matches upstream screenDrawGPU.cpp:327-355: queue-only, no draw.
+	void screenGPU_blitTexture(TextureData* texture, DrawRect* /*rect*/, s32 x0, s32 y0,
+	                           JBool /*forceTransparency*/, JBool /*forceOpaque*/)
+	{
+		if (!texture || !texture->image || texture->width <= 0 || texture->height <= 0) return;
+		TFE_RenderBackend::GpuTextureHandle gpuTex =
+			TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
+				texture, texture->image, texture->width, texture->height, /*columnMajor*/false);
+		if (!gpuTex) return;
+		f32 uMax, vMax; scrGpu_uvMax(texture->width, texture->height, &uMax, &vMax);
+		scrGpu_queueBlit(gpuTex,
+			(f32)x0, (f32)y0,
+			(f32)(x0 + texture->width), (f32)(y0 + texture->height),
+			uMax, vMax);
+	}
+
+	void screenGPU_blitTextureLit(TextureData* texture, DrawRect* rect, s32 x0, s32 y0,
+	                              u8 /*lightLevel*/, JBool ft)
+	{
+		// Xbox path doesn't have the lit colourmap shader; same as unlit.
+		screenGPU_blitTexture(texture, rect, x0, y0, ft, JFALSE);
+	}
+
+	// Matches upstream screenDrawGPU.cpp:416-450.
+	void screenGPU_blitTextureScaled(TextureData* texture, DrawRect* /*rect*/,
+	                                  fixed16_16 x0, fixed16_16 y0,
+	                                  fixed16_16 xScale, fixed16_16 yScale,
+	                                  u8 /*lightLevel*/, JBool /*forceTransparency*/)
+	{
+		if (!texture || !texture->image || texture->width <= 0 || texture->height <= 0) return;
+		TFE_RenderBackend::GpuTextureHandle gpuTex =
+			TFE_RenderBackend::gpuGetOrUploadIndexedTexture(
+				texture, texture->image, texture->width, texture->height, /*columnMajor*/false);
+		if (!gpuTex) return;
+		f32 uMax, vMax; scrGpu_uvMax(texture->width, texture->height, &uMax, &vMax);
+		const f32 fx0 = fixed16ToFloat(x0);
+		const f32 fy0 = fixed16ToFloat(y0);
+		const f32 fx1 = fx0 + (f32)texture->width  * fixed16ToFloat(xScale);
+		const f32 fy1 = fy0 + (f32)texture->height * fixed16ToFloat(yScale);
+		scrGpu_queueBlit(gpuTex, fx0, fy0, fx1, fy1, uMax, vMax);
+	}
+
+	// addImageQuad - verbatim ports of upstream screenDrawGPU.cpp:278-289.
+	// quadDraw2d batches the requests; flush happens in
+	// screenGPU_endImageQuads above.
+	void screenGPU_addImageQuad(s32 x0, s32 z0, s32 x1, s32 z1, TextureGpu* texture)
+	{
+		u32 colors[] = { 0xffffffff, 0xffffffff };
+		Vec2f vtx[]  = { { (f32)x0, (f32)z0 }, { (f32)x1, (f32)z1 } };
+		TFE_RenderShared::quadDraw2d_add(vtx, colors, texture);
+	}
+	void screenGPU_addImageQuad(s32 x0, s32 z0, s32 x1, s32 z1,
+	                            f32 u0, f32 u1, TextureGpu* texture)
+	{
+		u32 colors[] = { 0xffffffff, 0xffffffff };
+		Vec2f vtx[]  = { { (f32)x0, (f32)z0 }, { (f32)x1, (f32)z1 } };
+		TFE_RenderShared::quadDraw2d_add(vtx, colors, u0, u1, texture);
+	}
+
+	// ScreenImage* versions - unused by escape menu / agent menu / PDA.
+	// Stubbed for now; revisit if anything triggers them.
 	void screenGPU_blitTexture(ScreenImage*, DrawRect*, s32, s32) {}
 	void screenGPU_blitTextureScaled(ScreenImage*, DrawRect*, s32, s32, fixed16_16, fixed16_16) {}
 	void screenGPU_blitTextureLitScaled(ScreenImage*, DrawRect*, s32, s32, fixed16_16, fixed16_16, u8) {}
-
 	void screenGPU_blitTextureIScale(TextureData*, DrawRect*, s32, s32, s32) {}
 
 	// =====================================================================
@@ -1373,10 +1546,12 @@ namespace TFE_Jedi
 		const f32 rx = cy, rz = sy;
 		const u32 sectorColor = ambientToColor(sector->ambient);
 
-		for (s32 i = 0; i < sector->objectCount; i++)
+		SecObject** objIter = sector->objectList;
+		for (s32 i = 0; i < sector->objectCount; objIter++)
 		{
-			SecObject* obj = sector->objectList[i];
+			SecObject* obj = *objIter;
 			if (!obj) { s_objStats.nullObj++; continue; }
+			i++;
 
 			// Categorise.
 			switch (obj->type)
@@ -1956,19 +2131,6 @@ void __cdecl operator delete(void* p, const std::_DebugHeapTag_t&, char*, int)
 
 void* __cdecl operator new[](unsigned int sz, const std::_DebugHeapTag_t&, char*, int)
 { return operator new[](sz); }
-
-// =====================================================================
-// Landru system stubs (lsystem.cpp not in Xbox build)
-// =====================================================================
-namespace TFE_DarkForces
-{
-	MemoryRegion* s_alloc = NULL;
-
-	void lsystem_init()    {}
-	void lsystem_destroy() {}
-	void lsystem_setAllocator(LAllocator)   {}
-	void lsystem_clearAllocator(LAllocator) {}
-}
 
 // =====================================================================
 // TFE_Settings stubs (loadCustomModSettings is inside #ifndef _XBOX)

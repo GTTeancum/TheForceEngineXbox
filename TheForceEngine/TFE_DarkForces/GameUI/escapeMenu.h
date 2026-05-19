@@ -14,6 +14,8 @@ enum EscapeMenuAction
 	ESC_ABORT_OR_NEXT,	// abort the current mission or move on to the next.
 	ESC_QUIT,			// quit the game.
 	ESC_CONFIG,			// configuration menu.
+	ESC_PDA,			// open the PDA / Datapad.
+	ESC_RESPAWN,		// respawn the player in-place.
 	ESC_COUNT
 };
 

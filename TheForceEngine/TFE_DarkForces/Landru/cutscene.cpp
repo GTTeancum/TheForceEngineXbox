@@ -31,22 +31,34 @@ namespace TFE_DarkForces
 
 	JBool cutscene_play(s32 sceneId)
 	{
-		if (!s_enabled || !s_playSeq) { return JFALSE; }
+		if (!s_enabled || !s_playSeq)
+		{
+			TFE_System::logWrite(LOG_ERROR, "Cutscene", "play scene=%d rejected enabled=%d list=%p", sceneId, s_enabled, s_playSeq);
+			return JFALSE;
+		}
 		TFE_Settings_Sound* soundSettings = TFE_Settings::getSoundSettings();
 		TFE_Audio::setVolume(soundSettings->cutsceneSoundFxVolume * soundSettings->masterVolume);
 		TFE_MidiPlayer::setVolume(soundSettings->cutsceneMusicVolume * soundSettings->masterVolume);
 
 		// Search for the requested scene.
 		s32 found = 0;
+		s32 foundIndex = -1;
 		for (s32 i = 0; !found && s_playSeq[i].id != SCENE_EXIT; i++)
 		{
 			if (s_playSeq[i].id == sceneId)
 			{
 				found = 1;
+				foundIndex = i;
 				break;
 			}
 		}
-		if (!found) return JFALSE;
+		if (!found)
+		{
+			TFE_System::logWrite(LOG_ERROR, "Cutscene", "scene=%d not found in cutscene list", sceneId);
+			return JFALSE;
+		}
+		TFE_System::logWrite(LOG_MSG, "Cutscene", "play scene=%d index=%d archive='%s' scene='%s'",
+			sceneId, foundIndex, s_playSeq[foundIndex].archive, s_playSeq[foundIndex].scene);
 		// Re-initialize the canvas, so cutscenes run at the correct resolution even if it was changed for gameplay
 		// (i.e. high resolution support).
 		lcanvas_init(320, 200);

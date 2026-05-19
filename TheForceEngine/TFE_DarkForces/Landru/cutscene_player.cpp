@@ -127,6 +127,8 @@ namespace TFE_DarkForces
 			FilePath path;
 			if (!TFE_Paths::getFilePath(s_playSeq[s_playId].archive, &path))
 			{
+				TFE_System::logWrite(LOG_ERROR, "CutscenePlayer", "archive '%s' not found for scene=%d",
+					s_playSeq[s_playId].archive, sceneId);
 				s_scene = SCENE_EXIT;
 				return;
 			}
@@ -134,9 +136,13 @@ namespace TFE_DarkForces
 			if (!lfd->open(path.path))
 			{
 				delete lfd;
+				TFE_System::logWrite(LOG_ERROR, "CutscenePlayer", "archive '%s' failed to open path='%s' scene=%d",
+					s_playSeq[s_playId].archive, path.path, sceneId);
 				s_scene = SCENE_EXIT;
 				return;
 			}
+			TFE_System::logWrite(LOG_MSG, "CutscenePlayer", "scene=%d archive='%s' path='%s' files=%u",
+				sceneId, s_playSeq[s_playId].archive, path.path, lfd->getFileCount());
 			TFE_Paths::addLocalArchiveToFront(lfd);
 
 			char name[16];

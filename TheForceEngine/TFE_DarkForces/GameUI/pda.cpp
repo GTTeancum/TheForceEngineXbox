@@ -29,6 +29,7 @@
 #include <TFE_Jedi/Level/rfont.h>
 #include <TFE_Jedi/Renderer/jediRenderer.h>
 #include <TFE_Settings/settings.h>
+#include <TFE_System/system.h>
 #include <TFE_Input/replay.h>
 #include <TFE_Input/inputMapping.h>
 
@@ -113,8 +114,11 @@ namespace TFE_DarkForces
 	void pda_drawOverlay();
 	void pda_clearToBlack();
 	void pda_displayFontString(Font* font, s32 x, s32 y, char* msg);
+	void pda_resetState();
+	void pda_releaseLoadedResources();
 
 	extern void pauseLevelSound();
+	extern void resumeLevelSound();
 	// From DarkForcesMain
 	// TODO: Refactor.
 	extern Font* getMapNumFont();
@@ -124,6 +128,8 @@ namespace TFE_DarkForces
 	///////////////////////////////////////////
 	void pda_start(const char* levelName)
 	{
+		TFE_System::logWrite(LOG_MSG, "Datapad", "start requested level='%s' loaded=%d open=%d",
+			levelName ? levelName : "", s_pdaLoaded ? 1 : 0, s_pdaOpen ? 1 : 0);
 		// TFE
 		reticle_enable(false);
 		memset(&s_mouseAccum, 0, sizeof(s_mouseAccum));
@@ -133,6 +139,9 @@ namespace TFE_DarkForces
 		{
 			if (!menu_openResourceArchive("dfbrief.lfd"))
 			{
+				TFE_System::logWrite(LOG_ERROR, "Datapad", "failed to open dfbrief.lfd");
+				reticle_enable(true);
+				resumeLevelSound();
 				return;
 			}
 			LRect rect;
@@ -143,9 +152,16 @@ namespace TFE_DarkForces
 			s_items    = lactorAnim_load("items", &rect, 0, 0, 0);
 			menu_closeResourceArchive();
 
-			lactor_setTime(s_goalsActor, -1, -1);
-			lactor_setTime(s_weapons, -1, -1);
-			lactor_setTime(s_items,   -1, -1);
+			TFE_System::logWrite(LOG_MSG, "Datapad", "dfbrief resources briefing=%p goals=%p weapons=%p items=%p",
+				s_briefing, s_goalsActor, s_weapons, s_items);
+			if (!s_briefing || !s_goalsActor || !s_weapons || !s_items)
+			{
+				TFE_System::logWrite(LOG_WARNING, "Datapad", "one or more optional dfbrief resources are missing");
+			}
+
+			if (s_goalsActor) { lactor_setTime(s_goalsActor, -1, -1); }
+			if (s_weapons)    { lactor_setTime(s_weapons, -1, -1); }
+			if (s_items)      { lactor_setTime(s_items,   -1, -1); }
 
 			if (s_briefing)
 			{
@@ -167,6 +183,10 @@ namespace TFE_DarkForces
 			
 			if (!menu_openResourceArchive("menu.lfd"))
 			{
+				TFE_System::logWrite(LOG_ERROR, "Datapad", "failed to open menu.lfd");
+				pda_releaseLoadedResources();
+				reticle_enable(true);
+				resumeLevelSound();
 				return;
 			}
 			s_framebuffer = ldraw_getBitmap();
@@ -174,11 +194,29 @@ namespace TFE_DarkForces
 				
 			s_pdaArt = lactorAnim_load("pda", &s_viewBounds, 0, 0, 0);
 			s_palette = lpalette_load("menu");
-			lactor_setTime(s_pdaArt, -1, -1);
-			
 			menu_closeResourceArchive();
 
+			TFE_System::logWrite(LOG_MSG, "Datapad", "menu resources framebuffer=%p art=%p palette=%p bounds=%d,%d,%d,%d",
+				s_framebuffer, s_pdaArt, s_palette,
+				s_viewBounds.left, s_viewBounds.top, s_viewBounds.right, s_viewBounds.bottom);
+			if (!s_framebuffer || !s_pdaArt || !s_palette)
+			{
+				TFE_System::logWrite(LOG_ERROR, "Datapad", "missing menu resource; aborting datapad open");
+				pda_releaseLoadedResources();
+				reticle_enable(true);
+				resumeLevelSound();
+				return;
+			}
+			lactor_setTime(s_pdaArt, -1, -1);
+
 			s_pdaLoaded = JTRUE;
+		}
+		if (!s_palette)
+		{
+			TFE_System::logWrite(LOG_ERROR, "Datapad", "palette missing after load; aborting datapad open");
+			reticle_enable(true);
+			resumeLevelSound();
+			return;
 		}
 		lpalette_setScreenPal(s_palette);
 
@@ -192,9 +230,10 @@ namespace TFE_DarkForces
 		ltime_setFrameDelay(10);
 
 		TFE_Input::endFrame();
+		TFE_System::logWrite(LOG_MSG, "Datapad", "opened");
 	}
 
-	void pda_cleanup()
+	void pda_releaseLoadedResources()
 	{
 		lactor_removeActor(s_briefing);
 		lactor_removeActor(s_pdaArt);
@@ -210,6 +249,11 @@ namespace TFE_DarkForces
 		lpalette_free(s_palette);
 
 		pda_resetState();
+	}
+
+	void pda_cleanup()
+	{
+		pda_releaseLoadedResources();
 	}
 
 	// Reset the tab to the map to support replay consistency. 
@@ -237,6 +281,7 @@ namespace TFE_DarkForces
 		
 	void pda_close()
 	{
+		TFE_System::logWrite(LOG_MSG, "Datapad", "close requested");
 		// Clear the screen to black during the palette transition.
 		pda_clearToBlack();
 
@@ -284,6 +329,10 @@ namespace TFE_DarkForces
 
 		// Input
 		pda_handleInput();
+		if (!s_pdaOpen)
+		{
+			return;
+		}
 
 		// Main view
 		u32 outWidth, outHeight;
@@ -331,7 +380,9 @@ namespace TFE_DarkForces
 		// Doing that we need to restore the transparent color before blitting the mouse cursor, otherwise its black edges will 
 		// show up incorrectly.
 		screenDraw_setTransColor(0);
+#ifndef _XBOX
 		menu_blitCursorScaled(s_cursorPos.x, s_cursorPos.z, vfb_getCpuBuffer());
+#endif
 		vfb_swap();
 	}
 	
@@ -642,6 +693,84 @@ namespace TFE_DarkForces
 		
 	void pda_handleInput()
 	{
+#ifdef _XBOX
+		automap_setPdaActive(JTRUE);
+
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_B) ||
+			TFE_Input::buttonPressed(CONTROLLER_BUTTON_START))
+		{
+			pda_close();
+			return;
+		}
+
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_LEFTSHOULDER))
+		{
+			s_pdaMode = (s_pdaMode == PDA_MODE_MAP) ? PDA_MODE_BRIEF : PdaMode(s_pdaMode - 1);
+			TFE_System::logWrite(LOG_MSG, "Datapad", "tab previous mode=%d", s_pdaMode);
+		}
+		else if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_RIGHTSHOULDER))
+		{
+			s_pdaMode = (s_pdaMode == PDA_MODE_BRIEF) ? PDA_MODE_MAP : PdaMode(s_pdaMode + 1);
+			TFE_System::logWrite(LOG_MSG, "Datapad", "tab next mode=%d", s_pdaMode);
+		}
+
+		const f32 lx = TFE_Input::getAxis(AXIS_LEFT_X);
+		const f32 ly = TFE_Input::getAxis(AXIS_LEFT_Y);
+		const bool stickLeft  = lx < -0.35f;
+		const bool stickRight = lx >  0.35f;
+		const bool stickUp    = ly >  0.35f;
+		const bool stickDown  = ly < -0.35f;
+
+		if (s_frameReady && s_pdaMode == PDA_MODE_MAP)
+		{
+			if (TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_UP) || stickUp)
+			{
+				automap_updateMapData(MAP_MOVE1_UP);
+			}
+			else if (TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_DOWN) || stickDown)
+			{
+				automap_updateMapData(MAP_MOVE1_DN);
+			}
+			if (TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_LEFT) || stickLeft)
+			{
+				automap_updateMapData(MAP_MOVE1_LEFT);
+			}
+			else if (TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_RIGHT) || stickRight)
+			{
+				automap_updateMapData(MAP_MOVE1_RIGHT);
+			}
+			if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A))
+			{
+				automap_updateMapData(MAP_ZOOM_OUT);
+			}
+			else if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_X))
+			{
+				automap_updateMapData(MAP_ZOOM_IN);
+			}
+			if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_Y))
+			{
+				automap_updateMapData(MAP_LAYER_UP);
+			}
+			else if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_BACK))
+			{
+				automap_updateMapData(MAP_LAYER_DOWN);
+			}
+		}
+		else if (s_frameReady && s_pdaMode == PDA_MODE_BRIEF)
+		{
+			if ((TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_UP) || stickUp) && s_briefY > -BRIEF_VERT_MARGIN)
+			{
+				s_briefY -= BRIEF_LINE_SCROLL;
+				if (s_briefY < -BRIEF_VERT_MARGIN) s_briefY = -BRIEF_VERT_MARGIN;
+			}
+			else if ((TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_DOWN) || stickDown) && s_briefY != s_briefingMaxY)
+			{
+				s_briefY += BRIEF_LINE_SCROLL;
+				if (s_briefY > s_briefingMaxY) s_briefY = s_briefingMaxY;
+			}
+		}
+		return;
+#endif
 		menu_handleMousePosition();
 		automap_setPdaActive(JTRUE);
 

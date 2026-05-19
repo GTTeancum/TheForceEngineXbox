@@ -360,6 +360,10 @@
 			>
 		</File>
 		<File
+			RelativePath=".\TFE_DarkForces\Landru\lsystem.cpp"
+			>
+		</File>
+		<File
 			RelativePath=".\TFE_DarkForces\Landru\lsound.cpp"
 			>
 		</File>

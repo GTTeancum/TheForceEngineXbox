@@ -19,6 +19,10 @@
 #include <TFE_Jedi/Level/rtexture.h>
 #include <TFE_Jedi/Level/roffscreenBuffer.h>
 #include <TFE_System/system.h>
+#ifdef _XBOX
+#include <TFE_Input/input.h>
+#include <TFE_RenderBackend/renderBackend_xbox.h>
+#endif
 
 using namespace TFE_Jedi;
 using namespace TFE_Input;
@@ -54,10 +58,19 @@ namespace TFE_DarkForces
 
 	enum EscapeButtons
 	{
+#ifdef _XBOX
+		ESC_BTN_RESUME,
+		ESC_BTN_PDA,
+		ESC_BTN_ABORT,
+		ESC_BTN_RESPAWN,
+		ESC_BTN_OPTIONS,
+		ESC_BTN_CHEAT,
+#else
 		ESC_BTN_ABORT,
 		ESC_BTN_CONFIG,
 		ESC_BTN_QUIT,
 		ESC_BTN_RETURN,
+#endif
 		ESC_BTN_COUNT
 	};
 	enum ConfirmButtons
@@ -68,10 +81,19 @@ namespace TFE_DarkForces
 	};
 	static Vec2i c_escButtons[ESC_BTN_COUNT] =
 	{
+#ifdef _XBOX
+		{64, 35},	// ESC_RESUME
+		{64, 55},	// ESC_PDA
+		{64, 75},	// ESC_ABORT
+		{64, 95},	// ESC_RESPAWN
+		{64, 115},	// ESC_OPTIONS
+		{64, 135},	// ESC_CHEAT
+#else
 		{64, 35},	// ESC_ABORT
 		{64, 55},	// ESC_CONFIG
 		{64, 75},	// ESC_QUIT
 		{64, 99},	// ESC_RETURN
+#endif
 	};
 	static const Vec2i c_escButtonDim = { 96, 16 };
 	static Vec4i s_confirmButtonRange[4];
@@ -118,6 +140,11 @@ namespace TFE_DarkForces
 	bool escapeMenu_getTextures(TextureInfoList& texList, AssetPool pool);
 	void escapeMenu_draw(JBool drawMouse, JBool drawBackground);
 	EscapeMenuAction escapeMenu_updateUI();
+#ifdef _XBOX
+	void escapeMenu_drawXboxOverlay();
+	EscapeMenuAction escapeMenu_updateXboxUI();
+	const char* escapeMenu_xboxButtonName(s32 button);
+#endif
 
 	extern void pauseLevelSound();
 	extern void resumeLevelSound();
@@ -125,6 +152,9 @@ namespace TFE_DarkForces
 
 	void escapeMenu_resetState()
 	{
+#ifdef _XBOX
+		TFE_RenderBackend::xboxSetPauseOverlay(false, 0, 0, false);
+#endif
 		// TFE: GPU Support.
 		if (s_emState.renderTarget)
 		{
@@ -218,9 +248,13 @@ namespace TFE_DarkForces
 
 			// 2. Blit current frame to the new render target.
 			TFE_Jedi::endRender();
+#ifdef _XBOX
+			TFE_RenderBackend::copyBackbufferToRenderTarget(s_emState.renderTarget);
+#else
 			TFE_RenderBackend::swap(true);
 
 			TFE_RenderBackend::copyBackbufferToRenderTarget(s_emState.renderTarget);
+#endif
 			TFE_RenderBackend::unbindRenderTarget();
 		}
 		else // Software renderer code.
@@ -261,19 +295,30 @@ namespace TFE_DarkForces
 		escapeMenu_copyBackground(framebuffer, palette);
 
 		escMenu_resetCursor();
+#ifdef _XBOX
+		s_emState.buttonPressed = ESC_BTN_RESUME;
+		s_emState.buttonHover = true;
+#else
 		s_emState.buttonPressed = -1;
 		s_emState.buttonHover = false;
+#endif
 		s_emState.confirmState = CONFIRM_STATE_NONE;
 	}
 
 	void escapeMenu_resetLevel()
 	{
 		s_emState.escMenuOpen = JFALSE;
+#ifdef _XBOX
+		TFE_RenderBackend::xboxSetPauseOverlay(false, 0, 0, false);
+#endif
 	}
 
 	void escapeMenu_close()
 	{
 		s_emState.escMenuOpen = JFALSE;
+#ifdef _XBOX
+		TFE_RenderBackend::xboxSetPauseOverlay(false, 0, 0, false);
+#endif
 		resumeLevelSound();
 
 		// TFE
@@ -538,12 +583,17 @@ namespace TFE_DarkForces
 
 	EscapeMenuAction escapeMenu_update()
 	{
+#ifndef _XBOX
 		vfb_setPalette(s_escMenuPalette);
+#endif
 
 		EscapeMenuAction action = escapeMenu_updateUI();
 		if (action != ESC_CONTINUE)
 		{
 			s_emState.escMenuOpen = JFALSE;
+#ifdef _XBOX
+			TFE_RenderBackend::xboxSetPauseOverlay(false, 0, 0, false);
+#endif
 			// Avoid sound pops due to buffered sound when returning to the Agent or Main menu.
 			if (!s_levelComplete || action != ESC_ABORT_OR_NEXT)
 			{
@@ -556,7 +606,14 @@ namespace TFE_DarkForces
 			TFE_RenderBackend::bloomPostEnable(true);
 		}
 
-		escapeMenu_draw(JTRUE, JTRUE);
+		if (action == ESC_CONTINUE)
+		{
+#ifdef _XBOX
+			escapeMenu_drawXboxOverlay();
+#else
+			escapeMenu_draw(JTRUE, JTRUE);
+#endif
+		}
 		return action;
 	}
 
@@ -576,23 +633,55 @@ namespace TFE_DarkForces
 				}
 				if (TFE_Input::keyPressed(s_emState.langKeys->k_conf))
 				{
+#ifdef _XBOX
+					actionPressed = ESC_BTN_OPTIONS;
+#else
 					actionPressed = ESC_BTN_CONFIG;
+#endif
 				}
 				if (TFE_Input::keyPressed(s_emState.langKeys->k_quit))
 				{
+#ifndef _XBOX
 					actionPressed = ESC_BTN_QUIT;
+#endif
 				}
 				if (TFE_Input::keyPressed(s_emState.langKeys->k_cont))
 				{
+#ifdef _XBOX
+					actionPressed = ESC_BTN_RESUME;
+#else
 					actionPressed = ESC_BTN_RETURN;
+#endif
 				}
 			}
 
 			switch (actionPressed)
 			{
-			case ESC_BTN_ABORT:
-				s_emState.confirmState = s_levelComplete ? CONFIRM_STATE_NEXT : CONFIRM_STATE_ABORT;
+#ifdef _XBOX
+			case ESC_BTN_RESUME:
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "action Resume");
+				action = ESC_RETURN;
 				break;
+			case ESC_BTN_PDA:
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "action Datapad");
+				action = ESC_PDA;
+				break;
+			case ESC_BTN_RESPAWN:
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "Respawn selected: no checkpoint respawn handler wired yet");
+				break;
+			case ESC_BTN_CHEAT:
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "Enter Cheat Code selected: no cheat-entry UI wired yet");
+				break;
+			case ESC_BTN_ABORT:
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "open Abort Mission confirm");
+				s_emState.confirmState = s_levelComplete ? CONFIRM_STATE_NEXT : CONFIRM_STATE_ABORT;
+				s_emState.buttonPressed = CONFIRM_NO;
+				s_emState.buttonHover = true;
+				break;
+			case ESC_BTN_OPTIONS:
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "Options selected: no options UI wired yet");
+				break;
+#else
 			case ESC_BTN_CONFIG:
 				action = ESC_CONFIG;
 				break;
@@ -602,6 +691,7 @@ namespace TFE_DarkForces
 			case ESC_BTN_RETURN:
 				action = ESC_RETURN;
 				break;
+#endif
 			};
 		}
 		else
@@ -630,25 +720,37 @@ namespace TFE_DarkForces
 				case CONFIRM_YES:
 					if (s_emState.confirmState == CONFIRM_STATE_ABORT || s_emState.confirmState == CONFIRM_STATE_NEXT)
 					{
+						TFE_System::logWrite(LOG_MSG, "PauseMenu", "confirm Yes -> abort/next");
 						action = ESC_ABORT_OR_NEXT;
 					}
 					else
 					{
+						TFE_System::logWrite(LOG_MSG, "PauseMenu", "confirm Yes -> quit");
 						action = ESC_QUIT;
 					}
 					break;
 				case CONFIRM_NO:
+					TFE_System::logWrite(LOG_MSG, "PauseMenu", "confirm No -> return to pause menu");
 					s_emState.confirmState = CONFIRM_STATE_NONE;
+#ifdef _XBOX
+					s_emState.buttonPressed = ESC_BTN_RESUME;
+					s_emState.buttonHover = true;
+#endif
 					break;
 			};
+#ifndef _XBOX
 			s_emState.buttonHover = false;
 			s_emState.buttonPressed = -1;
+#endif
 		}
 		return action;
 	}
 
 	EscapeMenuAction escapeMenu_updateUI()
 	{
+#ifdef _XBOX
+		return escapeMenu_updateXboxUI();
+#endif
 		EscapeMenuAction action = ESC_CONTINUE;
 		escMenu_handleMousePosition();
 		if (inputMapping_getActionState(IADF_MENU_TOGGLE) == STATE_PRESSED || TFE_Input::keyPressed(KEY_ESCAPE))
@@ -747,6 +849,256 @@ namespace TFE_DarkForces
 
 		return action;
 	}
+
+#ifdef _XBOX
+	static const u8 c_xboxPausePanel = 13;
+	static const u8 c_xboxPauseGreen = 12;
+	static const u8 c_xboxPauseWhite = 47;
+
+#include "xboxPauseFont.inc"
+
+	const char* escapeMenu_xboxButtonName(s32 button)
+	{
+		switch (button)
+		{
+			case ESC_BTN_RESUME:  return "Resume";
+			case ESC_BTN_PDA:     return "Datapad";
+			case ESC_BTN_ABORT:   return "Abort Mission";
+			case ESC_BTN_RESPAWN: return "Respawn";
+			case ESC_BTN_OPTIONS: return "Options";
+			case ESC_BTN_CHEAT:   return "Enter Cheat Code";
+		}
+		return "Unknown";
+	}
+
+	static s32 xboxScaleX(s32 x, s32 width)
+	{
+		return (x * width + 320) / 640;
+	}
+
+	static s32 xboxScaleY(s32 y, s32 height)
+	{
+		return (y * height + 240) / 480;
+	}
+
+	static void xboxDrawRect(u8* fb, s32 width, s32 height, s32 x, s32 y, s32 w, s32 h, u8 color)
+	{
+		if (w <= 0 || h <= 0 || x >= width || y >= height || x + w <= 0 || y + h <= 0) return;
+		if (x < 0) { w += x; x = 0; }
+		if (y < 0) { h += y; y = 0; }
+		if (x + w > width)  w = width - x;
+		if (y + h > height) h = height - y;
+
+		for (s32 iy = 0; iy < h; iy++)
+		{
+			memset(&fb[(y + iy) * width + x], color, w);
+		}
+	}
+
+	static void xboxDrawRectBase(u8* fb, s32 width, s32 height, s32 x, s32 y, s32 w, s32 h, u8 color)
+	{
+		const s32 x0 = xboxScaleX(x, width);
+		const s32 y0 = xboxScaleY(y, height);
+		const s32 x1 = xboxScaleX(x + w, width);
+		const s32 y1 = xboxScaleY(y + h, height);
+		xboxDrawRect(fb, width, height, x0, y0, x1 - x0, y1 - y0, color);
+	}
+
+	static void xboxDrawHLineBase(u8* fb, s32 width, s32 height, s32 x, s32 y, s32 w, s32 thickness, u8 color)
+	{
+		xboxDrawRectBase(fb, width, height, x, y, w, thickness, color);
+	}
+
+	static void xboxDrawVLineBase(u8* fb, s32 width, s32 height, s32 x, s32 y, s32 h, s32 thickness, u8 color)
+	{
+		xboxDrawRectBase(fb, width, height, x, y, thickness, h, color);
+	}
+
+	static void xboxDrawTextMask(u8* fb, s32 width, s32 height, XboxPauseTextId id, s32 x, s32 y, bool selected, bool shadow)
+	{
+		const XboxPauseTextSprite* sprite = &c_xboxPauseText[id];
+		const u8* data = sprite->data;
+		const s32 dstX0 = xboxScaleX(x * 2, width);
+		const s32 dstY0 = xboxScaleY(y * 12 / 5, height);
+		const s32 dstW = max(1, xboxScaleX((x + sprite->width) * 2, width) - dstX0);
+		const s32 dstH = max(1, xboxScaleY((y * 12 / 5) + sprite->height * 2, height) - dstY0);
+
+		const s32 shadowOffsetX = max(1, width / 640);
+		const s32 shadowOffsetY = max(1, height / 480);
+		for (s32 py = 0; py < sprite->height; py++)
+		{
+			const s32 rowY0 = dstY0 + (py * dstH) / sprite->height + (shadow ? shadowOffsetY : 0);
+			const s32 rowY1 = dstY0 + ((py + 1) * dstH) / sprite->height + (shadow ? shadowOffsetY : 0);
+			for (s32 px = 0; px < sprite->width; px++)
+			{
+				const u8 coverage = data[py * sprite->width + px];
+				if (coverage)
+				{
+					const s32 colX0 = dstX0 + (px * dstW) / sprite->width + (shadow ? shadowOffsetX : 0);
+					const s32 colX1 = dstX0 + ((px + 1) * dstW) / sprite->width + (shadow ? shadowOffsetX : 0);
+					u8 color = 0;
+					if (!shadow)
+					{
+						if (selected)
+						{
+							color = coverage >= 2 ? c_xboxPauseWhite : 36;
+						}
+						else
+						{
+							color = coverage >= 2 ? 36 : 0;
+						}
+					}
+					xboxDrawRect(fb, width, height, colX0, rowY0, max(1, colX1 - colX0), max(1, rowY1 - rowY0), color);
+				}
+			}
+		}
+	}
+
+	static void xboxDrawText(u8* fb, s32 width, s32 height, XboxPauseTextId id, s32 x, s32 y, bool selected)
+	{
+		xboxDrawTextMask(fb, width, height, id, x, y, selected, true);
+		xboxDrawTextMask(fb, width, height, id, x, y, selected, false);
+	}
+
+	static bool xboxStickPressed(f32 value, bool* latch)
+	{
+		const bool down = value > 0.55f || value < -0.55f;
+		const bool pressed = down && !*latch;
+		*latch = down;
+		return pressed;
+	}
+
+	static void xboxMoveSelection(s32 delta)
+	{
+		if (s_emState.confirmState != CONFIRM_STATE_NONE)
+		{
+			if (s_emState.buttonPressed < 0) s_emState.buttonPressed = CONFIRM_NO;
+			else s_emState.buttonPressed = (s_emState.buttonPressed == CONFIRM_NO) ? CONFIRM_YES : CONFIRM_NO;
+			s_emState.buttonHover = true;
+			return;
+		}
+
+		if (s_emState.buttonPressed < 0) s_emState.buttonPressed = ESC_BTN_RESUME;
+		s_emState.buttonPressed += delta;
+		if (s_emState.buttonPressed < 0) s_emState.buttonPressed = ESC_BTN_COUNT - 1;
+		if (s_emState.buttonPressed >= ESC_BTN_COUNT) s_emState.buttonPressed = 0;
+		s_emState.buttonHover = true;
+		TFE_System::logWrite(LOG_MSG, "PauseMenu", "selection=%d (%s)",
+			s_emState.buttonPressed, escapeMenu_xboxButtonName(s_emState.buttonPressed));
+	}
+
+	EscapeMenuAction escapeMenu_updateXboxUI()
+	{
+		EscapeMenuAction action = ESC_CONTINUE;
+		static bool s_stickYLatched = false;
+		static bool s_stickXLatched = false;
+
+		const f32 ly = TFE_Input::getAxis(AXIS_LEFT_Y);
+		const f32 lx = TFE_Input::getAxis(AXIS_LEFT_X);
+		const bool stickYPressed = xboxStickPressed(ly, &s_stickYLatched);
+		const bool stickXPressed = xboxStickPressed(lx, &s_stickXLatched);
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_UP) ||
+			(stickYPressed && ly > 0.0f))
+		{
+			xboxMoveSelection(-1);
+		}
+		else if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_DOWN) ||
+			(stickYPressed && ly < 0.0f))
+		{
+			xboxMoveSelection(1);
+		}
+
+		if (s_emState.confirmState != CONFIRM_STATE_NONE)
+		{
+			if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_LEFT) ||
+				TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_RIGHT) ||
+				stickXPressed)
+			{
+				xboxMoveSelection(1);
+			}
+		}
+
+		if (inputMapping_getActionState(IADF_MENU_TOGGLE) == STATE_PRESSED ||
+			TFE_Input::buttonPressed(CONTROLLER_BUTTON_B))
+		{
+			if (s_emState.confirmState != CONFIRM_STATE_NONE)
+			{
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "cancel confirm");
+				s_emState.confirmState = CONFIRM_STATE_NONE;
+				s_emState.buttonPressed = ESC_BTN_RESUME;
+				s_emState.buttonHover = true;
+			}
+			else
+			{
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "close via B/Start");
+				action = ESC_RETURN;
+				s_emState.escMenuOpen = JFALSE;
+			}
+			return action;
+		}
+
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A))
+		{
+			TFE_System::logWrite(LOG_MSG, "PauseMenu", "activate selection=%d (%s) confirm=%d",
+				s_emState.buttonPressed,
+				s_emState.confirmState == CONFIRM_STATE_NONE ? escapeMenu_xboxButtonName(s_emState.buttonPressed) :
+					(s_emState.buttonPressed == CONFIRM_YES ? "Confirm Yes" : "Confirm No"),
+				(int)s_emState.confirmState);
+			action = escapeMenu_handleAction(action, s_emState.buttonPressed);
+			if (s_emState.confirmState != CONFIRM_STATE_NONE && s_emState.buttonPressed < 0)
+			{
+				s_emState.buttonPressed = CONFIRM_NO;
+				s_emState.buttonHover = true;
+			}
+		}
+
+		return action;
+	}
+
+	static void xboxDimFramebuffer(u8* fb, s32 width, s32 height)
+	{
+		for (s32 y = 0; y < height; y++)
+		{
+			u8* row = &fb[y * width];
+			for (s32 x = (y & 1); x < width; x += 2)
+			{
+				row[x] = 0;
+			}
+		}
+	}
+
+	static void xboxDrawFrame(u8* fb, s32 width, s32 height, s32 x, s32 y, s32 w, s32 h)
+	{
+		xboxDrawRectBase(fb, width, height, x, y, w, h, c_xboxPausePanel);
+		xboxDrawHLineBase(fb, width, height, x, y, w, 2, c_xboxPauseWhite);
+		xboxDrawHLineBase(fb, width, height, x, y + h - 2, w, 2, 36);
+		xboxDrawVLineBase(fb, width, height, x, y, h, 2, c_xboxPauseWhite);
+		xboxDrawVLineBase(fb, width, height, x + w - 2, y, h, 2, 36);
+		xboxDrawHLineBase(fb, width, height, x + 5, y + 5, w - 10, 2, 36);
+		xboxDrawHLineBase(fb, width, height, x + 5, y + h - 7, w - 10, 2, c_xboxPauseWhite);
+		xboxDrawVLineBase(fb, width, height, x + 5, y + 5, h - 10, 2, 36);
+		xboxDrawVLineBase(fb, width, height, x + w - 7, y + 5, h - 10, 2, c_xboxPauseWhite);
+	}
+
+	static void xboxDrawMenuText(u8* fb, s32 width, s32 height, XboxPauseTextId textId, s32 x, s32 y, bool selected)
+	{
+		if (selected)
+		{
+			const XboxPauseTextSprite* sprite = &c_xboxPauseText[textId];
+			xboxDrawRectBase(fb, width, height, x * 2 - 26, y * 12 / 5 - 5, 300, sprite->height * 2 + 10, c_xboxPauseGreen);
+			xboxDrawText(fb, width, height, XPT_ARROW, x - 23, y + ((sprite->height - c_xboxPauseText[XPT_ARROW].height) >> 1), true);
+		}
+		xboxDrawText(fb, width, height, textId, x, y, selected);
+	}
+
+	void escapeMenu_drawXboxOverlay()
+	{
+		TFE_RenderBackend::xboxSetPauseOverlay(true,
+			s_emState.buttonPressed,
+			s_emState.buttonPressed,
+			s_emState.confirmState != CONFIRM_STATE_NONE);
+	}
+#endif
 
 	// The cursor is handled independently for the Escape Menu for now so it can later handle
 	// widescreen. However, it may be better to merge these functions anyway.

@@ -2,6 +2,7 @@
 
 #include "missionBriefing.h"
 #include "menu.h"
+#include "uiDraw.h"
 #include <TFE_DarkForces/Landru/lactorDelt.h>
 #include <TFE_DarkForces/Landru/lactorAnim.h>
 #include <TFE_DarkForces/Landru/lpalette.h>
@@ -48,6 +49,19 @@ namespace TFE_DarkForces
 	static LPalette* s_palette = nullptr;
 	static u8* s_framebuffer = nullptr;
 	static LangHotkeys* s_langKeys;
+#ifdef _XBOX
+	static BriefingButton s_xboxSelectedButton = BRIEF_BTN_OK;
+	static s32 s_xboxNavX = 0;
+	static s32 s_xboxNavY = 0;
+	static JBool s_xboxShowObjectives = JFALSE;
+	static bool s_xboxPrevA = false;
+	static bool s_xboxPrevB = false;
+	static bool s_xboxPrevX = false;
+	static bool s_xboxPrevY = false;
+	static bool s_xboxPrevBack = false;
+	static bool s_xboxPrevLB = false;
+	static bool s_xboxPrevRB = false;
+#endif
 
 	s16 s_briefY;
 	s32 s_briefingMaxY;
@@ -91,6 +105,22 @@ namespace TFE_DarkForces
 
 		s_briefingOpen = JFALSE;
 		s_skill = skill;
+#ifdef _XBOX
+		s_xboxSelectedButton = BRIEF_BTN_OK;
+		s_xboxNavX = 0;
+		s_xboxNavY = 0;
+		s_xboxShowObjectives = JFALSE;
+		s_xboxPrevA = TFE_Input::buttonDown(CONTROLLER_BUTTON_A);
+		s_xboxPrevB = TFE_Input::buttonDown(CONTROLLER_BUTTON_B);
+		s_xboxPrevX = TFE_Input::buttonDown(CONTROLLER_BUTTON_X);
+		s_xboxPrevY = TFE_Input::buttonDown(CONTROLLER_BUTTON_Y);
+		s_xboxPrevBack = TFE_Input::buttonDown(CONTROLLER_BUTTON_BACK);
+		s_xboxPrevLB = TFE_Input::buttonDown(CONTROLLER_BUTTON_LEFTSHOULDER);
+		s_xboxPrevRB = TFE_Input::buttonDown(CONTROLLER_BUTTON_RIGHTSHOULDER);
+		s_buttonPressed = -1;
+		s_buttonHover = JFALSE;
+		s_keyPressed = -1;
+#endif
 
 		if (!menu_openResourceArchive(archive))
 		{
@@ -219,11 +249,183 @@ namespace TFE_DarkForces
 			if (s_briefY > s_briefingMaxY) { s_briefY = s_briefingMaxY; }
 		}
 	}
+
+#ifdef _XBOX
+	JBool missionBriefing_xboxPressed(Button button, bool* prevDown)
+	{
+		const bool down = TFE_Input::buttonDown(button);
+		const JBool pressed = (down && !*prevDown) ? JTRUE : JFALSE;
+		*prevDown = down;
+		return pressed;
+	}
+
+	void missionBriefing_activateButton(BriefingButton button, JBool* abort, JBool* exitBriefing)
+	{
+		s_keyPressed = button;
+		TFE_System::logWrite(LOG_MSG, "MissionBriefing", "activate button=%d", button);
+
+		switch (button)
+		{
+			case BRIEF_BTN_OK:
+			{
+				*abort = JFALSE;
+				*exitBriefing = JTRUE;
+			} break;
+			case BRIEF_BTN_UP:
+			{
+				missionBriefing_scroll(-BRIEF_LINE_SCROLL);
+			} break;
+			case BRIEF_BTN_DOWN:
+			{
+				missionBriefing_scroll(BRIEF_LINE_SCROLL);
+			} break;
+			case BRIEF_BTN_CANCEL:
+			{
+				*abort = JTRUE;
+				*exitBriefing = JTRUE;
+			} break;
+			case BRIEF_BTN_EASY:
+			{
+				s_skill = 0;
+			} break;
+			case BRIEF_BTN_MEDIUM:
+			{
+				s_skill = 1;
+			} break;
+			case BRIEF_BTN_HARD:
+			{
+				s_skill = 2;
+			} break;
+			default:
+			{
+			} break;
+		}
+	}
+
+	BriefingButton missionBriefing_buttonFromVisualIndex(s32 index)
+	{
+		static const BriefingButton c_order[] =
+		{
+			BRIEF_BTN_EASY,
+			BRIEF_BTN_MEDIUM,
+			BRIEF_BTN_HARD,
+			BRIEF_BTN_CANCEL,
+			BRIEF_BTN_UP,
+			BRIEF_BTN_DOWN,
+			BRIEF_BTN_OK,
+		};
+		if (index < 0) { index = 0; }
+		if (index >= (s32)TFE_ARRAYSIZE(c_order)) { index = (s32)TFE_ARRAYSIZE(c_order) - 1; }
+		return c_order[index];
+	}
+
+	s32 missionBriefing_visualIndexFromButton(BriefingButton button)
+	{
+		static const BriefingButton c_order[] =
+		{
+			BRIEF_BTN_EASY,
+			BRIEF_BTN_MEDIUM,
+			BRIEF_BTN_HARD,
+			BRIEF_BTN_CANCEL,
+			BRIEF_BTN_UP,
+			BRIEF_BTN_DOWN,
+			BRIEF_BTN_OK,
+		};
+		for (s32 i = 0; i < (s32)TFE_ARRAYSIZE(c_order); i++)
+		{
+			if (c_order[i] == button) { return i; }
+		}
+		return (s32)TFE_ARRAYSIZE(c_order) - 1;
+	}
+
+	JBool missionBriefing_handleXboxInput(JBool* abort)
+	{
+		JBool exitBriefing = JFALSE;
+		s_buttonPressed = -1;
+		s_buttonHover = JFALSE;
+		s_keyPressed = -1;
+
+		const f32 ly = TFE_Input::getAxis(AXIS_LEFT_Y);
+		const s32 axisY = ly > 0.45f ? 1 : (ly < -0.45f ? -1 : 0);
+		const JBool aPressed = missionBriefing_xboxPressed(CONTROLLER_BUTTON_A, &s_xboxPrevA);
+		const JBool bPressed = missionBriefing_xboxPressed(CONTROLLER_BUTTON_B, &s_xboxPrevB);
+		const JBool xPressed = missionBriefing_xboxPressed(CONTROLLER_BUTTON_X, &s_xboxPrevX);
+		const JBool yPressed = missionBriefing_xboxPressed(CONTROLLER_BUTTON_Y, &s_xboxPrevY);
+		const JBool backPressed = missionBriefing_xboxPressed(CONTROLLER_BUTTON_BACK, &s_xboxPrevBack);
+		const JBool lbPressed = missionBriefing_xboxPressed(CONTROLLER_BUTTON_LEFTSHOULDER, &s_xboxPrevLB);
+		const JBool rbPressed = missionBriefing_xboxPressed(CONTROLLER_BUTTON_RIGHTSHOULDER, &s_xboxPrevRB);
+
+		s32 moveY = 0;
+		if (TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_UP))   { moveY = -1; }
+		if (TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_DOWN)) { moveY =  1; }
+		if (axisY) { moveY = -axisY; }
+
+		if (moveY && ltime_isFrameReady())
+		{
+			s_keyPressed = moveY < 0 ? BRIEF_BTN_UP : BRIEF_BTN_DOWN;
+			missionBriefing_scroll(moveY < 0 ? -BRIEF_LINE_SCROLL : BRIEF_LINE_SCROLL);
+		}
+
+		if (lbPressed)
+		{
+			s_keyPressed = BRIEF_BTN_UP;
+			missionBriefing_scroll(-BRIEF_PAGE_SCROLL);
+		}
+		else if (rbPressed)
+		{
+			s_keyPressed = BRIEF_BTN_DOWN;
+			missionBriefing_scroll(BRIEF_PAGE_SCROLL);
+		}
+
+		if (aPressed)
+		{
+			TFE_System::logWrite(LOG_MSG, "MissionBriefing", "A START");
+			missionBriefing_activateButton(BRIEF_BTN_OK, abort, &exitBriefing);
+		}
+		else if (bPressed || backPressed)
+		{
+			TFE_System::logWrite(LOG_MSG, "MissionBriefing", "B/BACK ABORT");
+			s_keyPressed = BRIEF_BTN_CANCEL;
+			*abort = JTRUE;
+			exitBriefing = JTRUE;
+		}
+		else if (xPressed)
+		{
+			s_xboxShowObjectives = !s_xboxShowObjectives;
+			TFE_System::logWrite(LOG_MSG, "MissionBriefing", "toggle view=%s", s_xboxShowObjectives ? "objectives" : "briefing");
+		}
+		else if (yPressed)
+		{
+			s_skill = (s_skill + 1) % 3;
+			TFE_System::logWrite(LOG_MSG, "MissionBriefing", "difficulty=%d", s_skill);
+		}
+
+		s_xboxNavY = axisY;
+		return exitBriefing;
+	}
+
+	void missionBriefing_drawXboxFooter()
+	{
+		LRect strip = { 164, 0, 200, 320 };
+		const char* viewPrompt = s_xboxShowObjectives ? "BRIEFING" : "OBJECTIVES";
+		const char* skillPrompt = s_skill == 0 ? "EASY" : (s_skill == 1 ? "MEDIUM" : "HARD");
+		drawClippedColorRect(&strip, 0);
+		print("A START", 8, 190, 12, s_framebuffer);
+		print("B ABORT", 61, 190, 39, s_framebuffer);
+		print("X", 118, 190, 34, s_framebuffer);
+		print(viewPrompt, 130, 190, 47, s_framebuffer);
+		print("Y", 218, 190, 43, s_framebuffer);
+		print(skillPrompt, 230, 190, 47, s_framebuffer);
+	}
+#endif
 		
 	JBool missionBriefing_handleInput(JBool* abort)
 	{
 		JBool exitBriefing = JFALSE;
 
+#ifdef _XBOX
+		return missionBriefing_handleXboxInput(abort);
+#else
 		// Add support for mouse wheel scrolling.
 		s32 wdx, wdy;
 		TFE_Input::getMouseWheel(&wdx, &wdy);
@@ -384,6 +586,7 @@ namespace TFE_DarkForces
 		}
 
 		return exitBriefing;
+#endif
 	}
 
 	JBool missionBriefing_update(s32* skill, JBool* abort)
@@ -411,11 +614,13 @@ namespace TFE_DarkForces
 		lactor_setState(s_menuActor, 0, 0);
 		lactorAnim_draw(s_menuActor, &s_viewBounds, &s_viewBounds, 0, 0, JTRUE);
 
+#ifndef _XBOX
 		// Buttons
 		for (s32 i = 0; i < BRIEF_BTN_COUNT; i++)
 		{
 			drawButton(BriefingButton(i));
 		}
+#endif
 
 		// Briefing Text.
 		LRect rect = s_missionTextRect;
@@ -427,7 +632,11 @@ namespace TFE_DarkForces
 		lactorDelt_draw(s_briefActor, &rect, &s_missionTextRect, x, y, JTRUE);
 		lcanvas_clearClipRect();
 
+#ifndef _XBOX
 		menu_blitCursor(s_cursorPos.x, s_cursorPos.z, s_framebuffer);
+#else
+		missionBriefing_drawXboxFooter();
+#endif
 		menu_blitToScreen();
 		return JTRUE;
 	}

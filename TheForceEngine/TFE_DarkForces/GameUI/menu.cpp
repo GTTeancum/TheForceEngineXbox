@@ -121,21 +121,32 @@ namespace TFE_DarkForces
 		FilePath lfdPath;
 		if (!TFE_Paths::getFilePath(name, &lfdPath))
 		{
+			TFE_System::logWrite(LOG_ERROR, "Menu", "resource archive '%s' not found", name);
 			return JFALSE;
 		}
 		// Load the mission briefing text.
 		if (!s_archive.open(lfdPath.path))
 		{
+			TFE_System::logWrite(LOG_ERROR, "Menu", "failed to open resource archive '%s' path='%s'", name, lfdPath.path);
 			return JFALSE;
 		}
-		TFE_Paths::addLocalArchive(&s_archive);
+		TFE_Paths::addLocalArchiveToFront(&s_archive);
+
+		const u32 fileCount = s_archive.getFileCount();
+		TFE_System::logWrite(LOG_MSG, "Menu", "opened resource archive '%s' path='%s' files=%u", name, lfdPath.path, fileCount);
+		const u32 logCount = fileCount < 12 ? fileCount : 12;
+		for (u32 i = 0; i < logCount; i++)
+		{
+			TFE_System::logWrite(LOG_MSG, "Menu", "  [%u] %s (%u bytes)", i, s_archive.getFileName(i), s_archive.getFileLength(i));
+		}
 		return JTRUE;
 	}
 
 	void menu_closeResourceArchive()
 	{
+		TFE_Paths::removeFirstArchive();
 		s_archive.close();
-		TFE_Paths::removeLastArchive();
+		TFE_System::logWrite(LOG_MSG, "Menu", "closed resource archive");
 	}
 
 	void menu_blitToScreen(u8* framebuffer/*=nullptr*/, JBool transparent/*=JFALSE*/, JBool swap/*=JTRUE*/)

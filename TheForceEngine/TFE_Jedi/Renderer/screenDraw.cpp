@@ -63,6 +63,11 @@ namespace TFE_Jedi
 
 	void screenDraw_beginQuads(u32 width, u32 height)
 	{
+#ifdef _XBOX
+		screenGPU_beginImageQuads(width, height);
+		screenGPU_beginQuads(width, height);
+		return;
+#endif
 		if (s_gpuEnabled)
 		{
 			screenGPU_beginImageQuads(width, height);
@@ -72,6 +77,11 @@ namespace TFE_Jedi
 
 	void screenDraw_endQuads()
 	{
+#ifdef _XBOX
+		screenGPU_endImageQuads();
+		screenGPU_endQuads();
+		return;
+#endif
 		if (s_gpuEnabled)
 		{
 			screenGPU_endImageQuads();
