@@ -34,6 +34,7 @@
 #include <TFE_DarkForces/GameUI/xboxPauseFont.inc>
 #include <TFE_RenderBackend/xboxStartLogo.inc>
 #include <TFE_RenderBackend/xboxStartFont.inc>
+#include <TFE_RenderBackend/xboxBriefingPromptFont.inc>
 
 // ---------------------------------------------------------------------------
 // Output resolution
@@ -133,11 +134,17 @@ namespace TFE_RenderBackend
     // Max virtual display size: 1280x960 to be safe. ~5MB.
     #define MAX_VDISP_PIXELS (1280 * 960)
     static u32 s_expandBuf[MAX_VDISP_PIXELS];
+    static u32 s_captureBuf[MAX_VDISP_PIXELS];
+    static bool s_captureBufValid = false;
 
     static bool s_pauseOverlayEnabled = false;
     static s32  s_pauseSelection = 0;
     static s32  s_pauseConfirmSelection = 0;
     static bool s_pauseConfirmOpen = false;
+    static s32  s_pauseNotice = 0;
+    static bool s_briefingFooterEnabled = false;
+    static bool s_briefingFooterObjectivesPrompt = true;
+    static s32  s_briefingFooterDifficulty = 1;
     static bool s_startScreenEnabled = false;
     static s32  s_startSelection = 0;
     static u32  s_startFrame = 0;
@@ -146,6 +153,22 @@ namespace TFE_RenderBackend
     static u32  s_loadFrame = 0;
     static const XboxLoadSlotInfo* s_loadSlots = NULL;
     static s32  s_loadSlotCount = 0;
+    static bool s_modScreenEnabled = false;
+    static s32  s_modSelection = 0;
+    static u32  s_modFrame = 0;
+    static XboxModInfo s_mods[12];
+    static s32  s_modCount = 0;
+    static bool s_optionsScreenEnabled = false;
+    static bool s_optionsPauseStyle = false;
+    static s32  s_optionsSelection = 0;
+    static s32  s_optionsScroll = 0;
+    static u32  s_optionsFrame = 0;
+    static XboxOptionsItem s_optionsItems[12];
+    static s32  s_optionsItemCount = 0;
+    static bool s_missionCompleteScreenEnabled = false;
+    static s32  s_missionCompleteSelection = 0;
+    static u32  s_missionCompleteFrame = 0;
+    static XboxMissionCompleteInfo s_missionCompleteInfo = { 0, 0, 0, 0 };
 
     static const u32 XPAUSE_GREEN_DARK  = 0xFF003800u;
     static const u32 XPAUSE_GREEN_MID   = 0xFF00A000u;
@@ -274,12 +297,22 @@ namespace TFE_RenderBackend
         const s32 rowX = boxX + 105;
         const s32 firstY = boxY + 30;
         const s32 step = XPAUSE_ROW_STEP;
-        if (!s_pauseConfirmOpen)
+        if (s_pauseNotice != 0)
+        {
+            const bool saved = s_pauseNotice == 1;
+            pauseDrawText(s_expandBuf, width, height, XPT_QUICK_SAVE,
+                boxX + boxW / 2 - c_xboxPauseText[XPT_QUICK_SAVE].width / 2, boxY + 92, true);
+            pauseDrawText(s_expandBuf, width, height, saved ? XPT_GAME_SAVED : XPT_SAVE_FAILED,
+                boxX + boxW / 2 - c_xboxPauseText[saved ? XPT_GAME_SAVED : XPT_SAVE_FAILED].width / 2, boxY + 138, saved);
+            pauseDrawText(s_expandBuf, width, height, XPT_PRESS_A,
+                boxX + boxW / 2 - c_xboxPauseText[XPT_PRESS_A].width / 2, boxY + 195, false);
+        }
+        else if (!s_pauseConfirmOpen)
         {
             pauseDrawMenuRow(s_expandBuf, width, height, XPT_RESUME,  rowX, firstY + step * 0, s_pauseSelection == 0);
             pauseDrawMenuRow(s_expandBuf, width, height, XPT_DATAPAD, rowX, firstY + step * 1, s_pauseSelection == 1);
             pauseDrawMenuRow(s_expandBuf, width, height, XPT_ABORT,   rowX, firstY + step * 2, s_pauseSelection == 2);
-            pauseDrawMenuRow(s_expandBuf, width, height, XPT_RESPAWN, rowX, firstY + step * 3, s_pauseSelection == 3);
+            pauseDrawMenuRow(s_expandBuf, width, height, XPT_QUICK_SAVE, rowX, firstY + step * 3, s_pauseSelection == 3);
             pauseDrawMenuRow(s_expandBuf, width, height, XPT_OPTIONS, rowX, firstY + step * 4, s_pauseSelection == 4);
             pauseDrawMenuRow(s_expandBuf, width, height, XPT_CHEAT,   rowX, firstY + step * 5, s_pauseSelection == 5);
         }
@@ -487,12 +520,74 @@ namespace TFE_RenderBackend
         loadDrawText(dst, width, height, text, rightX - loadTextWidth(text, scale), y, scale, color);
     }
 
+    static void loadDrawTextCenter(u32* dst, s32 width, s32 height, const char* text, s32 centerX, s32 y, s32 scale, u32 color)
+    {
+        if (!text) return;
+        loadDrawText(dst, width, height, text, centerX - loadTextWidth(text, scale) / 2, y, scale, color);
+    }
+
     static void loadStrokeRect(u32* dst, s32 width, s32 height, s32 x, s32 y, s32 w, s32 h, u32 color)
     {
         pauseFillRect(dst, width, height, x, y, w, 1, color);
         pauseFillRect(dst, width, height, x, y + h - 1, w, 1, color);
         pauseFillRect(dst, width, height, x, y, 1, h, color);
         pauseFillRect(dst, width, height, x + w - 1, y, 1, h, color);
+    }
+
+    static void briefingDrawPromptTextRaw(u32* dst, s32 width, s32 height, XboxBriefingPromptTextId id, s32 x, s32 y, u32 primary, bool shadow)
+    {
+        const XboxBriefingPromptTextSprite* s = &c_xboxBriefingPromptText[id];
+        const s32 ox = shadow ? 2 : 0;
+        const s32 oy = shadow ? 2 : 0;
+        for (s32 py = 0; py < s->height; py++)
+        {
+            const s32 dy = y + oy + py;
+            if (dy < 0 || dy >= height) continue;
+            for (s32 px = 0; px < s->width; px++)
+            {
+                const u8 cov = s->data[py * s->width + px];
+                if (!cov) continue;
+                const s32 dx = x + ox + px;
+                if (dx < 0 || dx >= width) continue;
+                const u32 src = shadow ? XPAUSE_BLACK : primary;
+                const u32 a = shadow ? (u32)(cov * 44) : (u32)(cov * 64);
+                u32* pixel = dst + dy * width + dx;
+                *pixel = pauseBlend(*pixel | 0xFF000000u, src, (u32)pauseClamp((s32)a, 0, 255));
+            }
+        }
+    }
+
+    static void briefingDrawPromptText(XboxBriefingPromptTextId id, s32 x, s32 y, u32 color)
+    {
+        briefingDrawPromptTextRaw(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, id, x, y, color, true);
+        briefingDrawPromptTextRaw(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, id, x, y, color, false);
+    }
+
+    static void briefingDrawButtonBox(const char* button, s32 x, s32 y, u32 buttonColor)
+    {
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, x, y, 18, 18, 0xFF101010u);
+        loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, x, y, 18, 18, buttonColor);
+        loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, button, x + 9, y + 4, 1, buttonColor);
+    }
+
+    static void briefingCompositeFooter()
+    {
+        if (!s_briefingFooterEnabled) return;
+
+        const s32 y = XBOX_OUTPUT_HEIGHT - 54;
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 0, y - 8, XBOX_OUTPUT_WIDTH, 62, 0xFF000000u);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 0, y - 10, XBOX_OUTPUT_WIDTH, 1, 0xFF3C2E10u);
+
+        XboxBriefingPromptTextId diffText = XBF_X_DIFF_MEDIUM;
+        if (s_briefingFooterDifficulty <= 0) diffText = XBF_X_DIFF_EASY;
+        else if (s_briefingFooterDifficulty >= 2) diffText = XBF_X_DIFF_HARD;
+
+        briefingDrawButtonBox("A", 28, y + 2, 0xFF20E050u);
+        briefingDrawPromptText(XBF_A_START, 52, y - 2, 0xFFE8E8E8u);
+        briefingDrawButtonBox("B", 138, y + 2, 0xFFE8E8E8u);
+        briefingDrawPromptText(XBF_B_ABORT, 162, y - 2, 0xFFE8E8E8u);
+        briefingDrawButtonBox("X", 255, y + 2, 0xFF64A8FFu);
+        briefingDrawPromptText(diffText, 279, y - 2, 0xFFE8E8E8u);
     }
 
     static void loadDrawThumb(u32* dst, s32 width, s32 height, const u32* image, s32 x, s32 y, s32 w, s32 h)
@@ -586,6 +681,259 @@ namespace TFE_RenderBackend
         loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 562, 344, 64, 31, selectedValid ? 0xFFFF3030u : 0xFF4F4A34u);
         loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "LOAD", 581, 354, 1, selectedValid ? 0xFFFF3030u : 0xFF4F4A34u);
         loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "A LOAD   B BACK", 14, 450, 1, 0xFF8E8B72u);
+    }
+
+    static void modDrawWrappedText(const char* text, s32 x, s32 y, s32 maxChars, s32 maxLines, u32 color)
+    {
+        if (!text || !text[0]) return;
+        char line[80];
+        const char* p = text;
+        for (s32 lineIndex = 0; lineIndex < maxLines && *p; lineIndex++)
+        {
+            while (*p == ' ') p++;
+            s32 len = 0;
+            s32 lastSpace = -1;
+            while (p[len] && len < maxChars)
+            {
+                if (p[len] == ' ') lastSpace = len;
+                len++;
+            }
+            if (p[len] && lastSpace > 0) len = lastSpace;
+            if (len > 70) len = 70;
+            memcpy(line, p, len);
+            line[len] = 0;
+            loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, line, x, y + lineIndex * 15, 1, color);
+            p += len;
+        }
+    }
+
+    static void modBuildFrame()
+    {
+        startDrawStarfield(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_modFrame);
+
+        startDrawTextSprite(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, XST_START_MOD,
+                            (XBOX_OUTPUT_WIDTH - c_xboxStartText[XST_START_MOD].width) / 2, 38,
+                            0xFFFF3030u, true);
+        loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "- SELECT AN INSTALLED MOD -", XBOX_OUTPUT_WIDTH / 2, 76, 1, 0xFF8E8B72u);
+
+        const s32 listX = 42;
+        const s32 listY = 112;
+        const s32 listW = 385;
+        const s32 rowH = 38;
+        const s32 visibleRows = 6;
+        s32 firstMod = s_modSelection - visibleRows + 1;
+        if (firstMod < 0) firstMod = 0;
+        if (firstMod > s_modCount - visibleRows) firstMod = s_modCount - visibleRows;
+        if (firstMod < 0) firstMod = 0;
+        for (s32 i = 0; i < visibleRows; i++)
+        {
+            const s32 modIndex = firstMod + i;
+            const s32 y = listY + i * rowH;
+            const bool valid = modIndex < s_modCount && s_mods[modIndex].valid;
+            const bool selected = modIndex == s_modSelection;
+            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, listX, y, listW, 28, selected ? 0xFF24180Eu : 0xFF100D07u);
+            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, listX, y, listW, 28, selected ? 0xFFFF3030u : 0xFF4F4A34u);
+
+            char idx[8];
+            sprintf(idx, "%02d", modIndex + 1);
+            loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, idx, listX + 12, y + 8, 1, selected ? 0xFFFF3030u : 0xFF8E8B72u);
+            loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, valid ? s_mods[modIndex].title : "- EMPTY SLOT -",
+                listX + 58, y + 8, 1, selected ? 0xFFFF3030u : (valid ? 0xFFE0D8B8u : 0xFF4F4A34u));
+        }
+
+        const bool selectedValid = s_modSelection >= 0 && s_modSelection < s_modCount && s_mods[s_modSelection].valid;
+        const XboxModInfo* selectedMod = selectedValid ? &s_mods[s_modSelection] : NULL;
+        const s32 panelX = 446;
+        const s32 panelY = 112;
+        const s32 panelW = 168;
+        const s32 panelH = 264;
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xFF080604u);
+        loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xFF4F4A34u);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 10, panelY + 10, panelW - 20, 84, 0xFF160F08u);
+        loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 10, panelY + 10, panelW - 20, 84, 0xFF3F3420u);
+        modDrawWrappedText(selectedValid ? selectedMod->description : "Drop ZIP mods into the Mods folder. Use a matching _metadata.txt file for title, author, version, missions, and description.", panelX + 10, panelY + 112, 25, 5, selectedValid ? 0xFFFF3030u : 0xFF8E8B72u);
+
+        const s32 valueRightX = panelX + panelW - 12;
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "AUTHOR", panelX + 10, panelY + 208, 1, 0xFF8E8B72u);
+        loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, selectedValid ? selectedMod->author : "-", valueRightX, panelY + 208, 1, 0xFFFF3030u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "VERSION", panelX + 10, panelY + 232, 1, 0xFF8E8B72u);
+        loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, selectedValid ? selectedMod->version : "-", valueRightX, panelY + 232, 1, 0xFFFF3030u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "MISSIONS", panelX + 10, panelY + 256, 1, 0xFF8E8B72u);
+        char missionText[16];
+        sprintf(missionText, "%d", selectedValid ? selectedMod->missionCount : 0);
+        loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, selectedValid ? missionText : "-", valueRightX, panelY + 256, 1, 0xFFFF3030u);
+
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 0, 424, XBOX_OUTPUT_WIDTH, 56, XPAUSE_BLACK);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 0, 422, XBOX_OUTPUT_WIDTH, 1, 0xFF3C2E10u);
+        loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "Visit https://df-21.net/downloads/levels/ for more mods!", XBOX_OUTPUT_WIDTH / 2, 430, 1, 0xFF8E8B72u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "A START", 14, 450, 1, selectedValid ? 0xFF33D033u : 0xFF4F4A34u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "B BACK", 118, 450, 1, 0xFF8E8B72u);
+    }
+
+    static void optionsDrawTriangle(s32 cx, s32 y, s32 halfW, s32 h, bool up, u32 color)
+    {
+        for (s32 row = 0; row < h; row++)
+        {
+            const s32 span = up ? row : (h - 1 - row);
+            const s32 w = (span * halfW) / (h - 1);
+            for (s32 x = cx - w; x <= cx + w; x++)
+            {
+                const s32 py = y + row;
+                if (x < 0 || x >= XBOX_OUTPUT_WIDTH || py < 0 || py >= XBOX_OUTPUT_HEIGHT) continue;
+                s_expandBuf[py * XBOX_OUTPUT_WIDTH + x] = color;
+            }
+        }
+    }
+
+    static void optionsDrawSlider(s32 x, s32 y, s32 w, const XboxOptionsItem* item, bool selected, bool pauseStyle)
+    {
+        const u32 dim = pauseStyle ? 0xFF5F775Fu : 0xFF4F4A34u;
+        const u32 fill = pauseStyle ? XPAUSE_GREEN_EDGE : 0xFFFF3030u;
+        const u32 knob = selected ? 0xFFE8E8E8u : 0xFF8E8B72u;
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, x, y + 7, w, 4, dim);
+
+        s32 range = item->maxValue - item->minValue;
+        if (range <= 0) range = 1;
+        s32 pos = ((item->value - item->minValue) * w) / range;
+        if (pos < 0) pos = 0;
+        if (pos > w) pos = w;
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, x, y + 7, pos, 4, fill);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, x + pos - 3, y + 2, 6, 14, knob);
+    }
+
+    static void optionsDrawRows(s32 panelX, s32 panelY, s32 panelW, s32 firstY, bool pauseStyle)
+    {
+        const s32 visibleRows = 6;
+        const s32 rowH = 42;
+        const s32 labelX = panelX + 34;
+        const s32 sliderX = panelX + panelW - 218;
+        const s32 sliderW = 136;
+        const u32 normalText = pauseStyle ? 0xFFC8C8C8u : 0xFF8E8B72u;
+        const u32 selectedText = pauseStyle ? XPAUSE_WHITE : 0xFFFF3030u;
+
+        for (s32 row = 0; row < visibleRows; row++)
+        {
+            const s32 index = s_optionsScroll + row;
+            if (index < 0 || index >= s_optionsItemCount) continue;
+
+            const bool selected = index == s_optionsSelection;
+            const s32 y = firstY + row * rowH;
+            if (selected)
+            {
+                const u32 bar = pauseStyle ? XPAUSE_GREEN_MID : 0xFF24180Eu;
+                pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 18, y - 8, panelW - 36, 30, bar);
+            }
+
+            loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_optionsItems[index].label,
+                labelX, y, 1, selected ? selectedText : normalText);
+            optionsDrawSlider(sliderX, y, sliderW, &s_optionsItems[index], selected, pauseStyle);
+
+            char valueText[16];
+            sprintf(valueText, "%d", s_optionsItems[index].value);
+            loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, valueText,
+                panelX + panelW - 28, y, 1, selected ? selectedText : normalText);
+        }
+    }
+
+    static void optionsBuildFrame()
+    {
+        if (s_optionsPauseStyle)
+        {
+            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 0, 0, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, XPAUSE_BLACK);
+        }
+        else
+        {
+            startDrawStarfield(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_optionsFrame);
+        }
+
+        const bool pauseStyle = s_optionsPauseStyle;
+        const s32 panelX = pauseStyle ? 82 : 86;
+        const s32 panelY = pauseStyle ? 58 : 76;
+        const s32 panelW = pauseStyle ? 476 : 468;
+        const s32 panelH = pauseStyle ? 340 : 324;
+
+        if (pauseStyle)
+        {
+            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 5, panelY + 5, panelW, panelH, XPAUSE_GREY_DARK);
+            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, XPAUSE_GREEN_DARK);
+            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, XPAUSE_GREY);
+            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 6, panelY + 6, panelW - 12, panelH - 12, XPAUSE_GREEN_EDGE);
+        }
+        else
+        {
+            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xCC080604u);
+            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xFF4F4A34u);
+        }
+
+        startDrawTextSprite(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, XST_OPTIONS,
+            (XBOX_OUTPUT_WIDTH - c_xboxStartText[XST_OPTIONS].width) / 2, pauseStyle ? 24 : 34,
+            pauseStyle ? XPAUSE_WHITE : 0xFFFF3030u, !pauseStyle);
+
+        optionsDrawRows(panelX, panelY, panelW, panelY + 72, pauseStyle);
+
+        const u32 arrowColor = pauseStyle ? XPAUSE_GREEN_EDGE : 0xFFFF3030u;
+        if (s_optionsScroll > 0)
+        {
+            optionsDrawTriangle(panelX + panelW - 18, panelY + 52, 7, 10, true, arrowColor);
+        }
+        if (s_optionsScroll + 6 < s_optionsItemCount)
+        {
+            optionsDrawTriangle(panelX + panelW - 18, panelY + panelH - 32, 7, 10, false, arrowColor);
+        }
+
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 0, 424, XBOX_OUTPUT_WIDTH, 56, XPAUSE_BLACK);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 0, 422, XBOX_OUTPUT_WIDTH, 1, pauseStyle ? 0xFF1B6A1Bu : 0xFF3C2E10u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "A APPLY", 14, 450, 1, 0xFF33D033u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "B BACK", 118, 450, 1, 0xFF8E8B72u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "DPAD/STICK ADJUST", 226, 450, 1, 0xFF8E8B72u);
+    }
+
+    static void missionCompleteBuildFrame()
+    {
+        startDrawStarfield(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_missionCompleteFrame);
+
+        loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "MISSION ACCOMPLISHED", XBOX_OUTPUT_WIDTH / 2, 120, 4, 0xFFFF3030u);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 94, 156, 452, 2, 0xFFFF3030u);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 94, 160, 452, 1, 0xFF661010u);
+
+        char timeText[16];
+        char secretText[16];
+        const u32 seconds = s_missionCompleteInfo.seconds;
+        const u32 minutes = seconds / 60;
+        sprintf(timeText, "%02u:%02u", (unsigned)minutes, (unsigned)(seconds % 60));
+        sprintf(secretText, "%d/%d", s_missionCompleteInfo.secretsFound, s_missionCompleteInfo.secretsTotal);
+
+        const char* diffText = "MEDIUM";
+        if (s_missionCompleteInfo.difficulty <= 0) diffText = "EASY";
+        else if (s_missionCompleteInfo.difficulty >= 2) diffText = "HARD";
+
+        const s32 statsY = 205;
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "TIME", 150, statsY, 1, 0xFF33D033u);
+        loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, timeText, 250, statsY, 1, 0xFF33FF33u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "SECRETS", 284, statsY, 1, 0xFF33D033u);
+        loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, secretText, 390, statsY, 1, 0xFF33FF33u);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "DIFFICULTY", 424, statsY, 1, 0xFF33D033u);
+        loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, diffText, 526, statsY, 1, 0xFF33FF33u);
+
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 150, statsY + 18, 100, 1, 0xFF143814u);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 284, statsY + 18, 106, 1, 0xFF143814u);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 424, statsY + 18, 102, 1, 0xFF143814u);
+
+        loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "SAVE GAME?", XBOX_OUTPUT_WIDTH / 2, 280, 3, 0xFFFF3030u);
+
+        const s32 yesX = 244;
+        const s32 noX = 360;
+        const s32 buttonY = 340;
+        const bool yesSelected = s_missionCompleteSelection == 0;
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, yesX, buttonY, 84, 32, yesSelected ? 0xFF381010u : 0xFF201C12u);
+        loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, yesX, buttonY, 84, 32, yesSelected ? 0xFFFF3030u : 0xFF8E8B72u);
+        loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "YES", yesX + 42, buttonY + 10, 2, yesSelected ? 0xFFFF3030u : 0xFFE0D8B8u);
+
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, noX, buttonY, 72, 32, !yesSelected ? 0xFF381010u : 0xFF201C12u);
+        loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, noX, buttonY, 72, 32, !yesSelected ? 0xFFFF3030u : 0xFF8E8B72u);
+        loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "NO", noX + 36, buttonY + 10, 2, !yesSelected ? 0xFFFF3030u : 0xFFE0D8B8u);
+
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "A CONFIRM", 14, 450, 1, 0xFF8E8B72u);
     }
 
     static bool startUploadTexture()
@@ -911,7 +1259,11 @@ namespace TFE_RenderBackend
                 : ((s_paletteCpu[idx] & 0x00FFFFFFu) | 0xFF000000u);
         }
 
+        memcpy(s_captureBuf, s_expandBuf, pixels * sizeof(u32));
+        s_captureBufValid = true;
+
         pauseCompositeOverlay();
+        briefingCompositeFooter();
 
         s_vdispCalls++;
 
@@ -932,12 +1284,20 @@ namespace TFE_RenderBackend
         s_vdispTex->UnlockRect(0);
     }
 
-    void xboxSetPauseOverlay(bool enabled, s32 selection, s32 confirmSelection, bool confirmOpen)
+    void xboxSetPauseOverlay(bool enabled, s32 selection, s32 confirmSelection, bool confirmOpen, s32 notice)
     {
         s_pauseOverlayEnabled = enabled;
         s_pauseSelection = pauseClamp(selection, 0, 5);
         s_pauseConfirmSelection = pauseClamp(confirmSelection, 0, 1);
         s_pauseConfirmOpen = confirmOpen;
+        s_pauseNotice = notice;
+    }
+
+    void xboxSetBriefingFooter(bool enabled, bool objectivesPrompt, s32 difficulty)
+    {
+        s_briefingFooterEnabled = enabled;
+        s_briefingFooterObjectivesPrompt = objectivesPrompt;
+        s_briefingFooterDifficulty = pauseClamp(difficulty, 0, 2);
     }
 
     void xboxSetStartScreen(bool enabled, s32 selection, u32 frame)
@@ -954,6 +1314,40 @@ namespace TFE_RenderBackend
         s_loadFrame = frame;
         s_loadSlots = slots;
         s_loadSlotCount = pauseClamp(slotCount, 0, 6);
+    }
+
+    void xboxSetModScreen(bool enabled, s32 selection, u32 frame, const XboxModInfo* mods, s32 modCount)
+    {
+        s_modScreenEnabled = enabled;
+        s_modCount = pauseClamp(modCount, 0, 12);
+        s_modSelection = pauseClamp(selection, 0, s_modCount > 0 ? s_modCount - 1 : 0);
+        s_modFrame = frame;
+        for (s32 i = 0; i < s_modCount; i++)
+        {
+            s_mods[i] = mods[i];
+        }
+    }
+
+    void xboxSetOptionsScreen(bool enabled, bool pauseStyle, s32 selection, s32 scroll, u32 frame, const XboxOptionsItem* items, s32 itemCount)
+    {
+        s_optionsScreenEnabled = enabled;
+        s_optionsPauseStyle = pauseStyle;
+        s_optionsItemCount = pauseClamp(itemCount, 0, 12);
+        s_optionsSelection = pauseClamp(selection, 0, s_optionsItemCount > 0 ? s_optionsItemCount - 1 : 0);
+        s_optionsScroll = pauseClamp(scroll, 0, s_optionsItemCount > 6 ? s_optionsItemCount - 6 : 0);
+        s_optionsFrame = frame;
+        for (s32 i = 0; i < s_optionsItemCount; i++)
+        {
+            s_optionsItems[i] = items[i];
+        }
+    }
+
+    void xboxSetMissionCompleteScreen(bool enabled, s32 selection, u32 frame, const XboxMissionCompleteInfo* info)
+    {
+        s_missionCompleteScreenEnabled = enabled;
+        s_missionCompleteSelection = pauseClamp(selection, 0, 1);
+        s_missionCompleteFrame = frame;
+        if (info) s_missionCompleteInfo = *info;
     }
 
     void setPalette(const u32* palette)
@@ -1134,9 +1528,33 @@ namespace TFE_RenderBackend
                         D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL,
                         0, 1.0f, 0);
 
-        if (s_loadScreenEnabled)
+        if (s_optionsScreenEnabled)
+        {
+            optionsBuildFrame();
+            if (startUploadTexture())
+            {
+                blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, /*alphaTest*/false);
+            }
+        }
+        else if (s_missionCompleteScreenEnabled)
+        {
+            missionCompleteBuildFrame();
+            if (startUploadTexture())
+            {
+                blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, /*alphaTest*/false);
+            }
+        }
+        else if (s_loadScreenEnabled)
         {
             loadBuildFrame();
+            if (startUploadTexture())
+            {
+                blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, /*alphaTest*/false);
+            }
+        }
+        else if (s_modScreenEnabled)
+        {
+            modBuildFrame();
             if (startUploadTexture())
             {
                 blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, /*alphaTest*/false);
@@ -1343,9 +1761,10 @@ namespace TFE_RenderBackend
         if (!mem) return;
         const u32 outW = XBOX_OUTPUT_WIDTH;
         const u32 outH = XBOX_OUTPUT_HEIGHT;
+        const u32* srcBuf = s_captureBufValid ? s_captureBuf : s_expandBuf;
         if (s_vdispWidth == outW && s_vdispHeight == outH)
         {
-            memcpy(mem, s_expandBuf, outW * outH * sizeof(u32));
+            memcpy(mem, srcBuf, outW * outH * sizeof(u32));
             return;
         }
         for (u32 y = 0; y < outH; y++)
@@ -1354,7 +1773,7 @@ namespace TFE_RenderBackend
             for (u32 x = 0; x < outW; x++)
             {
                 const u32 sx = s_vdispWidth ? (x * s_vdispWidth) / outW : 0;
-                mem[y * outW + x] = s_expandBuf[sy * s_vdispWidth + sx] | 0xFF000000u;
+                mem[y * outW + x] = srcBuf[sy * s_vdispWidth + sx] | 0xFF000000u;
             }
         }
     }

@@ -1,5 +1,8 @@
 #include "zipArchive.h"
 #include <TFE_FileSystem/fileutil.h>
+#ifdef _XBOX
+#include <TFE_FileSystem/filestream.h>
+#endif
 #include <TFE_System/system.h>
 #include "zip/zip.h"
 #include <assert.h>
@@ -24,6 +27,11 @@ ZipArchive::~ZipArchive()
 	free(m_tempBuffer);
 	m_tempBuffer = nullptr;
 	m_tempBufferSize = 0;
+#ifdef _XBOX
+	free(m_zipBuffer);
+	m_zipBuffer = nullptr;
+	m_zipBufferSize = 0;
+#endif
 
 	close();
 }
@@ -35,6 +43,10 @@ bool ZipArchive::create(const char *archivePath)
 	m_fileOffset = 0;
 	m_tempBuffer = nullptr;
 	m_tempBufferSize = 0;
+#ifdef _XBOX
+	m_zipBuffer = nullptr;
+	m_zipBufferSize = 0;
+#endif
 	m_newFiles.clear();
 
 	strcpy(m_archivePath, archivePath);
@@ -50,11 +62,42 @@ bool ZipArchive::open(const char *archivePath)
 	m_fileOffset = 0;
 	m_tempBuffer = nullptr;
 	m_tempBufferSize = 0;
+#ifdef _XBOX
+	free(m_zipBuffer);
+	m_zipBuffer = nullptr;
+	m_zipBufferSize = 0;
+
+	FileStream file;
+	if (!file.open(archivePath, Stream::MODE_READ))
+	{
+		TFE_System::logWrite(LOG_ERROR, "zipArchive", "Cannot open Zip Archive '%s'", archivePath);
+		return false;
+	}
+	m_zipBufferSize = file.getSize();
+	m_zipBuffer = (u8*)malloc(m_zipBufferSize);
+	if (!m_zipBuffer)
+	{
+		file.close();
+		TFE_System::logWrite(LOG_ERROR, "zipArchive", "Cannot allocate Zip Archive '%s' (%u bytes)", archivePath, (u32)m_zipBufferSize);
+		m_zipBufferSize = 0;
+		return false;
+	}
+	file.readBuffer(m_zipBuffer, (u32)m_zipBufferSize);
+	file.close();
+
+	struct zip_t* zip = zip_open_stream((const char*)m_zipBuffer, m_zipBufferSize);
+#else
 
 	struct zip_t* zip = zip_open(archivePath, 0, 'r');
+#endif
 	if (!zip)
 	{
 		TFE_System::logWrite(LOG_ERROR, "zipArchive", "Cannot open Zip Archive '%s'", archivePath);
+#ifdef _XBOX
+		free(m_zipBuffer);
+		m_zipBuffer = nullptr;
+		m_zipBufferSize = 0;
+#endif
 		return false;
 	}
 
@@ -110,6 +153,11 @@ void ZipArchive::close()
 	delete[] m_entries;
 	m_entries = nullptr;
 	m_curFile = INVALID_FILE;
+#ifdef _XBOX
+	free(m_zipBuffer);
+	m_zipBuffer = nullptr;
+	m_zipBufferSize = 0;
+#endif
 }
 
 // File Access
@@ -119,7 +167,11 @@ bool ZipArchive::openFile(const char *file)
 	m_fileOffset = 0;
 	if (m_curFile != INVALID_FILE)
 	{
+#ifdef _XBOX
+		m_fileHandle = zip_open_stream((const char*)m_zipBuffer, m_zipBufferSize);
+#else
 		m_fileHandle = zip_open(m_archivePath, 0, 'r');
+#endif
 		if (zip_entry_openbyindex((struct zip_t*)m_fileHandle, m_curFile) != 0)
 		{
 			TFE_System::logWrite(LOG_ERROR, "zipArchive", "Cannot open file '%s' from archive '%s'", file, m_archivePath);
@@ -147,7 +199,11 @@ bool ZipArchive::openFile(u32 index)
 	if (index <= (u32)m_entryCount)
 	{
 		// Open the system file.
+#ifdef _XBOX
+		m_fileHandle = zip_open_stream((const char*)m_zipBuffer, m_zipBufferSize);
+#else
 		m_fileHandle = zip_open(m_archivePath, 0, 'r');
+#endif
 		// Open the file entry itself.
 		m_curFile = index;
 		if (zip_entry_openbyindex((struct zip_t*)m_fileHandle, index) != 0)

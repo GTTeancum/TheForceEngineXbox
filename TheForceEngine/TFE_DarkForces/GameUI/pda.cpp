@@ -338,7 +338,46 @@ namespace TFE_DarkForces
 		u32 outWidth, outHeight;
 		vfb_getResolution(&outWidth, &outHeight);
 		memset(vfb_getCpuBuffer(), 0, outWidth * outHeight);
-		
+
+#ifdef _XBOX
+		// The Xbox PDA frame is an upgraded opaque plate, unlike the original
+		// asset which used color 79 holes for the content area. Draw the frame
+		// first, then populate the clipped content area so the frame cannot
+		// cover the map/briefing/inventory layers.
+		lcanvas_eraseRect(&s_viewBounds);
+		lactor_setState(s_pdaArt, 0, 0);
+		lactorAnim_draw(s_pdaArt, &s_viewBounds, &s_viewBounds, 0, 0, JTRUE);
+
+		pda_drawCommonButtons();
+		if (s_pdaMode == PDA_MODE_MAP)
+		{
+			pda_drawMapButtons();
+
+			Font* mapNumFont = getMapNumFont();
+			if (mapNumFont)
+			{
+				char str[10];
+				memset(str, 0, 10);
+				snprintf(str, 10, "%d", automap_getLayer());
+				if (str[0] == '-') { str[0] = ':'; }
+				s32 leftAdj = font_getStringLength(mapNumFont, str) / 2;
+				pda_displayFontString(mapNumFont, 275 - leftAdj, 127, str);
+			}
+		}
+		else if (s_pdaMode == PDA_MODE_BRIEF)
+		{
+			pdaDrawBriefingButtons();
+		}
+
+		screenDraw_setTransColor(79);
+		menu_blitToScreen(nullptr, JTRUE/*transparent*/, JFALSE/*swap*/);
+		screenDraw_setTransColor(0);
+
+		pda_drawOverlay();
+		vfb_swap();
+		return;
+#endif
+
 		// Draw the overlay *behind* the main view - which means we must blit it to the view.
 		pda_drawOverlay();
 		
@@ -854,6 +893,12 @@ namespace TFE_DarkForces
 	{
 		for (s32 i = PDA_BTN_MAP; i <= PDA_BTN_EXIT; i++)
 		{
+#ifdef _XBOX
+			if (i == PDA_BTN_EXIT)
+			{
+				continue;
+			}
+#endif
 			pda_drawButton(PdaButton(i));
 		}
 	}

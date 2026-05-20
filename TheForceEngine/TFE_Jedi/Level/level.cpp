@@ -13,6 +13,9 @@
 #include <TFE_Asset/spriteAsset_Jedi.h>
 #include <TFE_Asset/vocAsset.h>
 #include <TFE_DarkForces/sound.h>
+#ifdef _XBOX
+#include <TFE_DarkForces/agent.h>
+#endif
 #include <TFE_FileSystem/filestream.h>
 #include <TFE_FileSystem/paths.h>
 #include <TFE_System/parser.h>
@@ -163,8 +166,14 @@ namespace TFE_Jedi
 		s_levelState.maxLayer = INT_MIN;
 		message_free();
 
-		// Try loading as an LVB
-		if (level_loadGeometryBin(levelName, s_buffer))
+#ifdef _XBOX
+		const JBool skipBinaryLevel = agent_hasXboxCustomLevelName();
+#else
+		const JBool skipBinaryLevel = JFALSE;
+#endif
+		// Try loading as an LVB. Custom Xbox mods may replace a stock-named
+		// LEV such as SECBASE.LEV, so do not let the stock SECBASE.LVB win.
+		if (!skipBinaryLevel && level_loadGeometryBin(levelName, s_buffer))
 		{
 			return JTRUE;
 		}
@@ -180,6 +189,16 @@ namespace TFE_Jedi
 			TFE_System::logWrite(LOG_ERROR, "level_loadGeometry", "Cannot find level geometry '%s'.", levelName);
 			return false;
 		}
+#ifdef _XBOX
+		if (filePath.archive)
+		{
+			TFE_System::logWrite(LOG_MSG, "level_loadGeometry", "Loading '%s' from archive '%s'", levelPath, filePath.archive->getName());
+		}
+		else
+		{
+			TFE_System::logWrite(LOG_MSG, "level_loadGeometry", "Loading '%s' from path '%s'", levelPath, filePath.path);
+		}
+#endif
 		FileStream file;
 		if (!file.open(&filePath, Stream::MODE_READ))
 		{

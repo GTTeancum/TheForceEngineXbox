@@ -29,8 +29,10 @@
 #include <TFE_DarkForces/Landru/cutsceneList.h>
 #include <TFE_DarkForces/Actor/actor.h>
 #include <TFE_Game/reticle.h>
+#include <TFE_Game/saveSystem.h>
 #include <TFE_Input/inputMapping.h>
 #include <TFE_Memory/memoryRegion.h>
+#include <TFE_RenderBackend/renderBackend_xbox.h>
 #include <TFE_Settings/settings.h>
 #include <TFE_System/system.h>
 #include <TFE_System/tfeMessage.h>
@@ -46,6 +48,7 @@
 #include <TFE_Archive/archive.h>
 #include <TFE_Archive/zipArchive.h>
 #include <TFE_Archive/gobMemoryArchive.h>
+#include <TFE_Jedi/Level/levelData.h>
 #include <TFE_Jedi/Level/rfont.h>
 #include <TFE_Jedi/Level/level.h>
 #include <TFE_Jedi/InfSystem/infSystem.h>
@@ -70,6 +73,65 @@ using namespace TFE_Input;
 
 namespace TFE_DarkForces
 {
+#ifdef _XBOX
+	static bool s_xboxMissionCompleteOpen = false;
+	static s32 s_xboxMissionCompleteSelection = 0;
+	static u32 s_xboxMissionCompleteFrame = 0;
+	static bool s_xboxMissionCompleteLeftHeld = false;
+	static bool s_xboxMissionCompleteRightHeld = false;
+	static TFE_RenderBackend::XboxMissionCompleteInfo s_xboxMissionCompleteInfo = { 0, 0, 0, 0 };
+
+	void xboxMissionCompleteOpen()
+	{
+		s_xboxMissionCompleteOpen = true;
+		s_xboxMissionCompleteSelection = 0;
+		s_xboxMissionCompleteFrame = 0;
+		s_xboxMissionCompleteLeftHeld = false;
+		s_xboxMissionCompleteRightHeld = false;
+		s_xboxMissionCompleteInfo.seconds = s_curTick / TICKS_PER_SECOND;
+		s_xboxMissionCompleteInfo.secretsFound = s_secretsFound;
+		s_xboxMissionCompleteInfo.secretsTotal = TFE_Jedi::s_levelState.secretCount;
+		s_xboxMissionCompleteInfo.difficulty = s_agentData[s_agentId].difficulty;
+		TFE_RenderBackend::xboxSetMissionCompleteScreen(true, s_xboxMissionCompleteSelection, s_xboxMissionCompleteFrame, &s_xboxMissionCompleteInfo);
+		TFE_System::logWrite(LOG_MSG, "MissionComplete", "open time=%u secrets=%d/%d difficulty=%d",
+			s_xboxMissionCompleteInfo.seconds, s_xboxMissionCompleteInfo.secretsFound,
+			s_xboxMissionCompleteInfo.secretsTotal, s_xboxMissionCompleteInfo.difficulty);
+	}
+
+	bool xboxMissionCompleteUpdate(bool* saveSelected)
+	{
+		const f32 lx = TFE_Input::getAxis(AXIS_LEFT_X);
+		const bool stickLeft = lx < -0.55f;
+		const bool stickRight = lx > 0.55f;
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_LEFT) || (stickLeft && !s_xboxMissionCompleteLeftHeld))
+		{
+			s_xboxMissionCompleteSelection = 0;
+		}
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_RIGHT) || (stickRight && !s_xboxMissionCompleteRightHeld))
+		{
+			s_xboxMissionCompleteSelection = 1;
+		}
+		s_xboxMissionCompleteLeftHeld = stickLeft;
+		s_xboxMissionCompleteRightHeld = stickRight;
+
+		TFE_RenderBackend::xboxSetMissionCompleteScreen(true, s_xboxMissionCompleteSelection, s_xboxMissionCompleteFrame++, &s_xboxMissionCompleteInfo);
+
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_B) || TFE_Input::buttonPressed(CONTROLLER_BUTTON_BACK))
+		{
+			*saveSelected = false;
+			TFE_System::logWrite(LOG_MSG, "MissionComplete", "confirm save=0");
+			return true;
+		}
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A) || TFE_Input::buttonPressed(CONTROLLER_BUTTON_START))
+		{
+			*saveSelected = (s_xboxMissionCompleteSelection == 0);
+			TFE_System::logWrite(LOG_MSG, "MissionComplete", "confirm save=%d", *saveSelected ? 1 : 0);
+			return true;
+		}
+		return false;
+	}
+#endif
+
 	/////////////////////////////////////////////
 	// Constants
 	/////////////////////////////////////////////
@@ -272,6 +334,9 @@ namespace TFE_DarkForces
 	// This part loads and sets up the game.
 	bool DarkForces::runGame(s32 argCount, const char* argv[], Stream* stream)
 	{
+		s_runGameState = RunGameState();
+		s_sharedState = SharedGameState();
+
 		// TFE: Initially disable the reticle.
 		reticle_enable(false);
 
@@ -605,9 +670,29 @@ namespace TFE_DarkForces
 				s_runGameState.cutscenesEnabled = JFALSE;
 			}
 
+			if (s_runGameState.startLevel)
+			{
+				s_runGameState.abortLevel = JFALSE;
+				s_runGameState.levelIndex = s_runGameState.startLevel;
+				s_runGameState.startLevel = 0;
+				skipToLevelNextScene(s_runGameState.levelIndex);
+				lmusic_reset();
+				agent_setNextLevelByIndex(s_runGameState.levelIndex);
+				startNextMode();
+				break;
+			}
+
 			if (s_runGameState.cutscenesEnabled && !s_runGameState.startLevel)
 			{
-				cutscene_play(10);
+				s_invalidLevelIndex = JFALSE;
+				s_runGameState.levelIndex = 1;
+				s_runGameState.cutsceneIndex = -1;
+				agent_setNextLevelByIndex(1);
+				if (!cutscene_play(10))
+				{
+					s_runGameState.cutsceneIndex = 0;
+					startNextMode();
+				}
 			}
 			else
 			{
@@ -723,6 +808,31 @@ namespace TFE_DarkForces
 			}
 			else
 			{
+#ifdef _XBOX
+				bool xboxAbortToStart = false;
+				if (s_levelComplete)
+				{
+					if (!s_xboxMissionCompleteOpen)
+					{
+						xboxMissionCompleteOpen();
+						return;
+					}
+
+					bool saveSelected = false;
+					if (!xboxMissionCompleteUpdate(&saveSelected))
+					{
+						return;
+					}
+
+					if (saveSelected)
+					{
+						TFE_SaveSystem::saveGame(TFE_SaveSystem::c_quickSaveName, "Autosave");
+					}
+					TFE_RenderBackend::xboxSetMissionCompleteScreen(false, 0, 0, NULL);
+					s_xboxMissionCompleteOpen = false;
+				}
+#endif
+
 				// We have returned from the mission tasks.
 				renderer_reset();
 				gameMusic_stop();
@@ -744,7 +854,12 @@ namespace TFE_DarkForces
 				if (!s_levelComplete)
 				{
 					s_runGameState.abortLevel = JTRUE;
+#ifdef _XBOX
+					xboxAbortToStart = true;
+					TFE_System::logWrite(LOG_MSG, "Main", "Mission aborted; returning to Xbox start menu");
+#else
 					s_runGameState.cutsceneIndex--;
+#endif
 				}
 				else
 				{
@@ -752,7 +867,16 @@ namespace TFE_DarkForces
 					handleLevelComplete();
 				}
 
-				startNextMode();
+#ifdef _XBOX
+				if (xboxAbortToStart)
+				{
+					TFE_XboxReturnToStartMenu();
+				}
+				else
+#endif
+				{
+					startNextMode();
+				}
 
 				region_clear(s_levelRegion);
 				bitmap_clearLevelData();
@@ -906,6 +1030,9 @@ namespace TFE_DarkForces
 	void processCommandLineArgs(s32 argCount, const char* argv[], char* startLevel)
 	{
 		s_sharedState.customGobName[0] = 0;
+#ifdef _XBOX
+		agent_clearXboxCustomLevelName();
+#endif
 		TFE_Settings::clearModSettings();
 
 		for (s32 i = 0; i < argCount; i++)
@@ -982,6 +1109,14 @@ namespace TFE_DarkForces
 
 		if (!levelName || levelName[0] == 0) { return; }
 		s_runGameState.startLevel = agent_getLevelIndexFromName(levelName);
+#ifdef _XBOX
+		if (!s_runGameState.startLevel && s_sharedState.customGobName[0])
+		{
+			agent_setXboxCustomLevelName(levelName);
+			s_runGameState.startLevel = agent_getLevelIndexFromName(levelName);
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "Using Xbox custom mod level '%s' startIndex=%d", levelName, s_runGameState.startLevel);
+		}
+#endif
 	}
 
 	char* extractTextFileFromZip(ZipArchive& zip, u32 fileIndex)
@@ -1136,7 +1271,8 @@ namespace TFE_DarkForces
 						GobMemoryArchive* gobArchive = new GobMemoryArchive();
 						gobArchive->setName(zipArchive->getFileName(gobIndex));
 						gobArchive->open(buffer, bufferLen);
-						TFE_Paths::addLocalArchive(gobArchive);
+						TFE_Paths::addLocalArchiveToFront(gobArchive);
+						TFE_System::logWrite(LOG_MSG, "Mod", "mounted GOB from ZIP at archive front '%s'", zipArchive->getFileName(gobIndex));
 					}
 
 					char tempPath[TFE_MAX_PATH];
@@ -1198,7 +1334,8 @@ namespace TFE_DarkForces
 				Archive* archive = Archive::getArchive(ARCHIVE_GOB, gobName, archivePath.path);
 				if (archive)
 				{
-					TFE_Paths::addLocalArchive(archive);
+					TFE_Paths::addLocalArchiveToFront(archive);
+					TFE_System::logWrite(LOG_MSG, "Mod", "mounted GOB at archive front '%s'", gobName);
 
 					char modPath[TFE_MAX_PATH];
 					FileUtil::getFilePath(archivePath.path, modPath);

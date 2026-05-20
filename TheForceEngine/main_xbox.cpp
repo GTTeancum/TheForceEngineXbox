@@ -28,16 +28,21 @@
 #include <TFE_System/frameLimiter.h>
 #include <TFE_System/tfeMessage.h>
 #include <TFE_Memory/memoryRegion.h>
+#include <TFE_Archive/archive.h>
 #include <TFE_Archive/gobArchive.h>
+#include <TFE_Archive/gobMemoryArchive.h>
+#include <TFE_Archive/zipArchive.h>
 #include <TFE_Game/igame.h>
 #include <TFE_Game/saveSystem.h>
 #include <TFE_Game/reticle.h>
 #include <TFE_Jedi/InfSystem/infSystem.h>
 #include <TFE_FileSystem/fileutil.h>
+#include <TFE_FileSystem/filestream.h>
 #include <TFE_FileSystem/paths.h>
 #include <TFE_Audio/audioSystem.h>
 #include <TFE_Audio/audioDevice.h>
 #include <TFE_Audio/midiPlayer.h>
+#include <TFE_Jedi/IMuse/imuse.h>
 #include <TFE_RenderBackend/renderBackend.h>
 #include <TFE_RenderBackend/renderBackend_xbox.h>
 #include <TFE_Input/input.h>
@@ -58,6 +63,8 @@ enum AppState
     APP_STATE_MENU = 0,
     APP_STATE_EDITOR,
     APP_STATE_LOAD,
+    APP_STATE_MODS,
+    APP_STATE_OPTIONS,
     APP_STATE_GAME,
     APP_STATE_QUIT,
     APP_STATE_NO_GAME_DATA,
@@ -75,6 +82,7 @@ enum AppState
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <stdlib.h>
 
 using namespace TFE_Input;
 
@@ -103,10 +111,39 @@ static s32      s_loadMenuSelection = 0;
 static u32      s_loadMenuFrame = 0;
 static bool     s_loadStickUpHeld = false;
 static bool     s_loadStickDownHeld = false;
+static s32      s_modMenuSelection = 0;
+static u32      s_modMenuFrame = 0;
+static bool     s_modStickUpHeld = false;
+static bool     s_modStickDownHeld = false;
+static s32      s_optionsSelection = 0;
+static s32      s_optionsScroll = 0;
+static u32      s_optionsFrame = 0;
+static bool     s_optionsStickUpHeld = false;
+static bool     s_optionsStickDownHeld = false;
+static bool     s_optionsStickLeftHeld = false;
+static bool     s_optionsStickRightHeld = false;
+static TFE_RenderBackend::XboxOptionsItem s_optionsItems[7];
 static TFE_SaveSystem::SaveHeader s_loadHeaders[6];
 static TFE_RenderBackend::XboxLoadSlotInfo s_loadSlots[6];
 static char s_loadDateDisplay[6][32];
+struct XboxModEntry
+{
+    TFE_RenderBackend::XboxModInfo ui;
+    char path[TFE_MAX_PATH];
+    char archiveName[96];
+    char title[64];
+    char author[64];
+    char version[32];
+    char description[256];
+    char levelName[32];
+};
+static XboxModEntry s_modEntries[12];
+static TFE_RenderBackend::XboxModInfo s_modUi[12];
+static s32 s_modCount = 0;
 static bool s_returnToStartRequested = false;
+static bool s_menuMusicReady = false;
+static bool s_menuMusicPlaying = false;
+static Archive* s_menuMusicArchive = NULL;
 
 extern "C" void TFE_XboxReturnToStartMenu()
 {
@@ -146,11 +183,83 @@ static bool validatePath()
     return true;
 }
 
+static void stopMenuMusic()
+{
+    if (!s_menuMusicReady)
+    {
+        return;
+    }
+
+    TFE_System::logWrite(LOG_MSG, "StartMenu", "stopping menu music");
+    TFE_Jedi::ImStopAllSounds();
+    TFE_Jedi::ImUnloadAll();
+    TFE_Jedi::ImTerminate();
+
+    if (s_menuMusicArchive)
+    {
+        TFE_Paths::removeLastArchive();
+        Archive::freeArchive(s_menuMusicArchive);
+        s_menuMusicArchive = NULL;
+    }
+
+    s_menuMusicReady = false;
+    s_menuMusicPlaying = false;
+}
+
+static void startMenuMusic()
+{
+    if (s_menuMusicPlaying)
+    {
+        return;
+    }
+
+    char gobPath[TFE_MAX_PATH];
+    snprintf(gobPath, TFE_MAX_PATH, "%sSOUNDS.GOB", TFE_Paths::getPath(PATH_SOURCE_DATA));
+    s_menuMusicArchive = Archive::getArchive(ARCHIVE_GOB, "SOUNDS.GOB", gobPath);
+    if (!s_menuMusicArchive)
+    {
+        TFE_System::logWrite(LOG_ERROR, "StartMenu", "could not open SOUNDS.GOB for menu music");
+        return;
+    }
+    TFE_Paths::addLocalArchive(s_menuMusicArchive);
+
+    if (TFE_Jedi::ImInitialize(s_gameRegion) != imSuccess)
+    {
+        TFE_System::logWrite(LOG_ERROR, "StartMenu", "iMuse init failed for menu music");
+        TFE_Paths::removeLastArchive();
+        Archive::freeArchive(s_menuMusicArchive);
+        s_menuMusicArchive = NULL;
+        return;
+    }
+    s_menuMusicReady = true;
+
+    TFE_Settings_Sound* sound = TFE_Settings::getSoundSettings();
+    TFE_MidiPlayer::setVolume(sound->musicVolume * sound->masterVolume);
+
+    ImSoundId song = TFE_Jedi::ImLoadMidi("crixmus");
+    if (!song)
+    {
+        song = TFE_Jedi::ImLoadMidi("CRIXMUS");
+    }
+    if (!song || TFE_Jedi::ImStartSound(song, 64) != imSuccess)
+    {
+        TFE_System::logWrite(LOG_ERROR, "StartMenu", "failed to start CRIXMUS menu music");
+        stopMenuMusic();
+        return;
+    }
+
+    s_menuMusicPlaying = true;
+    TFE_System::logWrite(LOG_MSG, "StartMenu", "playing CRIXMUS");
+}
+
 // ---------------------------------------------------------------------------
 // Game lifecycle
 // ---------------------------------------------------------------------------
 static void startGame(int argc, const char** argv)
 {
+    stopMenuMusic();
+    TFE_RenderBackend::xboxSetModScreen(false, 0, 0, NULL, 0);
+
     if (s_curGame)
     {
         freeGame(s_curGame);
@@ -185,6 +294,8 @@ static void startGame(int argc, const char** argv)
 static bool loadGameFromMenu(const char* filename)
 {
     if (!filename || !filename[0]) return false;
+    stopMenuMusic();
+
     if (s_curGame)
     {
         freeGame(s_curGame);
@@ -202,6 +313,7 @@ static bool loadGameFromMenu(const char* filename)
     TFE_SaveSystem::setCurrentGame(s_curGame);
 
     TFE_RenderBackend::xboxSetLoadScreen(false, 0, 0, NULL, 0);
+    TFE_RenderBackend::xboxSetModScreen(false, 0, 0, NULL, 0);
     const bool loaded = TFE_SaveSystem::loadGame(filename);
     if (!loaded)
     {
@@ -210,6 +322,7 @@ static bool loadGameFromMenu(const char* filename)
         s_curGame = NULL;
         s_curState = APP_STATE_MENU;
         TFE_RenderBackend::xboxSetStartScreen(true, s_startMenuSelection, s_startMenuFrame);
+        startMenuMusic();
         return false;
     }
 
@@ -259,12 +372,459 @@ static void refreshLoadSlots()
     TFE_System::logWrite(LOG_MSG, "LoadMenu", "slots refreshed");
 }
 
+static void copyString(char* dst, size_t dstSize, const char* src)
+{
+    if (!dst || dstSize == 0) return;
+    if (!src) src = "";
+    strncpy(dst, src, dstSize - 1);
+    dst[dstSize - 1] = 0;
+}
+
+static char* trimText(char* text)
+{
+    if (!text) return text;
+    while (*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n') text++;
+    char* end = text + strlen(text);
+    while (end > text && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n')) *--end = 0;
+    return text;
+}
+
+static void assignModDefaults(XboxModEntry* mod, const char* folderPath, const char* archiveName)
+{
+    memset(mod, 0, sizeof(XboxModEntry));
+    mod->ui.valid = true;
+    copyString(mod->path, TFE_MAX_PATH, folderPath);
+    copyString(mod->archiveName, sizeof(mod->archiveName), archiveName);
+    char title[96];
+    FileUtil::getFileNameFromPath(archiveName && archiveName[0] ? archiveName : folderPath, title, false);
+    if (!title[0]) strcpy(title, "Installed Mod");
+    copyString(mod->title, sizeof(mod->title), title);
+    copyString(mod->author, sizeof(mod->author), "-");
+    copyString(mod->version, sizeof(mod->version), "-");
+    copyString(mod->description, sizeof(mod->description), "No description provided.");
+    mod->levelName[0] = 0;
+    mod->ui.title = mod->title;
+    mod->ui.author = mod->author;
+    mod->ui.version = mod->version;
+    mod->ui.description = mod->description;
+    mod->ui.missionCount = archiveName && archiveName[0] ? 1 : 0;
+}
+
+static void parseModManifestLine(XboxModEntry* mod, char* line)
+{
+    char* sep = strchr(line, '=');
+    if (!sep) sep = strchr(line, ':');
+    if (!sep) return;
+    *sep = 0;
+    char* key = trimText(line);
+    char* value = trimText(sep + 1);
+    if (!key[0] || !value[0]) return;
+
+    if (!strcasecmp(key, "title") || !strcasecmp(key, "name"))
+        copyString(mod->title, sizeof(mod->title), value);
+    else if (!strcasecmp(key, "author"))
+        copyString(mod->author, sizeof(mod->author), value);
+    else if (!strcasecmp(key, "version"))
+        copyString(mod->version, sizeof(mod->version), value);
+    else if (!strcasecmp(key, "description") || !strcasecmp(key, "desc"))
+        copyString(mod->description, sizeof(mod->description), value);
+    else if (!strcasecmp(key, "missions"))
+        mod->ui.missionCount = atoi(value);
+    else if (!strcasecmp(key, "level") || !strcasecmp(key, "startlevel"))
+        copyString(mod->levelName, sizeof(mod->levelName), value);
+}
+
+static void parseModManifestBuffer(XboxModEntry* mod, char* buffer)
+{
+    char* line = buffer;
+    while (line && *line)
+    {
+        char* next = strchr(line, '\n');
+        if (next) *next++ = 0;
+        parseModManifestLine(mod, line);
+        line = next;
+    }
+
+    mod->ui.title = mod->title;
+    mod->ui.author = mod->author;
+    mod->ui.version = mod->version;
+    mod->ui.description = mod->description;
+}
+
+static bool readModManifestFile(XboxModEntry* mod, const char* filename)
+{
+    FileStream file;
+    if (!file.open(filename, Stream::MODE_READ)) return false;
+
+    size_t size = file.getSize();
+    if (size > 2047) size = 2047;
+    char buffer[2048];
+    memset(buffer, 0, sizeof(buffer));
+    file.readBuffer(buffer, 1, (u32)size);
+    file.close();
+    parseModManifestBuffer(mod, buffer);
+    return true;
+}
+
+static bool readModManifestFromZip(XboxModEntry* mod)
+{
+    const size_t archiveLen = strlen(mod->archiveName);
+    if (archiveLen < 4) return false;
+    const char* ext3 = archiveLen >= 3 ? &mod->archiveName[archiveLen - 3] : "";
+    if (strcasecmp(ext3, "zip") != 0)
+    {
+        return false;
+    }
+
+    char archivePath[TFE_MAX_PATH];
+    snprintf(archivePath, TFE_MAX_PATH, "%s%s", mod->path, mod->archiveName);
+    ZipArchive zip;
+    if (!zip.open(archivePath)) return false;
+
+    const u32 count = zip.getFileCount();
+    for (u32 i = 0; i < count; i++)
+    {
+        char fileName[TFE_MAX_PATH];
+        FileUtil::getFileNameFromPath(zip.getFileName(i), fileName, true);
+        if (strcasecmp(fileName, "metadata.txt") == 0 ||
+            strcasecmp(fileName, "mod.txt") == 0 ||
+            strcasecmp(fileName, "manifest.txt") == 0 ||
+            strcasecmp(fileName, "mod.ini") == 0)
+        {
+            u32 bufferLen = (u32)zip.getFileLength(i);
+            if (bufferLen > 2047) bufferLen = 2047;
+            char buffer[2048];
+            memset(buffer, 0, sizeof(buffer));
+            zip.openFile(i);
+            zip.readFile(buffer, bufferLen);
+            zip.closeFile();
+            parseModManifestBuffer(mod, buffer);
+            zip.close();
+            return true;
+        }
+    }
+    zip.close();
+    return false;
+}
+
+static bool readFirstLevelFromGobBuffer(const u8* data, u32 size, char* outLevel, size_t outSize)
+{
+    if (!data || !size || !outLevel || outSize == 0) return false;
+
+    GobMemoryArchive gob;
+    if (!gob.open(data, size)) return false;
+
+    const u32 count = gob.getFileCount();
+    for (u32 i = 0; i < count; i++)
+    {
+        const char* name = gob.getFileName(i);
+        if (!name) continue;
+        const size_t len = strlen(name);
+        if (len < 5) continue;
+        if (strcasecmp(&name[len - 3], "lev") == 0)
+        {
+            char levelName[32];
+            FileUtil::getFileNameFromPath(name, levelName, false);
+            copyString(outLevel, outSize, levelName);
+            gob.close();
+            return outLevel[0] != 0;
+        }
+    }
+
+    gob.close();
+    return false;
+}
+
+static bool readFirstLevelFromZip(XboxModEntry* mod)
+{
+    if (mod->levelName[0]) return true;
+
+    char archivePath[TFE_MAX_PATH];
+    snprintf(archivePath, TFE_MAX_PATH, "%s%s", mod->path, mod->archiveName);
+    ZipArchive zip;
+    if (!zip.open(archivePath)) return false;
+
+    const u32 count = zip.getFileCount();
+    for (u32 i = 0; i < count; i++)
+    {
+        const char* name = zip.getFileName(i);
+        if (!name) continue;
+        const size_t len = strlen(name);
+        if (len < 5 || strcasecmp(&name[len - 3], "gob") != 0) continue;
+
+        char gobFileName[TFE_MAX_PATH];
+        FileUtil::getFileNameFromPath(name, gobFileName, true);
+        if (gobFileName[0] == '.' && gobFileName[1] == '_') continue;
+
+        u32 bufferLen = (u32)zip.getFileLength(i);
+        u8* buffer = (u8*)malloc(bufferLen);
+        if (!buffer)
+        {
+            zip.close();
+            return false;
+        }
+
+        zip.openFile(i);
+        zip.readFile(buffer, bufferLen);
+        zip.closeFile();
+        const bool found = readFirstLevelFromGobBuffer(buffer, bufferLen, mod->levelName, sizeof(mod->levelName));
+        zip.close();
+        TFE_System::logWrite(found ? LOG_MSG : LOG_WARNING, "ModMenu", "zip level scan archive='%s' level='%s'", mod->archiveName, mod->levelName);
+        return found;
+    }
+
+    zip.close();
+    return false;
+}
+
+static void readModManifest(XboxModEntry* mod)
+{
+    char baseName[96];
+    FileUtil::getFileNameFromPath(mod->archiveName, baseName, false);
+
+    bool metadataLoaded = false;
+    char filename[TFE_MAX_PATH];
+    if (baseName[0])
+    {
+        snprintf(filename, TFE_MAX_PATH, "%s%s_metadata.txt", mod->path, baseName);
+        metadataLoaded = readModManifestFile(mod, filename);
+    }
+
+    static const char* names[] = { "metadata.txt", "mod.txt", "manifest.txt", "mod.ini" };
+    for (s32 i = 0; !metadataLoaded && i < 4; i++)
+    {
+        snprintf(filename, TFE_MAX_PATH, "%s%s", mod->path, names[i]);
+        metadataLoaded = readModManifestFile(mod, filename);
+    }
+
+    if (!metadataLoaded)
+    {
+        readModManifestFromZip(mod);
+    }
+    readFirstLevelFromZip(mod);
+
+    FileList levels;
+    FileUtil::readDirectory(mod->path, "lev", levels);
+    if (mod->ui.missionCount == 0 && levels.size() > 0)
+    {
+        mod->ui.missionCount = (s32)levels.size();
+    }
+    mod->ui.title = mod->title;
+    mod->ui.author = mod->author;
+    mod->ui.version = mod->version;
+    mod->ui.description = mod->description;
+}
+
+static bool findFirstModArchive(const char* dir, char* outName, size_t outSize)
+{
+    FileList files;
+    FileUtil::readDirectory(dir, "zip", files);
+    if (!files.empty())
+    {
+        copyString(outName, outSize, files[0].c_str());
+        return true;
+    }
+    outName[0] = 0;
+    return false;
+}
+
+static void addModEntry(const char* dir, const char* archiveName)
+{
+    if (s_modCount >= 12 || !archiveName || !archiveName[0]) return;
+    XboxModEntry* mod = &s_modEntries[s_modCount];
+    assignModDefaults(mod, dir, archiveName);
+    readModManifest(mod);
+    s_modUi[s_modCount] = mod->ui;
+    s_modCount++;
+}
+
+static void refreshModSlots()
+{
+    memset(s_modEntries, 0, sizeof(s_modEntries));
+    memset(s_modUi, 0, sizeof(s_modUi));
+    s_modCount = 0;
+
+    char modsRoot[TFE_MAX_PATH];
+    snprintf(modsRoot, TFE_MAX_PATH, "%sMods\\", TFE_Paths::getPath(PATH_PROGRAM));
+    FileUtil::makeDirectory(modsRoot);
+
+    FileList dirs;
+    FileUtil::readSubdirectories(modsRoot, dirs);
+    for (size_t i = 0; i < dirs.size() && s_modCount < 12; i++)
+    {
+        char archiveName[96];
+        if (findFirstModArchive(dirs[i].c_str(), archiveName, sizeof(archiveName)))
+        {
+            addModEntry(dirs[i].c_str(), archiveName);
+        }
+    }
+
+    FileList files;
+    FileUtil::readDirectory(modsRoot, "zip", files);
+    for (size_t f = 0; f < files.size() && s_modCount < 12; f++)
+    {
+        addModEntry(modsRoot, files[f].c_str());
+    }
+
+    if (s_modMenuSelection >= s_modCount) s_modMenuSelection = s_modCount > 0 ? s_modCount - 1 : 0;
+    TFE_System::logWrite(LOG_MSG, "ModMenu", "mods refreshed count=%d root='%s'", s_modCount, modsRoot);
+}
+
 static void startMenuMove(s32 delta)
 {
     s_startMenuSelection += delta;
     if (s_startMenuSelection < 0) s_startMenuSelection = 3;
     if (s_startMenuSelection > 3) s_startMenuSelection = 0;
     TFE_System::logWrite(LOG_MSG, "StartMenu", "selection=%d", s_startMenuSelection);
+}
+
+static s32 optionPercent(float value)
+{
+    s32 pct = (s32)(value * 100.0f + 0.5f);
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    return pct;
+}
+
+static void refreshOptionsItems()
+{
+    TFE_Settings_Sound* sound = TFE_Settings::getSoundSettings();
+    s_optionsItems[0].label = "LOOK SENSITIVITY";
+    s_optionsItems[0].value = (s32)(TFE_InputXbox::getLookSensitivity() * 100.0f + 0.5f);
+    s_optionsItems[0].minValue = 25;
+    s_optionsItems[0].maxValue = 250;
+
+    s_optionsItems[1].label = "STICK DEADZONE";
+    s_optionsItems[1].value = (s32)(TFE_InputXbox::getStickDeadzone() * 100.0f + 0.5f);
+    s_optionsItems[1].minValue = 0;
+    s_optionsItems[1].maxValue = 30;
+
+    s_optionsItems[2].label = "MASTER VOLUME";
+    s_optionsItems[2].value = optionPercent(sound->masterVolume);
+    s_optionsItems[2].minValue = 0;
+    s_optionsItems[2].maxValue = 100;
+
+    s_optionsItems[3].label = "SFX VOLUME";
+    s_optionsItems[3].value = optionPercent(sound->soundFxVolume);
+    s_optionsItems[3].minValue = 0;
+    s_optionsItems[3].maxValue = 100;
+
+    s_optionsItems[4].label = "MUSIC VOLUME";
+    s_optionsItems[4].value = optionPercent(sound->musicVolume);
+    s_optionsItems[4].minValue = 0;
+    s_optionsItems[4].maxValue = 100;
+
+    s_optionsItems[5].label = "CUTSCENE SFX";
+    s_optionsItems[5].value = optionPercent(sound->cutsceneSoundFxVolume);
+    s_optionsItems[5].minValue = 0;
+    s_optionsItems[5].maxValue = 100;
+
+    s_optionsItems[6].label = "CUTSCENE MUSIC";
+    s_optionsItems[6].value = optionPercent(sound->cutsceneMusicVolume);
+    s_optionsItems[6].minValue = 0;
+    s_optionsItems[6].maxValue = 100;
+}
+
+static void applyOptionValue(s32 index, s32 value)
+{
+    if (index < 0 || index >= 7) return;
+    if (value < s_optionsItems[index].minValue) value = s_optionsItems[index].minValue;
+    if (value > s_optionsItems[index].maxValue) value = s_optionsItems[index].maxValue;
+
+    TFE_Settings_Sound* sound = TFE_Settings::getSoundSettings();
+    TFE_Settings_System* system = TFE_Settings::getSystemSettings();
+    switch (index)
+    {
+        case 0:
+            system->xboxLookSensitivity = (float)value / 100.0f;
+            TFE_InputXbox::setLookSensitivity(system->xboxLookSensitivity);
+            break;
+        case 1:
+            system->xboxStickDeadzone = (float)value / 100.0f;
+            TFE_InputXbox::setStickDeadzone(system->xboxStickDeadzone);
+            break;
+        case 2: sound->masterVolume = (float)value / 100.0f; break;
+        case 3: sound->soundFxVolume = (float)value / 100.0f; break;
+        case 4: sound->musicVolume = (float)value / 100.0f; break;
+        case 5: sound->cutsceneSoundFxVolume = (float)value / 100.0f; break;
+        case 6: sound->cutsceneMusicVolume = (float)value / 100.0f; break;
+    }
+
+    sound = TFE_Settings::getSoundSettings();
+    TFE_MidiPlayer::setVolume(sound->musicVolume * sound->masterVolume);
+    refreshOptionsItems();
+}
+
+static void optionsMove(s32 delta)
+{
+    s_optionsSelection += delta;
+    if (s_optionsSelection < 0) s_optionsSelection = 6;
+    if (s_optionsSelection > 6) s_optionsSelection = 0;
+    if (s_optionsSelection < s_optionsScroll) s_optionsScroll = s_optionsSelection;
+    if (s_optionsSelection >= s_optionsScroll + 6) s_optionsScroll = s_optionsSelection - 5;
+    TFE_System::logWrite(LOG_MSG, "Options", "selection=%d", s_optionsSelection);
+}
+
+static void openModMenu();
+
+static void openOptionsMenu(bool pauseStyle)
+{
+    (void)pauseStyle;
+    refreshOptionsItems();
+    s_optionsSelection = 0;
+    s_optionsScroll = 0;
+    s_optionsStickUpHeld = s_optionsStickDownHeld = false;
+    s_optionsStickLeftHeld = s_optionsStickRightHeld = false;
+    s_curState = APP_STATE_OPTIONS;
+    TFE_RenderBackend::xboxSetStartScreen(false, 0, 0);
+    TFE_RenderBackend::xboxSetLoadScreen(false, 0, 0, NULL, 0);
+    TFE_RenderBackend::xboxSetModScreen(false, 0, 0, NULL, 0);
+    TFE_RenderBackend::xboxSetOptionsScreen(true, false, s_optionsSelection, s_optionsScroll, s_optionsFrame, s_optionsItems, 7);
+}
+
+static void closeOptionsMenu()
+{
+    TFE_Settings::writeToDisk();
+    s_curState = APP_STATE_MENU;
+    TFE_RenderBackend::xboxSetOptionsScreen(false, false, 0, 0, 0, NULL, 0);
+    TFE_RenderBackend::xboxSetModScreen(false, 0, 0, NULL, 0);
+    TFE_RenderBackend::xboxSetStartScreen(true, s_startMenuSelection, s_startMenuFrame);
+    startMenuMusic();
+}
+
+static void updateOptionsMenu()
+{
+    const f32 lx = TFE_Input::getAxis(AXIS_LEFT_X);
+    const f32 ly = TFE_Input::getAxis(AXIS_LEFT_Y);
+    const bool stickUp = ly > 0.55f;
+    const bool stickDown = ly < -0.55f;
+    const bool stickLeft = lx < -0.55f;
+    const bool stickRight = lx > 0.55f;
+
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_UP) || (stickUp && !s_optionsStickUpHeld)) optionsMove(-1);
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_DOWN) || (stickDown && !s_optionsStickDownHeld)) optionsMove(1);
+    s_optionsStickUpHeld = stickUp;
+    s_optionsStickDownHeld = stickDown;
+
+    s32 delta = 0;
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_LEFT) || (stickLeft && !s_optionsStickLeftHeld)) delta = -5;
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_RIGHT) || (stickRight && !s_optionsStickRightHeld)) delta = 5;
+    s_optionsStickLeftHeld = stickLeft;
+    s_optionsStickRightHeld = stickRight;
+    if (delta) applyOptionValue(s_optionsSelection, s_optionsItems[s_optionsSelection].value + delta);
+
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A) || TFE_Input::buttonPressed(CONTROLLER_BUTTON_START))
+    {
+        TFE_Settings::writeToDisk();
+        TFE_System::logWrite(LOG_MSG, "Options", "applied");
+    }
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_B) || TFE_Input::buttonPressed(CONTROLLER_BUTTON_BACK))
+    {
+        closeOptionsMenu();
+        return;
+    }
+
+    TFE_RenderBackend::xboxSetOptionsScreen(s_curState == APP_STATE_OPTIONS, false, s_optionsSelection, s_optionsScroll, s_optionsFrame++, s_optionsItems, 7);
 }
 
 static void updateStartMenu()
@@ -292,10 +852,10 @@ static void updateStartMenu()
         TFE_System::logWrite(LOG_MSG, "StartMenu", "activate selection=%d", s_startMenuSelection);
         if (s_startMenuSelection == 0)
         {
-            const char* gameArgv[] = { "tfe_xbox", "-lSECBASE" };
+            const char* gameArgv[] = { "tfe_xbox" };
             TFE_RenderBackend::xboxSetStartScreen(false, 0, 0);
             TFE_System::logWrite(LOG_MSG, "Main", "Starting Dark Forces from start menu.");
-            startGame(2, gameArgv);
+            startGame(1, gameArgv);
         }
         else if (s_startMenuSelection == 1)
         {
@@ -303,8 +863,18 @@ static void updateStartMenu()
             s_curState = APP_STATE_LOAD;
             s_loadMenuSelection = 0;
             TFE_RenderBackend::xboxSetStartScreen(false, 0, 0);
+            TFE_RenderBackend::xboxSetModScreen(false, 0, 0, NULL, 0);
             TFE_RenderBackend::xboxSetLoadScreen(true, s_loadMenuSelection, s_loadMenuFrame, s_loadSlots, 6);
             TFE_System::logWrite(LOG_MSG, "StartMenu", "opened load screen");
+        }
+        else if (s_startMenuSelection == 2)
+        {
+            openModMenu();
+        }
+        else if (s_startMenuSelection == 3)
+        {
+            TFE_System::logWrite(LOG_MSG, "StartMenu", "opened options screen");
+            openOptionsMenu(false);
         }
         else
         {
@@ -329,6 +899,100 @@ static void closeLoadMenu()
     s_curState = APP_STATE_MENU;
     TFE_RenderBackend::xboxSetLoadScreen(false, 0, 0, NULL, 0);
     TFE_RenderBackend::xboxSetStartScreen(true, s_startMenuSelection, s_startMenuFrame);
+    startMenuMusic();
+}
+
+static void openModMenu()
+{
+    refreshModSlots();
+    s_curState = APP_STATE_MODS;
+    s_modMenuSelection = 0;
+    s_modStickUpHeld = false;
+    s_modStickDownHeld = false;
+    TFE_RenderBackend::xboxSetStartScreen(false, 0, 0);
+    TFE_RenderBackend::xboxSetModScreen(true, s_modMenuSelection, s_modMenuFrame, s_modUi, s_modCount);
+    TFE_System::logWrite(LOG_MSG, "StartMenu", "opened mod screen");
+}
+
+static void closeModMenu()
+{
+    s_curState = APP_STATE_MENU;
+    TFE_RenderBackend::xboxSetModScreen(false, 0, 0, NULL, 0);
+    TFE_RenderBackend::xboxSetStartScreen(true, s_startMenuSelection, s_startMenuFrame);
+    startMenuMusic();
+}
+
+static void modMenuMove(s32 delta)
+{
+    if (s_modCount <= 0) return;
+    s_modMenuSelection += delta;
+    if (s_modMenuSelection < 0) s_modMenuSelection = s_modCount - 1;
+    if (s_modMenuSelection >= s_modCount) s_modMenuSelection = 0;
+    TFE_System::logWrite(LOG_MSG, "ModMenu", "selection=%d title='%s'", s_modMenuSelection, s_modEntries[s_modMenuSelection].title);
+}
+
+static void startSelectedMod()
+{
+    if (s_modMenuSelection < 0 || s_modMenuSelection >= s_modCount) return;
+    XboxModEntry* mod = &s_modEntries[s_modMenuSelection];
+    if (!mod->ui.valid || !mod->archiveName[0]) return;
+
+    TFE_Paths::addAbsoluteSearchPathToHead(mod->path);
+    static char modArg[128];
+    static char levelArg[64];
+    snprintf(modArg, sizeof(modArg), "-u%s", mod->archiveName);
+    if (mod->levelName[0])
+    {
+        snprintf(levelArg, sizeof(levelArg), "-l%s", mod->levelName);
+        const char* gameArgv[] = { "tfe_xbox", "-c0", modArg, levelArg };
+        TFE_System::logWrite(LOG_MSG, "ModMenu", "starting mod title='%s' path='%s' archive='%s' level='%s'",
+            mod->title, mod->path, mod->archiveName, mod->levelName);
+        startGame(4, gameArgv);
+    }
+    else
+    {
+        snprintf(levelArg, sizeof(levelArg), "-lSECBASE");
+        const char* gameArgv[] = { "tfe_xbox", "-c0", modArg, levelArg };
+        TFE_System::logWrite(LOG_WARNING, "ModMenu", "starting mod without detected level; falling back to SECBASE title='%s' path='%s' archive='%s'",
+            mod->title, mod->path, mod->archiveName);
+        startGame(4, gameArgv);
+    }
+}
+
+static void updateModMenu()
+{
+    const f32 ly = TFE_Input::getAxis(AXIS_LEFT_Y);
+    const bool stickUp = ly > 0.55f;
+    const bool stickDown = ly < -0.55f;
+
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_UP) || (stickUp && !s_modStickUpHeld))
+    {
+        modMenuMove(-1);
+    }
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_DOWN) || (stickDown && !s_modStickDownHeld))
+    {
+        modMenuMove(1);
+    }
+    s_modStickUpHeld = stickUp;
+    s_modStickDownHeld = stickDown;
+
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_B) || TFE_Input::buttonPressed(CONTROLLER_BUTTON_BACK))
+    {
+        closeModMenu();
+        return;
+    }
+
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A) || TFE_Input::buttonPressed(CONTROLLER_BUTTON_START))
+    {
+        if (s_modCount > 0)
+        {
+            startSelectedMod();
+            return;
+        }
+        TFE_System::logWrite(LOG_WARNING, "ModMenu", "start pressed with no mods installed");
+    }
+
+    TFE_RenderBackend::xboxSetModScreen(s_curState == APP_STATE_MODS, s_modMenuSelection, s_modMenuFrame++, s_modUi, s_modCount);
 }
 
 static void updateLoadMenu()
@@ -544,6 +1208,8 @@ void __cdecl main()
     TFE_SaveSystem::init();
     TFE_SaveSystem::setCurrentGame(TFE_Settings::getGame()->id);
     TFE_InputXbox::init();
+    TFE_InputXbox::setLookSensitivity(TFE_Settings::getSystemSettings()->xboxLookSensitivity);
+    TFE_InputXbox::setStickDeadzone(TFE_Settings::getSystemSettings()->xboxStickDeadzone);
 
     // -----------------------------------------------------------------------
     // Reticle
@@ -582,6 +1248,7 @@ void __cdecl main()
     s_curState = APP_STATE_MENU;
     TFE_Input::enableRelativeMode(false);
     TFE_RenderBackend::xboxSetStartScreen(true, s_startMenuSelection, s_startMenuFrame);
+    startMenuMusic();
 
     TFE_System::logWrite(LOG_MSG, "Main", "Entering app loop at start menu.");
 
@@ -610,6 +1277,14 @@ void __cdecl main()
         else if (s_curState == APP_STATE_LOAD)
         {
             updateLoadMenu();
+        }
+        else if (s_curState == APP_STATE_MODS)
+        {
+            updateModMenu();
+        }
+        else if (s_curState == APP_STATE_OPTIONS)
+        {
+            updateOptionsMenu();
         }
         else if (!inputMapping_handleInputs())
         {
@@ -640,6 +1315,10 @@ void __cdecl main()
                     s_returnToStartRequested = false;
                     TFE_Input::enableRelativeMode(false);
                     TFE_RenderBackend::xboxSetStartScreen(true, s_startMenuSelection, s_startMenuFrame);
+                    TFE_RenderBackend::xboxSetLoadScreen(false, 0, 0, NULL, 0);
+                    TFE_RenderBackend::xboxSetModScreen(false, 0, 0, NULL, 0);
+                    TFE_RenderBackend::xboxSetOptionsScreen(false, false, 0, 0, 0, NULL, 0);
+                    startMenuMusic();
                     endInputFrame = true;
                 }
                 else
@@ -664,6 +1343,7 @@ void __cdecl main()
     }
 
     TFE_System::logWrite(LOG_MSG, "Main", "Game loop ended. Shutting down.");
+    stopMenuMusic();
 
     // -----------------------------------------------------------------------
     // Shutdown

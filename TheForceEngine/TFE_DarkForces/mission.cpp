@@ -18,6 +18,7 @@
 #include <TFE_DarkForces/logic.h>
 #include <TFE_Game/igame.h>
 #include <TFE_Game/reticle.h>
+#include <TFE_Game/saveSystem.h>
 #include <TFE_Settings/settings.h>
 #include <TFE_RenderBackend/renderBackend.h>
 #include <TFE_Jedi/Level/rtexture.h>
@@ -38,6 +39,9 @@
 #include <TFE_System/tfeMessage.h>
 #include <TFE_Input/inputMapping.h>
 #include <TFE_Input/replay.h>
+#ifdef _XBOX
+#include <TFE_Input/input.h>
+#endif
 
 using namespace TFE_Jedi;
 using namespace TFE_Input;
@@ -136,6 +140,52 @@ namespace TFE_DarkForces
 	static Tick s_loadingScreenStart;
 	static Tick s_loadingScreenDelta;
 	static CheatID s_queuedCheatID = CHEAT_NONE;
+#ifdef _XBOX
+	static bool s_xboxResumeInputGuard = false;
+	static s32  s_xboxResumeInputGuardFrames = 0;
+
+	static void xboxClearResumeInputActions()
+	{
+		inputMapping_removeState(IADF_JUMP);
+		inputMapping_removeState(IADF_USE);
+		inputMapping_removeState(IADF_PRIMARY_FIRE);
+		inputMapping_removeState(IADF_SECONDARY_FIRE);
+		inputMapping_removeState(IADF_MENU_TOGGLE);
+		inputMapping_removeState(IAS_QUICK_SAVE);
+	}
+
+	static void xboxBeginResumeInputGuard()
+	{
+		s_xboxResumeInputGuard = true;
+		s_xboxResumeInputGuardFrames = 3;
+		xboxClearResumeInputActions();
+	}
+
+	static bool xboxResumeInputGuardActive()
+	{
+		if (!s_xboxResumeInputGuard)
+		{
+			return false;
+		}
+
+		xboxClearResumeInputActions();
+		if (s_xboxResumeInputGuardFrames > 0)
+		{
+			s_xboxResumeInputGuardFrames--;
+		}
+
+		if (s_xboxResumeInputGuardFrames <= 0 &&
+			!TFE_Input::buttonDown(CONTROLLER_BUTTON_A) &&
+			!TFE_Input::buttonDown(CONTROLLER_BUTTON_B) &&
+			!TFE_Input::buttonDown(CONTROLLER_BUTTON_START) &&
+			inputMapping_getActionState(IADF_MENU_TOGGLE) == STATE_UP)
+		{
+			TFE_System::logWrite(LOG_MSG, "PauseMenu", "resume input guard released");
+			s_xboxResumeInputGuard = false;
+		}
+		return s_xboxResumeInputGuard;
+	}
+#endif
 
 	void console_cheat(const ConsoleArgList& args)
 	{
@@ -614,7 +664,12 @@ namespace TFE_DarkForces
 						
 			if (!escapeMenu_isOpen() && !pda_isOpen())
 			{
-				handleGeneralInput();
+#ifdef _XBOX
+				if (!xboxResumeInputGuardActive())
+#endif
+				{
+					handleGeneralInput();
+				}
 				if (s_drawAutomap)
 				{
 					automap_draw(s_framebuffer);
@@ -652,6 +707,9 @@ namespace TFE_DarkForces
 					TFE_Input::clearAccumulatedMouseMove();
 					task_pause(s_gamePaused);
 					time_pause(s_gamePaused);
+#ifdef _XBOX
+					xboxBeginResumeInputGuard();
+#endif
 
 					if (action == ESC_CONFIG)
 					{
@@ -694,10 +752,13 @@ namespace TFE_DarkForces
 						blankScreen();
 					}
 				}
-				else if (action == ESC_RESPAWN)
+				else if (action == ESC_QUICKSAVE)
 				{
-					TFE_System::logWrite(LOG_MSG, "PauseMenu", "mission handling action=Respawn");
-					player_revive();
+					TFE_System::logWrite(LOG_MSG, "PauseMenu", "mission handling action=QuickSave");
+					hud_sendTextMessage("Saving...", 0, true);
+					const bool saved = TFE_SaveSystem::saveGame(TFE_SaveSystem::c_quickSaveName, "Quicksave");
+					TFE_System::logWrite(saved ? LOG_MSG : LOG_ERROR, "PauseMenu", "quick save %s", saved ? "complete" : "failed");
+					hud_sendTextMessage(saved ? "Game Saved" : "Save Failed", 0, true);
 					s_gamePaused = JFALSE;
 					TFE_Input::clearAccumulatedMouseMove();
 					task_pause(s_gamePaused);
@@ -713,15 +774,28 @@ namespace TFE_DarkForces
 				if (!pda_isOpen())
 				{
 					mission_pause(JFALSE);
+#ifdef _XBOX
+					xboxBeginResumeInputGuard();
+#endif
 					resumeLevelSound();
 				}
 			}
 			else if (inputMapping_getActionState(IADF_MENU_TOGGLE) == STATE_PRESSED && !s_playerDying && !TFE_FrontEndUI::isConsoleOpen())
 			{
-				escapeMenu_open(s_framebuffer, s_basePalette);
-				s_gamePaused = JTRUE;
-				task_pause(s_gamePaused, s_mainTask);
-				time_pause(s_gamePaused);
+#ifdef _XBOX
+				if (s_levelComplete)
+				{
+					TFE_System::logWrite(LOG_MSG, "MissionComplete", "START pressed after level completion; opening mission complete screen");
+					s_exitLevel = JTRUE;
+				}
+				else
+#endif
+				{
+					escapeMenu_open(s_framebuffer, s_basePalette);
+					s_gamePaused = JTRUE;
+					task_pause(s_gamePaused, s_mainTask);
+					time_pause(s_gamePaused);
+				}
 			}
 
 			// vgaSwapBuffers() in the DOS code.

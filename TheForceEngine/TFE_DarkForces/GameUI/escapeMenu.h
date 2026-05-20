@@ -15,7 +15,7 @@ enum EscapeMenuAction
 	ESC_QUIT,			// quit the game.
 	ESC_CONFIG,			// configuration menu.
 	ESC_PDA,			// open the PDA / Datapad.
-	ESC_RESPAWN,		// respawn the player in-place.
+	ESC_QUICKSAVE,		// quick-save the current mission.
 	ESC_COUNT
 };
 

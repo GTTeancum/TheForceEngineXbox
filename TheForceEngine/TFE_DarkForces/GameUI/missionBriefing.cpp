@@ -15,6 +15,9 @@
 #include <TFE_Settings/settings.h>
 #include <TFE_Input/input.h>
 #include <TFE_RenderBackend/renderBackend.h>
+#ifdef _XBOX
+#include <TFE_RenderBackend/renderBackend_xbox.h>
+#endif
 #include <TFE_Jedi/Math/core_math.h>
 #include <TFE_Jedi/Level/rtexture.h>
 #include <TFE_System/system.h>
@@ -53,7 +56,6 @@ namespace TFE_DarkForces
 	static BriefingButton s_xboxSelectedButton = BRIEF_BTN_OK;
 	static s32 s_xboxNavX = 0;
 	static s32 s_xboxNavY = 0;
-	static JBool s_xboxShowObjectives = JFALSE;
 	static bool s_xboxPrevA = false;
 	static bool s_xboxPrevB = false;
 	static bool s_xboxPrevX = false;
@@ -61,6 +63,8 @@ namespace TFE_DarkForces
 	static bool s_xboxPrevBack = false;
 	static bool s_xboxPrevLB = false;
 	static bool s_xboxPrevRB = false;
+	static u8 s_xboxBriefingFrame[640 * 480];
+	static u8 s_xboxPortraitSource[320 * 200];
 #endif
 
 	s16 s_briefY;
@@ -109,7 +113,6 @@ namespace TFE_DarkForces
 		s_xboxSelectedButton = BRIEF_BTN_OK;
 		s_xboxNavX = 0;
 		s_xboxNavY = 0;
-		s_xboxShowObjectives = JFALSE;
 		s_xboxPrevA = TFE_Input::buttonDown(CONTROLLER_BUTTON_A);
 		s_xboxPrevB = TFE_Input::buttonDown(CONTROLLER_BUTTON_B);
 		s_xboxPrevX = TFE_Input::buttonDown(CONTROLLER_BUTTON_X);
@@ -208,6 +211,9 @@ namespace TFE_DarkForces
 
 	void missionBriefing_cleanup()
 	{
+#ifdef _XBOX
+		TFE_RenderBackend::xboxSetBriefingFooter(false, true, 1);
+#endif
 		lactor_removeActor(s_briefActor);
 		lactor_removeActor(s_menuActor);
 
@@ -391,13 +397,11 @@ namespace TFE_DarkForces
 		}
 		else if (xPressed)
 		{
-			s_xboxShowObjectives = !s_xboxShowObjectives;
-			TFE_System::logWrite(LOG_MSG, "MissionBriefing", "toggle view=%s", s_xboxShowObjectives ? "objectives" : "briefing");
+			s_skill = (s_skill + 1) % 3;
+			TFE_System::logWrite(LOG_MSG, "MissionBriefing", "difficulty=%d", s_skill);
 		}
 		else if (yPressed)
 		{
-			s_skill = (s_skill + 1) % 3;
-			TFE_System::logWrite(LOG_MSG, "MissionBriefing", "difficulty=%d", s_skill);
 		}
 
 		s_xboxNavY = axisY;
@@ -406,16 +410,167 @@ namespace TFE_DarkForces
 
 	void missionBriefing_drawXboxFooter()
 	{
-		LRect strip = { 164, 0, 200, 320 };
-		const char* viewPrompt = s_xboxShowObjectives ? "BRIEFING" : "OBJECTIVES";
-		const char* skillPrompt = s_skill == 0 ? "EASY" : (s_skill == 1 ? "MEDIUM" : "HARD");
-		drawClippedColorRect(&strip, 0);
-		print("A START", 8, 190, 12, s_framebuffer);
-		print("B ABORT", 61, 190, 39, s_framebuffer);
-		print("X", 118, 190, 34, s_framebuffer);
-		print(viewPrompt, 130, 190, 47, s_framebuffer);
-		print("Y", 218, 190, 43, s_framebuffer);
-		print(skillPrompt, 230, 190, 47, s_framebuffer);
+		TFE_RenderBackend::xboxSetBriefingFooter(true, true, s_skill);
+	}
+
+	static void missionBriefing_xboxFillRect(u8* dst, s32 x, s32 y, s32 w, s32 h, u8 color)
+	{
+		if (!dst || w <= 0 || h <= 0) return;
+		if (x < 0) { w += x; x = 0; }
+		if (y < 0) { h += y; y = 0; }
+		if (x + w > 640) w = 640 - x;
+		if (y + h > 480) h = 480 - y;
+		if (w <= 0 || h <= 0) return;
+
+		for (s32 yy = 0; yy < h; yy++)
+		{
+			memset(dst + (y + yy) * 640 + x, color, w);
+		}
+	}
+
+	static void missionBriefing_xboxStrokeRect(u8* dst, s32 x, s32 y, s32 w, s32 h, u8 color)
+	{
+		missionBriefing_xboxFillRect(dst, x, y, w, 2, color);
+		missionBriefing_xboxFillRect(dst, x, y + h - 2, w, 2, color);
+		missionBriefing_xboxFillRect(dst, x, y, 2, h, color);
+		missionBriefing_xboxFillRect(dst, x + w - 2, y, 2, h, color);
+	}
+
+	static void missionBriefing_xboxTriangle(u8* dst, s32 cx, s32 y, s32 halfW, s32 h, JBool up, u8 color)
+	{
+		if (!dst) return;
+		for (s32 row = 0; row < h; row++)
+		{
+			const s32 span = up ? row : (h - 1 - row);
+			const s32 w = (span * halfW) / (h - 1);
+			for (s32 x = cx - w; x <= cx + w; x++)
+			{
+				const s32 py = y + row;
+				if (x < 0 || x >= 640 || py < 0 || py >= 480) continue;
+				dst[py * 640 + x] = color;
+			}
+		}
+	}
+
+	static void missionBriefing_xboxBlitScaled(u8* dst, const u8* src, s32 sx, s32 sy, s32 sw, s32 sh,
+		s32 dx, s32 dy, s32 scale, u8 transparent)
+	{
+		if (!dst || !src || scale <= 0) return;
+		for (s32 y = 0; y < sh; y++)
+		{
+			const s32 srcY = sy + y;
+			if (srcY < 0 || srcY >= 200) continue;
+			for (s32 x = 0; x < sw; x++)
+			{
+				const s32 srcX = sx + x;
+				if (srcX < 0 || srcX >= 320) continue;
+				const u8 c = src[srcY * 320 + srcX];
+				if (c == transparent) continue;
+
+				const s32 outX = dx + x * scale;
+				const s32 outY = dy + y * scale;
+				for (s32 yy = 0; yy < scale; yy++)
+				{
+					const s32 py = outY + yy;
+					if (py < 0 || py >= 480) continue;
+					for (s32 xx = 0; xx < scale; xx++)
+					{
+						const s32 px = outX + xx;
+						if (px < 0 || px >= 640) continue;
+						dst[py * 640 + px] = c;
+					}
+				}
+			}
+		}
+	}
+
+	static void missionBriefing_xboxBlitBriefingScaledClipped(u8* dst, const u8* src, s32 sx, s32 sy, s32 sw, s32 sh,
+		s32 dx, s32 dy, s32 scale, u8 black, u8 bg0, u8 bg1, u8 bg2,
+		s32 clipX, s32 clipY, s32 clipW, s32 clipH)
+	{
+		if (!dst || !src || scale <= 0) return;
+		const s32 clipR = clipX + clipW;
+		const s32 clipB = clipY + clipH;
+		for (s32 y = 0; y < sh; y++)
+		{
+			const s32 srcY = sy + y;
+			if (srcY < 0 || srcY >= 200) continue;
+			for (s32 x = 0; x < sw; x++)
+			{
+				const s32 srcX = sx + x;
+				if (srcX < 0 || srcX >= 320) continue;
+				const u8 c = src[srcY * 320 + srcX];
+				if (c == black) continue;
+				if (c == bg0 || c == bg1 || c == bg2) continue;
+
+				const s32 outX = dx + x * scale;
+				const s32 outY = dy + y * scale;
+				for (s32 yy = 0; yy < scale; yy++)
+				{
+					const s32 py = outY + yy;
+					if (py < clipY || py >= clipB || py < 0 || py >= 480) continue;
+					for (s32 xx = 0; xx < scale; xx++)
+					{
+						const s32 px = outX + xx;
+						if (px < clipX || px >= clipR || px < 0 || px >= 640) continue;
+						dst[py * 640 + px] = c;
+					}
+				}
+			}
+		}
+	}
+
+	static void missionBriefing_blitXboxNative(const u8* portraitSrc, const u8* briefingSrc)
+	{
+		if (!portraitSrc || !briefingSrc) return;
+
+		const u8 black = portraitSrc[5 * 320 + 5];
+		const u8 brown = portraitSrc[80 * 320 + 150];
+		const u8 green = portraitSrc[24 * 320 + 155];
+		const u8 green2 = portraitSrc[165 * 320 + 155];
+		const u8 border = portraitSrc[16 * 320 + 141];
+		const s32 redSampleX = s_missionTextRect.left + 80;
+		const s32 redSampleY = s_missionTextRect.top + 28;
+		const u8 red = briefingSrc[(redSampleY >= 0 && redSampleY < 200 && redSampleX >= 0 && redSampleX < 320) ?
+			redSampleY * 320 + redSampleX : 0];
+
+		memset(s_xboxBriefingFrame, black, sizeof(s_xboxBriefingFrame));
+
+		const s32 panelX = 230;
+		const s32 panelY = 50;
+		const s32 panelW = 405;
+		const s32 panelH = 356;
+		const s32 innerX = panelX + 10;
+		const s32 innerW = panelW - 25;
+		const s32 headerY = panelY + 10;
+		const s32 headerH = 80;
+		const s32 bodyY = headerY + headerH;
+		const s32 bodyH = 230;
+		const s32 sectionY = bodyY + bodyH;
+		const s32 sectionH = 36;
+		const s32 textClipW = innerW - 20;
+		const s32 textClipH = sectionY + sectionH - headerY;
+		const s32 arrowX = panelX + panelW - 15;
+
+		missionBriefing_xboxFillRect(s_xboxBriefingFrame, panelX, panelY, panelW, panelH, brown);
+		missionBriefing_xboxFillRect(s_xboxBriefingFrame, innerX, headerY, innerW, headerH, green);
+		missionBriefing_xboxFillRect(s_xboxBriefingFrame, innerX, bodyY, innerW, bodyH, brown);
+		missionBriefing_xboxFillRect(s_xboxBriefingFrame, innerX, sectionY, innerW, sectionH, green2);
+		missionBriefing_xboxStrokeRect(s_xboxBriefingFrame, panelX, panelY, panelW, panelH, border);
+		missionBriefing_xboxStrokeRect(s_xboxBriefingFrame, innerX - 1, headerY - 1, innerW + 2, sectionY + sectionH - headerY + 2, border);
+		missionBriefing_xboxTriangle(s_xboxBriefingFrame, arrowX, bodyY + 18, 7, 10, JTRUE, red);
+		missionBriefing_xboxTriangle(s_xboxBriefingFrame, arrowX, bodyY + bodyH - 28, 7, 10, JFALSE, red);
+
+		missionBriefing_xboxBlitScaled(s_xboxBriefingFrame, portraitSrc, 0, 10, 108, 150, 16, 54, 2, black);
+		missionBriefing_xboxBlitBriefingScaledClipped(s_xboxBriefingFrame, briefingSrc,
+			s_missionTextRect.left, s_missionTextRect.top,
+			s_missionTextRect.right - s_missionTextRect.left,
+			s_missionTextRect.bottom - s_missionTextRect.top,
+			innerX, headerY, 2, black, brown, green, green2, innerX, headerY, textClipW, textClipH);
+
+		vfb_setResolution(640, 480);
+		memcpy(vfb_getCpuBuffer(), s_xboxBriefingFrame, sizeof(s_xboxBriefingFrame));
+		vfb_swap();
 	}
 #endif
 		
@@ -609,17 +764,28 @@ namespace TFE_DarkForces
 			return JFALSE;
 		}
 
+#ifndef _XBOX
 		// Background
 		lcanvas_eraseRect(&s_viewBounds);
 		lactor_setState(s_menuActor, 0, 0);
 		lactorAnim_draw(s_menuActor, &s_viewBounds, &s_viewBounds, 0, 0, JTRUE);
 
-#ifndef _XBOX
 		// Buttons
 		for (s32 i = 0; i < BRIEF_BTN_COUNT; i++)
 		{
 			drawButton(BriefingButton(i));
 		}
+#else
+		// Portrait source pass only. Do not present this buffer; it contains
+		// legacy briefing chrome and buttons that the Xbox UI replaces.
+		lcanvas_eraseRect(&s_viewBounds);
+		lactor_setState(s_menuActor, 0, 0);
+		lactorAnim_draw(s_menuActor, &s_viewBounds, &s_viewBounds, 0, 0, JTRUE);
+		memcpy(s_xboxPortraitSource, ldraw_getBitmap(), sizeof(s_xboxPortraitSource));
+
+		// Clean briefing-content pass. This isolates the DELT text and inline
+		// art from the old Easy/Med/Hard/Cancel/OK controls.
+		lcanvas_clear();
 #endif
 
 		// Briefing Text.
@@ -634,10 +800,11 @@ namespace TFE_DarkForces
 
 #ifndef _XBOX
 		menu_blitCursor(s_cursorPos.x, s_cursorPos.z, s_framebuffer);
+		menu_blitToScreen();
 #else
 		missionBriefing_drawXboxFooter();
+		missionBriefing_blitXboxNative(s_xboxPortraitSource, ldraw_getBitmap());
 #endif
-		menu_blitToScreen();
 		return JTRUE;
 	}
 	

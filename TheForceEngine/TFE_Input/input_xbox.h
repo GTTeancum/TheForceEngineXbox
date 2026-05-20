@@ -8,4 +8,8 @@ namespace TFE_InputXbox
     void init();
     void pollInput();
     void shutdown();
+    void setLookSensitivity(float value);
+    float getLookSensitivity();
+    void setStickDeadzone(float value);
+    float getStickDeadzone();
 }

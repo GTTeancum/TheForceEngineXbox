@@ -68,6 +68,11 @@ namespace TFE_DarkForces
 	s32   agent_getLevelIndexFromName(const char* name);
 	const char* agent_getLevelName();
 	const char* agent_getLevelDisplayName();
+#ifdef _XBOX
+	void  agent_setXboxCustomLevelName(const char* name);
+	void  agent_clearXboxCustomLevelName();
+	JBool agent_hasXboxCustomLevelName();
+#endif
 
 	void  agent_setLevelComplete(JBool complete);
 	JBool agent_getLevelComplete();

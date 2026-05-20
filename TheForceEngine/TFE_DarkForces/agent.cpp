@@ -30,6 +30,9 @@ namespace TFE_DarkForces
 	char** s_levelDisplayNames;
 	char** s_levelGamePaths;
 	char** s_levelSrcPaths;
+#ifdef _XBOX
+	static char s_xboxCustomLevelName[32] = "";
+#endif
 
 	static Task* s_levelEndTask = nullptr;
 
@@ -235,11 +238,20 @@ namespace TFE_DarkForces
 				return i + 1;
 			}
 		}
+#ifdef _XBOX
+		if (s_xboxCustomLevelName[0] && name && !strcasecmp(s_xboxCustomLevelName, name))
+		{
+			return 1;
+		}
+#endif
 		return 0;
 	}
 		
 	const char* agent_getLevelName()
 	{
+#ifdef _XBOX
+		if (s_xboxCustomLevelName[0]) { return s_xboxCustomLevelName; }
+#endif
 		if (!s_maxLevelIndex) { return nullptr; }
 		const s32 index = clamp(s_levelIndex, 1, s_maxLevelIndex);
 		return s_levelGamePaths[index - 1];
@@ -247,10 +259,35 @@ namespace TFE_DarkForces
 
 	const char* agent_getLevelDisplayName()
 	{
+#ifdef _XBOX
+		if (s_xboxCustomLevelName[0]) { return s_xboxCustomLevelName; }
+#endif
 		if (!s_maxLevelIndex) { return nullptr; }
 		const s32 index = clamp(s_levelIndex, 1, s_maxLevelIndex);
 		return s_levelDisplayNames[index - 1];
 	}
+
+#ifdef _XBOX
+	void agent_setXboxCustomLevelName(const char* name)
+	{
+		if (!name)
+		{
+			s_xboxCustomLevelName[0] = 0;
+			return;
+		}
+		strCopyAndZero(s_xboxCustomLevelName, name, sizeof(s_xboxCustomLevelName));
+	}
+
+	void agent_clearXboxCustomLevelName()
+	{
+		s_xboxCustomLevelName[0] = 0;
+	}
+
+	JBool agent_hasXboxCustomLevelName()
+	{
+		return s_xboxCustomLevelName[0] ? JTRUE : JFALSE;
+	}
+#endif
 
 	void  agent_setLevelComplete(JBool complete)
 	{

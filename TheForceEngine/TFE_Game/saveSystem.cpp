@@ -59,6 +59,27 @@ namespace TFE_SaveSystem
 			s_imageBufferSize[0] = size;
 		}
 		TFE_RenderBackend::captureScreenToMemory(s_imageBuffer[0]);
+#ifdef _XBOX
+		const u32 rawImageSize = SAVE_IMAGE_WIDTH * SAVE_IMAGE_HEIGHT * sizeof(u32);
+		if (rawImageSize > s_imageBufferSize[1])
+		{
+			s_imageBuffer[1] = (u32*)realloc(s_imageBuffer[1], rawImageSize);
+			s_imageBufferSize[1] = rawImageSize;
+		}
+		if (s_imageBuffer[1])
+		{
+			for (u32 y = 0; y < SAVE_IMAGE_HEIGHT; y++)
+			{
+				const u32 sy = displayInfo.height ? (y * displayInfo.height) / SAVE_IMAGE_HEIGHT : 0;
+				for (u32 x = 0; x < SAVE_IMAGE_WIDTH; x++)
+				{
+					const u32 sx = displayInfo.width ? (x * displayInfo.width) / SAVE_IMAGE_WIDTH : 0;
+					s_imageBuffer[1][y * SAVE_IMAGE_WIDTH + x] =
+						s_imageBuffer[0][sy * displayInfo.width + sx] | 0xff000000u;
+				}
+			}
+		}
+#else
 		// Save to memory.
 		u8* png = (u8*)malloc(SAVE_IMAGE_WIDTH * SAVE_IMAGE_HEIGHT * 4);
 		u32 pngSize = 0;
@@ -73,6 +94,7 @@ namespace TFE_SaveSystem
 			pngSize = 0;
 			png = (u8*)s_imageBuffer[0];
 		}
+#endif
 
 		// Master version.
 		u32 version = SVER_CUR;
@@ -120,9 +142,18 @@ namespace TFE_SaveSystem
 		stream->writeBuffer(modList, len);
 
 		// Image.
+#ifdef _XBOX
+		u32 pngSize = s_imageBuffer[1] ? rawImageSize : 0;
+		stream->write(&pngSize);
+		if (pngSize)
+		{
+			stream->writeBuffer(s_imageBuffer[1], pngSize);
+		}
+#else
 		stream->write(&pngSize);
 		stream->writeBuffer(png, pngSize);
 		free(png);
+#endif
 	}
 
 	void loadHeader(Stream* stream, SaveHeader* header, const char* fileName)
@@ -176,6 +207,26 @@ namespace TFE_SaveSystem
 		// Image, re-use buffer 0 for the PNG.
 		u32 pngSize;
 		stream->read(&pngSize);
+#ifdef _XBOX
+		const u32 rawImageSize = SAVE_IMAGE_WIDTH * SAVE_IMAGE_HEIGHT * sizeof(u32);
+		if (pngSize == rawImageSize)
+		{
+			stream->readBuffer(header->imageData, pngSize);
+		}
+		else
+		{
+			memset(header->imageData, 0, rawImageSize);
+			if (pngSize)
+			{
+				if (pngSize > s_imageBufferSize[0])
+				{
+					s_imageBuffer[0] = (u32*)realloc(s_imageBuffer[0], pngSize);
+					s_imageBufferSize[0] = pngSize;
+				}
+				stream->readBuffer(s_imageBuffer[0], pngSize);
+			}
+		}
+#else
 		if (pngSize > s_imageBufferSize[0])
 		{
 			s_imageBuffer[0] = (u32*)realloc(s_imageBuffer[0], pngSize);
@@ -191,6 +242,7 @@ namespace TFE_SaveSystem
 			memcpy(header->imageData, image->pixels, sz);
 			TFE_Image::free(image);
 		}
+#endif
 	}
 
 	void populateSaveDirectory(std::vector<SaveHeader>& dir)

@@ -24,6 +24,32 @@ namespace TFE_RenderBackend
         const u32* imageData;
     };
 
+    struct XboxMissionCompleteInfo
+    {
+        u32 seconds;
+        s32 secretsFound;
+        s32 secretsTotal;
+        s32 difficulty;
+    };
+
+    struct XboxOptionsItem
+    {
+        const char* label;
+        s32 value;
+        s32 minValue;
+        s32 maxValue;
+    };
+
+    struct XboxModInfo
+    {
+        bool valid;
+        const char* title;
+        const char* author;
+        const char* version;
+        const char* description;
+        s32 missionCount;
+    };
+
     // Single-vertex layout for untextured colored geometry. Matches
     // D3DFVF_XYZ | D3DFVF_DIFFUSE on the wire.
     struct GpuColorVert
@@ -124,9 +150,13 @@ namespace TFE_RenderBackend
                            u32 topColor = 0xFFFFFFFFu,
                            u32 botColor = 0xFFFFFFFFu);
 
-    void xboxSetPauseOverlay(bool enabled, s32 selection, s32 confirmSelection, bool confirmOpen);
+    void xboxSetPauseOverlay(bool enabled, s32 selection, s32 confirmSelection, bool confirmOpen, s32 notice = 0);
+    void xboxSetBriefingFooter(bool enabled, bool objectivesPrompt, s32 difficulty);
     void xboxSetStartScreen(bool enabled, s32 selection, u32 frame);
     void xboxSetLoadScreen(bool enabled, s32 selection, u32 frame, const XboxLoadSlotInfo* slots, s32 slotCount);
+    void xboxSetModScreen(bool enabled, s32 selection, u32 frame, const XboxModInfo* mods, s32 modCount);
+    void xboxSetOptionsScreen(bool enabled, bool pauseStyle, s32 selection, s32 scroll, u32 frame, const XboxOptionsItem* items, s32 itemCount);
+    void xboxSetMissionCompleteScreen(bool enabled, s32 selection, u32 frame, const XboxMissionCompleteInfo* info);
 }
 
 #endif // _XBOX

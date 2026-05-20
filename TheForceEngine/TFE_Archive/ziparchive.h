@@ -47,6 +47,10 @@ private:
 	u32 m_curFile;
 	ZipEntry* m_entries;
 	void* m_fileHandle;
+#ifdef _XBOX
+	u8* m_zipBuffer;
+	size_t m_zipBufferSize;
+#endif
 
 #ifndef _XBOX
 	u8* m_tempBuffer = nullptr;

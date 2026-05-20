@@ -547,6 +547,8 @@ namespace TFE_Settings
 		writeKeyValue_Bool(settings, "returnToModLoader", s_systemSettings.returnToModLoader);
 		writeKeyValue_Float(settings, "gifRecordingFramerate", s_systemSettings.gifRecordingFramerate);
 		writeKeyValue_Bool(settings, "showGifPathConfirmation", s_systemSettings.showGifPathConfirmation);
+		writeKeyValue_Float(settings, "xboxLookSensitivity", s_systemSettings.xboxLookSensitivity);
+		writeKeyValue_Float(settings, "xboxStickDeadzone", s_systemSettings.xboxStickDeadzone);
 	}
 
 	void writeA11ySettings(FileStream& settings)
@@ -1063,6 +1065,14 @@ namespace TFE_Settings
 		else if (strcasecmp("showGifPathConfirmation", key) == 0)
 		{
 			s_systemSettings.showGifPathConfirmation = parseBool(value);
+		}
+		else if (strcasecmp("xboxLookSensitivity", key) == 0)
+		{
+			s_systemSettings.xboxLookSensitivity = parseFloat(value);
+		}
+		else if (strcasecmp("xboxStickDeadzone", key) == 0)
+		{
+			s_systemSettings.xboxStickDeadzone = parseFloat(value);
 		}
 	}
 	

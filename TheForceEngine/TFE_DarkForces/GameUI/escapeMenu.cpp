@@ -7,6 +7,7 @@
 #include <TFE_DarkForces/util.h>
 #include <TFE_DarkForces/hud.h>
 #include <TFE_DarkForces/config.h>
+#include <TFE_Game/saveSystem.h>
 #include <TFE_Game/reticle.h>
 #include <TFE_Archive/archive.h>
 #include <TFE_Settings/settings.h>
@@ -20,7 +21,9 @@
 #include <TFE_Jedi/Level/roffscreenBuffer.h>
 #include <TFE_System/system.h>
 #ifdef _XBOX
+#include <TFE_Audio/midiPlayer.h>
 #include <TFE_Input/input.h>
+#include <TFE_Input/input_xbox.h>
 #include <TFE_RenderBackend/renderBackend_xbox.h>
 #endif
 
@@ -62,7 +65,7 @@ namespace TFE_DarkForces
 		ESC_BTN_RESUME,
 		ESC_BTN_PDA,
 		ESC_BTN_ABORT,
-		ESC_BTN_RESPAWN,
+		ESC_BTN_QUICKSAVE,
 		ESC_BTN_OPTIONS,
 		ESC_BTN_CHEAT,
 #else
@@ -85,7 +88,7 @@ namespace TFE_DarkForces
 		{64, 35},	// ESC_RESUME
 		{64, 55},	// ESC_PDA
 		{64, 75},	// ESC_ABORT
-		{64, 95},	// ESC_RESPAWN
+		{64, 95},	// ESC_QUICKSAVE
 		{64, 115},	// ESC_OPTIONS
 		{64, 135},	// ESC_CHEAT
 #else
@@ -117,6 +120,20 @@ namespace TFE_DarkForces
 		s32   buttonPressed;
 		bool  buttonHover;
 		ConfirmState confirmState;
+#ifdef _XBOX
+		s32   quickSaveStatus;
+		bool  quickSaveWaitRelease;
+		bool  quickSaveClosePending;
+		bool  optionsOpen;
+		s32   optionsSelection;
+		s32   optionsScroll;
+		u32   optionsFrame;
+		bool  optionsStickUpHeld;
+		bool  optionsStickDownHeld;
+		bool  optionsStickLeftHeld;
+		bool  optionsStickRightHeld;
+		TFE_RenderBackend::XboxOptionsItem optionsItems[7];
+#endif
 
 		RenderTargetHandle renderTarget;
 		LangHotkeys* langKeys;
@@ -127,6 +144,12 @@ namespace TFE_DarkForces
 			, framebufferCopy(NULL), framebuffer(NULL)
 			, buttonPressed(-1), buttonHover(false)
 			, confirmState(CONFIRM_STATE_NONE)
+#ifdef _XBOX
+			, quickSaveStatus(0), quickSaveWaitRelease(false), quickSaveClosePending(false)
+			, optionsOpen(false), optionsSelection(0), optionsScroll(0), optionsFrame(0)
+			, optionsStickUpHeld(false), optionsStickDownHeld(false)
+			, optionsStickLeftHeld(false), optionsStickRightHeld(false)
+#endif
 			, renderTarget(NULL), langKeys(NULL)
 		{
 			cursorPosAccum.x = 0; cursorPosAccum.z = 0;
@@ -144,6 +167,7 @@ namespace TFE_DarkForces
 	void escapeMenu_drawXboxOverlay();
 	EscapeMenuAction escapeMenu_updateXboxUI();
 	const char* escapeMenu_xboxButtonName(s32 button);
+	static void xboxOpenOptions();
 #endif
 
 	extern void pauseLevelSound();
@@ -154,6 +178,7 @@ namespace TFE_DarkForces
 	{
 #ifdef _XBOX
 		TFE_RenderBackend::xboxSetPauseOverlay(false, 0, 0, false);
+		TFE_RenderBackend::xboxSetOptionsScreen(false, true, 0, 0, 0, NULL, 0);
 #endif
 		// TFE: GPU Support.
 		if (s_emState.renderTarget)
@@ -593,6 +618,8 @@ namespace TFE_DarkForces
 			s_emState.escMenuOpen = JFALSE;
 #ifdef _XBOX
 			TFE_RenderBackend::xboxSetPauseOverlay(false, 0, 0, false);
+			TFE_RenderBackend::xboxSetOptionsScreen(false, true, 0, 0, 0, NULL, 0);
+			s_emState.optionsOpen = false;
 #endif
 			// Avoid sound pops due to buffered sound when returning to the Agent or Main menu.
 			if (!s_levelComplete || action != ESC_ABORT_OR_NEXT)
@@ -666,8 +693,19 @@ namespace TFE_DarkForces
 				TFE_System::logWrite(LOG_MSG, "PauseMenu", "action Datapad");
 				action = ESC_PDA;
 				break;
-			case ESC_BTN_RESPAWN:
-				TFE_System::logWrite(LOG_MSG, "PauseMenu", "Respawn selected: no checkpoint respawn handler wired yet");
+			case ESC_BTN_QUICKSAVE:
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "action Quick Save");
+				{
+					TFE_System::logWrite(LOG_MSG, "PauseMenu", "quick save begin");
+					const bool saved = TFE_SaveSystem::saveGame(TFE_SaveSystem::c_quickSaveName, "Quicksave");
+					s_emState.quickSaveStatus = saved ? 1 : 2;
+					s_emState.quickSaveWaitRelease = true;
+					s_emState.quickSaveClosePending = false;
+					s_emState.buttonPressed = ESC_BTN_QUICKSAVE;
+					s_emState.buttonHover = true;
+					TFE_System::logWrite(saved ? LOG_MSG : LOG_ERROR, "PauseMenu", "quick save %s; waiting for acknowledgement", saved ? "complete" : "failed");
+					action = ESC_CONTINUE;
+				}
 				break;
 			case ESC_BTN_CHEAT:
 				TFE_System::logWrite(LOG_MSG, "PauseMenu", "Enter Cheat Code selected: no cheat-entry UI wired yet");
@@ -679,7 +717,8 @@ namespace TFE_DarkForces
 				s_emState.buttonHover = true;
 				break;
 			case ESC_BTN_OPTIONS:
-				TFE_System::logWrite(LOG_MSG, "PauseMenu", "Options selected: no options UI wired yet");
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "Options selected");
+				xboxOpenOptions();
 				break;
 #else
 			case ESC_BTN_CONFIG:
@@ -864,7 +903,7 @@ namespace TFE_DarkForces
 			case ESC_BTN_RESUME:  return "Resume";
 			case ESC_BTN_PDA:     return "Datapad";
 			case ESC_BTN_ABORT:   return "Abort Mission";
-			case ESC_BTN_RESPAWN: return "Respawn";
+			case ESC_BTN_QUICKSAVE: return "Quick Save";
 			case ESC_BTN_OPTIONS: return "Options";
 			case ESC_BTN_CHEAT:   return "Enter Cheat Code";
 		}
@@ -968,6 +1007,145 @@ namespace TFE_DarkForces
 		return pressed;
 	}
 
+	static s32 xboxOptionPercent(float value)
+	{
+		s32 pct = (s32)(value * 100.0f + 0.5f);
+		if (pct < 0) pct = 0;
+		if (pct > 100) pct = 100;
+		return pct;
+	}
+
+	static void xboxRefreshOptionsItems()
+	{
+		TFE_Settings_Sound* sound = TFE_Settings::getSoundSettings();
+		s_emState.optionsItems[0].label = "LOOK SENSITIVITY";
+		s_emState.optionsItems[0].value = (s32)(TFE_InputXbox::getLookSensitivity() * 100.0f + 0.5f);
+		s_emState.optionsItems[0].minValue = 25;
+		s_emState.optionsItems[0].maxValue = 250;
+
+		s_emState.optionsItems[1].label = "STICK DEADZONE";
+		s_emState.optionsItems[1].value = (s32)(TFE_InputXbox::getStickDeadzone() * 100.0f + 0.5f);
+		s_emState.optionsItems[1].minValue = 0;
+		s_emState.optionsItems[1].maxValue = 30;
+
+		s_emState.optionsItems[2].label = "MASTER VOLUME";
+		s_emState.optionsItems[2].value = xboxOptionPercent(sound->masterVolume);
+		s_emState.optionsItems[2].minValue = 0;
+		s_emState.optionsItems[2].maxValue = 100;
+
+		s_emState.optionsItems[3].label = "SFX VOLUME";
+		s_emState.optionsItems[3].value = xboxOptionPercent(sound->soundFxVolume);
+		s_emState.optionsItems[3].minValue = 0;
+		s_emState.optionsItems[3].maxValue = 100;
+
+		s_emState.optionsItems[4].label = "MUSIC VOLUME";
+		s_emState.optionsItems[4].value = xboxOptionPercent(sound->musicVolume);
+		s_emState.optionsItems[4].minValue = 0;
+		s_emState.optionsItems[4].maxValue = 100;
+
+		s_emState.optionsItems[5].label = "CUTSCENE SFX";
+		s_emState.optionsItems[5].value = xboxOptionPercent(sound->cutsceneSoundFxVolume);
+		s_emState.optionsItems[5].minValue = 0;
+		s_emState.optionsItems[5].maxValue = 100;
+
+		s_emState.optionsItems[6].label = "CUTSCENE MUSIC";
+		s_emState.optionsItems[6].value = xboxOptionPercent(sound->cutsceneMusicVolume);
+		s_emState.optionsItems[6].minValue = 0;
+		s_emState.optionsItems[6].maxValue = 100;
+	}
+
+	static void xboxApplyOptionValue(s32 index, s32 value)
+	{
+		if (index < 0 || index >= 7) return;
+		if (value < s_emState.optionsItems[index].minValue) value = s_emState.optionsItems[index].minValue;
+		if (value > s_emState.optionsItems[index].maxValue) value = s_emState.optionsItems[index].maxValue;
+
+		TFE_Settings_Sound* sound = TFE_Settings::getSoundSettings();
+		TFE_Settings_System* system = TFE_Settings::getSystemSettings();
+		switch (index)
+		{
+			case 0:
+				system->xboxLookSensitivity = (float)value / 100.0f;
+				TFE_InputXbox::setLookSensitivity(system->xboxLookSensitivity);
+				break;
+			case 1:
+				system->xboxStickDeadzone = (float)value / 100.0f;
+				TFE_InputXbox::setStickDeadzone(system->xboxStickDeadzone);
+				break;
+			case 2: sound->masterVolume = (float)value / 100.0f; break;
+			case 3: sound->soundFxVolume = (float)value / 100.0f; break;
+			case 4: sound->musicVolume = (float)value / 100.0f; break;
+			case 5: sound->cutsceneSoundFxVolume = (float)value / 100.0f; break;
+			case 6: sound->cutsceneMusicVolume = (float)value / 100.0f; break;
+		}
+		sound = TFE_Settings::getSoundSettings();
+		TFE_MidiPlayer::setVolume(sound->musicVolume * sound->masterVolume);
+		xboxRefreshOptionsItems();
+	}
+
+	static void xboxOpenOptions()
+	{
+		xboxRefreshOptionsItems();
+		s_emState.optionsOpen = true;
+		s_emState.optionsSelection = 0;
+		s_emState.optionsScroll = 0;
+		s_emState.optionsStickUpHeld = s_emState.optionsStickDownHeld = false;
+		s_emState.optionsStickLeftHeld = s_emState.optionsStickRightHeld = false;
+		TFE_RenderBackend::xboxSetPauseOverlay(false, 0, 0, false);
+		TFE_RenderBackend::xboxSetOptionsScreen(true, true, s_emState.optionsSelection, s_emState.optionsScroll, s_emState.optionsFrame, s_emState.optionsItems, 7);
+	}
+
+	static void xboxCloseOptions()
+	{
+		TFE_Settings::writeToDisk();
+		s_emState.optionsOpen = false;
+		TFE_RenderBackend::xboxSetOptionsScreen(false, true, 0, 0, 0, NULL, 0);
+	}
+
+	static void xboxMoveOptions(s32 delta)
+	{
+		s_emState.optionsSelection += delta;
+		if (s_emState.optionsSelection < 0) s_emState.optionsSelection = 6;
+		if (s_emState.optionsSelection > 6) s_emState.optionsSelection = 0;
+		if (s_emState.optionsSelection < s_emState.optionsScroll) s_emState.optionsScroll = s_emState.optionsSelection;
+		if (s_emState.optionsSelection >= s_emState.optionsScroll + 6) s_emState.optionsScroll = s_emState.optionsSelection - 5;
+	}
+
+	static EscapeMenuAction xboxUpdateOptions()
+	{
+		const f32 lx = TFE_Input::getAxis(AXIS_LEFT_X);
+		const f32 ly = TFE_Input::getAxis(AXIS_LEFT_Y);
+		const bool stickUp = ly > 0.55f;
+		const bool stickDown = ly < -0.55f;
+		const bool stickLeft = lx < -0.55f;
+		const bool stickRight = lx > 0.55f;
+
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_UP) || (stickUp && !s_emState.optionsStickUpHeld)) xboxMoveOptions(-1);
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_DOWN) || (stickDown && !s_emState.optionsStickDownHeld)) xboxMoveOptions(1);
+		s_emState.optionsStickUpHeld = stickUp;
+		s_emState.optionsStickDownHeld = stickDown;
+
+		s32 delta = 0;
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_LEFT) || (stickLeft && !s_emState.optionsStickLeftHeld)) delta = -5;
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_RIGHT) || (stickRight && !s_emState.optionsStickRightHeld)) delta = 5;
+		s_emState.optionsStickLeftHeld = stickLeft;
+		s_emState.optionsStickRightHeld = stickRight;
+		if (delta) xboxApplyOptionValue(s_emState.optionsSelection, s_emState.optionsItems[s_emState.optionsSelection].value + delta);
+
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A))
+		{
+			TFE_Settings::writeToDisk();
+		}
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_B) ||
+			inputMapping_getActionState(IADF_MENU_TOGGLE) == STATE_PRESSED)
+		{
+			xboxCloseOptions();
+		}
+
+		TFE_RenderBackend::xboxSetOptionsScreen(s_emState.optionsOpen, true, s_emState.optionsSelection, s_emState.optionsScroll, s_emState.optionsFrame++, s_emState.optionsItems, 7);
+		return ESC_CONTINUE;
+	}
+
 	static void xboxMoveSelection(s32 delta)
 	{
 		if (s_emState.confirmState != CONFIRM_STATE_NONE)
@@ -992,6 +1170,55 @@ namespace TFE_DarkForces
 		EscapeMenuAction action = ESC_CONTINUE;
 		static bool s_stickYLatched = false;
 		static bool s_stickXLatched = false;
+
+		if (s_emState.optionsOpen)
+		{
+			return xboxUpdateOptions();
+		}
+
+		if (s_emState.quickSaveStatus != 0)
+		{
+			const bool dismissDown =
+				TFE_Input::buttonDown(CONTROLLER_BUTTON_A) ||
+				TFE_Input::buttonDown(CONTROLLER_BUTTON_B) ||
+				TFE_Input::buttonDown(CONTROLLER_BUTTON_START) ||
+				inputMapping_getActionState(IADF_MENU_TOGGLE) != STATE_UP;
+
+			if (s_emState.quickSaveWaitRelease)
+			{
+				if (!dismissDown)
+				{
+					TFE_System::logWrite(LOG_MSG, "PauseMenu", "quick save acknowledgement armed");
+					s_emState.quickSaveWaitRelease = false;
+				}
+				return ESC_CONTINUE;
+			}
+
+			if (s_emState.quickSaveClosePending)
+			{
+				if (dismissDown)
+				{
+					return ESC_CONTINUE;
+				}
+
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "quick save closed after release");
+				s_emState.quickSaveStatus = 0;
+				s_emState.quickSaveClosePending = false;
+				s_emState.quickSaveWaitRelease = true;
+				return ESC_RETURN;
+			}
+
+			if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A) ||
+				TFE_Input::buttonPressed(CONTROLLER_BUTTON_B) ||
+				TFE_Input::buttonPressed(CONTROLLER_BUTTON_START) ||
+				inputMapping_getActionState(IADF_MENU_TOGGLE) == STATE_PRESSED)
+			{
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "quick save dismissed; waiting for release before gameplay resumes");
+				s_emState.quickSaveClosePending = true;
+				s_emState.quickSaveWaitRelease = true;
+			}
+			return action;
+		}
 
 		const f32 ly = TFE_Input::getAxis(AXIS_LEFT_Y);
 		const f32 lx = TFE_Input::getAxis(AXIS_LEFT_X);
@@ -1093,10 +1320,15 @@ namespace TFE_DarkForces
 
 	void escapeMenu_drawXboxOverlay()
 	{
+		if (s_emState.optionsOpen)
+		{
+			return;
+		}
 		TFE_RenderBackend::xboxSetPauseOverlay(true,
 			s_emState.buttonPressed,
 			s_emState.buttonPressed,
-			s_emState.confirmState != CONFIRM_STATE_NONE);
+			s_emState.confirmState != CONFIRM_STATE_NONE,
+			s_emState.quickSaveStatus);
 	}
 #endif
 

@@ -313,10 +313,13 @@ struct TFE_Settings_System
     bool returnToModLoader;
     f32  gifRecordingFramerate;
     bool showGifPathConfirmation;
+    f32  xboxLookSensitivity;
+    f32  xboxStickDeadzone;
 
     TFE_Settings_System()
         : gameQuitExitsToMenu(true), returnToModLoader(true)
-        , gifRecordingFramerate(18.0f), showGifPathConfirmation(true) {}
+        , gifRecordingFramerate(18.0f), showGifPathConfirmation(true)
+        , xboxLookSensitivity(1.0f), xboxStickDeadzone(0.09f) {}
 };
 
 // ---------------------------------------------------------------------------
