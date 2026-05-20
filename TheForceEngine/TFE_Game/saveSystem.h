@@ -37,6 +37,8 @@ namespace TFE_SaveSystem
 	void update();
 	bool saveGame(const char* filename, const char* saveName);
 	bool loadGame(const char* filename);
+	void getQuickSaveFilename(char* filename, u32 size);
+	void getQuickSaveFilenameForMod(const char* modName, char* filename, u32 size);
 	// Load only the header for UI.
 	bool loadGameHeader(const char* filename, SaveHeader* header);
 

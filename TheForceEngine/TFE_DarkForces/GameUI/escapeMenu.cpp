@@ -697,7 +697,9 @@ namespace TFE_DarkForces
 				TFE_System::logWrite(LOG_MSG, "PauseMenu", "action Quick Save");
 				{
 					TFE_System::logWrite(LOG_MSG, "PauseMenu", "quick save begin");
-					const bool saved = TFE_SaveSystem::saveGame(TFE_SaveSystem::c_quickSaveName, "Quicksave");
+					char quickSaveName[TFE_MAX_PATH];
+					TFE_SaveSystem::getQuickSaveFilename(quickSaveName, TFE_MAX_PATH);
+					const bool saved = TFE_SaveSystem::saveGame(quickSaveName, "Quicksave");
 					s_emState.quickSaveStatus = saved ? 1 : 2;
 					s_emState.quickSaveWaitRelease = true;
 					s_emState.quickSaveClosePending = false;

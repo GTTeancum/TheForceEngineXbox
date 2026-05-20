@@ -55,6 +55,7 @@
 #include <TFE_Asset/imageAsset.h>
 #include <TFE_DarkForces/hud.h>
 #include <TFE_DarkForces/mission.h>
+
 // AppState is defined in frontEndUi.h which pulls in STL and ImGui.
 // Redeclare the enum directly here for Xbox to avoid those dependencies.
 // Keep in sync with TFE_FrontEndUI/frontEndUi.h.
@@ -136,6 +137,8 @@ struct XboxModEntry
     char version[32];
     char description[256];
     char levelName[32];
+    char quickSaveName[TFE_MAX_PATH];
+    bool hasQuickSave;
 };
 static XboxModEntry s_modEntries[12];
 static TFE_RenderBackend::XboxModInfo s_modUi[12];
@@ -403,11 +406,14 @@ static void assignModDefaults(XboxModEntry* mod, const char* folderPath, const c
     copyString(mod->version, sizeof(mod->version), "-");
     copyString(mod->description, sizeof(mod->description), "No description provided.");
     mod->levelName[0] = 0;
+    TFE_SaveSystem::getQuickSaveFilenameForMod(mod->archiveName, mod->quickSaveName, TFE_MAX_PATH);
+    mod->hasQuickSave = TFE_SaveSystem::loadGameHeader(mod->quickSaveName, &s_loadHeaders[0]);
     mod->ui.title = mod->title;
     mod->ui.author = mod->author;
     mod->ui.version = mod->version;
     mod->ui.description = mod->description;
     mod->ui.missionCount = archiveName && archiveName[0] ? 1 : 0;
+    mod->ui.hasQuickSave = mod->hasQuickSave;
 }
 
 static void parseModManifestLine(XboxModEntry* mod, char* line)
@@ -449,6 +455,7 @@ static void parseModManifestBuffer(XboxModEntry* mod, char* buffer)
     mod->ui.author = mod->author;
     mod->ui.version = mod->version;
     mod->ui.description = mod->description;
+    mod->ui.hasQuickSave = mod->hasQuickSave;
 }
 
 static bool readModManifestFile(XboxModEntry* mod, const char* filename)
@@ -638,11 +645,40 @@ static void addModEntry(const char* dir, const char* archiveName)
     s_modCount++;
 }
 
+static void addRemasterExtrasEntry()
+{
+    if (s_modCount >= 12) return;
+
+    char extrasPath[TFE_MAX_PATH];
+    snprintf(extrasPath, TFE_MAX_PATH, "%sextras.gob", TFE_Paths::getPath(PATH_SOURCE_DATA));
+    if (!FileUtil::exists(extrasPath)) return;
+
+    XboxModEntry* mod = &s_modEntries[s_modCount];
+    assignModDefaults(mod, TFE_Paths::getPath(PATH_SOURCE_DATA), "extras.gob");
+    copyString(mod->title, sizeof(mod->title), "Avenger Prototype");
+    copyString(mod->author, sizeof(mod->author), "LucasArts");
+    copyString(mod->version, sizeof(mod->version), "Remaster Extras");
+    copyString(mod->description, sizeof(mod->description),
+        "Original Avenger prototype level from Dark Forces Remaster extras.gob.");
+    copyString(mod->levelName, sizeof(mod->levelName), "AVENGER");
+    mod->ui.title = mod->title;
+    mod->ui.author = mod->author;
+    mod->ui.version = mod->version;
+    mod->ui.description = mod->description;
+    mod->ui.missionCount = 1;
+    mod->ui.hasQuickSave = mod->hasQuickSave;
+    s_modUi[s_modCount] = mod->ui;
+    s_modCount++;
+    TFE_System::logWrite(LOG_MSG, "ModMenu", "added Remaster extras map '%s'", extrasPath);
+}
+
 static void refreshModSlots()
 {
     memset(s_modEntries, 0, sizeof(s_modEntries));
     memset(s_modUi, 0, sizeof(s_modUi));
     s_modCount = 0;
+
+    addRemasterExtrasEntry();
 
     char modsRoot[TFE_MAX_PATH];
     snprintf(modsRoot, TFE_MAX_PATH, "%sMods\\", TFE_Paths::getPath(PATH_PROGRAM));
@@ -761,7 +797,7 @@ static void optionsMove(s32 delta)
     if (s_optionsSelection < 0) s_optionsSelection = 6;
     if (s_optionsSelection > 6) s_optionsSelection = 0;
     if (s_optionsSelection < s_optionsScroll) s_optionsScroll = s_optionsSelection;
-    if (s_optionsSelection >= s_optionsScroll + 6) s_optionsScroll = s_optionsSelection - 5;
+    if (s_optionsSelection >= s_optionsScroll + 7) s_optionsScroll = s_optionsSelection - 6;
     TFE_System::logWrite(LOG_MSG, "Options", "selection=%d", s_optionsSelection);
 }
 
@@ -852,10 +888,10 @@ static void updateStartMenu()
         TFE_System::logWrite(LOG_MSG, "StartMenu", "activate selection=%d", s_startMenuSelection);
         if (s_startMenuSelection == 0)
         {
-            const char* gameArgv[] = { "tfe_xbox" };
+            const char* gameArgv[] = { "tfe_xbox", "-xbriefing", "-lSECBASE" };
             TFE_RenderBackend::xboxSetStartScreen(false, 0, 0);
             TFE_System::logWrite(LOG_MSG, "Main", "Starting Dark Forces from start menu.");
-            startGame(1, gameArgv);
+            startGame(3, gameArgv);
         }
         else if (s_startMenuSelection == 1)
         {
@@ -959,6 +995,18 @@ static void startSelectedMod()
     }
 }
 
+static void resumeSelectedMod()
+{
+    if (s_modMenuSelection < 0 || s_modMenuSelection >= s_modCount) return;
+    XboxModEntry* mod = &s_modEntries[s_modMenuSelection];
+    if (!mod->ui.valid || !mod->archiveName[0] || !mod->hasQuickSave || !mod->quickSaveName[0]) return;
+
+    TFE_Paths::addAbsoluteSearchPathToHead(mod->path);
+    TFE_System::logWrite(LOG_MSG, "ModMenu", "resuming mod title='%s' save='%s' path='%s' archive='%s'",
+        mod->title, mod->quickSaveName, mod->path, mod->archiveName);
+    loadGameFromMenu(mod->quickSaveName);
+}
+
 static void updateModMenu()
 {
     const f32 ly = TFE_Input::getAxis(AXIS_LEFT_Y);
@@ -990,6 +1038,16 @@ static void updateModMenu()
             return;
         }
         TFE_System::logWrite(LOG_WARNING, "ModMenu", "start pressed with no mods installed");
+    }
+
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_X))
+    {
+        if (s_modCount > 0 && s_modEntries[s_modMenuSelection].hasQuickSave)
+        {
+            resumeSelectedMod();
+            return;
+        }
+        TFE_System::logWrite(LOG_WARNING, "ModMenu", "resume pressed without mod quicksave selection=%d", s_modMenuSelection);
     }
 
     TFE_RenderBackend::xboxSetModScreen(s_curState == APP_STATE_MODS, s_modMenuSelection, s_modMenuFrame++, s_modUi, s_modCount);
@@ -1242,15 +1300,18 @@ void __cdecl main()
     TFE_System::logWrite(LOG_MSG, "Main", "Frame limiter set to %d", graphics->frameRateLimit);
 
     // -----------------------------------------------------------------------
-    // Start at the Xbox-native menu. The game is created only when the
-    // player chooses Start Game.
+    // Start with the original Landru intro sequence, then return to the
+    // Xbox-native menu. Start Game itself jumps to the first briefing so the
+    // intro does not replay every time.
     // -----------------------------------------------------------------------
-    s_curState = APP_STATE_MENU;
     TFE_Input::enableRelativeMode(false);
-    TFE_RenderBackend::xboxSetStartScreen(true, s_startMenuSelection, s_startMenuFrame);
-    startMenuMusic();
+    {
+        const char* introArgv[] = { "tfe_xbox", "-xintro" };
+        TFE_System::logWrite(LOG_MSG, "Main", "Starting Xbox startup intro.");
+        startGame(2, introArgv);
+    }
 
-    TFE_System::logWrite(LOG_MSG, "Main", "Entering app loop at start menu.");
+    TFE_System::logWrite(LOG_MSG, "Main", "Entering app loop.");
 
     // -----------------------------------------------------------------------
     // Game loop

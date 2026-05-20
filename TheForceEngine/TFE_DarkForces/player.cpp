@@ -12,6 +12,12 @@
 #include "mission.h"
 #include "pickup.h"
 #include "weapon.h"
+#ifdef _XBOX
+#include "GameUI/menu.h"
+#include <TFE_DarkForces/Landru/lactorAnim.h>
+#include <TFE_DarkForces/Landru/lactor.h>
+#include <TFE_DarkForces/xboxWeaponWheelIcons.inc>
+#endif
 #include <TFE_System/system.h>
 #include <TFE_FrontEndUI/console.h>
 #include <TFE_Settings/settings.h>
@@ -25,6 +31,10 @@
 // Internal types need to be included in this case.
 #include <TFE_Jedi/InfSystem/infTypesInternal.h>
 #include <TFE_Jedi/Renderer/jediRenderer.h>
+#ifdef _XBOX
+#include <TFE_Input/input.h>
+#include <TFE_RenderBackend/renderBackend_xbox.h>
+#endif
 
 // TFE
 #include <TFE_System/tfeMessage.h>
@@ -217,6 +227,321 @@ namespace TFE_DarkForces
 	JBool s_oneHitKillEnabled = JFALSE;
 	JBool s_instaDeathEnabled = JFALSE;
 	u32*  s_playerInvSaved = nullptr;
+
+#ifdef _XBOX
+	enum
+	{
+		XBOX_WHEEL_ICON_SIZE = 64,
+	};
+
+	static JBool s_xboxWeaponWheelOpen = JFALSE;
+	static JBool s_xboxWeaponWheelHadAim = JFALSE;
+	static s32 s_xboxWeaponWheelSelection = -1;
+	static JBool s_xboxWeaponWheelIconsTried = JFALSE;
+	static JBool s_xboxWeaponWheelIconsLoaded = JFALSE;
+	static JBool s_xboxWeaponWheelIconValid[WPN_COUNT];
+	static u32 s_xboxWeaponWheelIcons[WPN_COUNT][XBOX_WHEEL_ICON_SIZE * XBOX_WHEEL_ICON_SIZE];
+
+	static const char* xboxWeaponWheelName(s32 weapon)
+	{
+		switch (weapon)
+		{
+			case WPN_FIST:        return "Fist";
+			case WPN_PISTOL:      return "Bryar Pistol";
+			case WPN_RIFLE:       return "Stormtrooper Rifle";
+			case WPN_THERMAL_DET: return "Thermal Detonator";
+			case WPN_REPEATER:    return "Repeater";
+			case WPN_FUSION:      return "Fusion Cutter";
+			case WPN_MORTAR:      return "Mortar Gun";
+			case WPN_MINE:        return "Land Mine";
+			case WPN_CONCUSSION:  return "Concussion Rifle";
+			case WPN_CANNON:      return "Assault Cannon";
+		}
+		return "";
+	}
+
+	static const char* xboxWeaponWheelAmmo(s32 weapon)
+	{
+		static char ammo[16];
+		switch (weapon)
+		{
+			case WPN_PISTOL:
+			case WPN_RIFLE:
+				sprintf(ammo, "%d", s_playerInfo.ammoEnergy);
+				return ammo;
+			case WPN_REPEATER:
+			case WPN_FUSION:
+			case WPN_CONCUSSION:
+				sprintf(ammo, "%d", s_playerInfo.ammoPower);
+				return ammo;
+			case WPN_THERMAL_DET:
+				sprintf(ammo, "%d", s_playerInfo.ammoDetonator);
+				return ammo;
+			case WPN_MINE:
+				sprintf(ammo, "%d", s_playerInfo.ammoMine);
+				return ammo;
+			case WPN_MORTAR:
+				sprintf(ammo, "%d", s_playerInfo.ammoShell);
+				return ammo;
+			case WPN_CANNON:
+				sprintf(ammo, "%d", s_playerInfo.ammoPlasma);
+				return ammo;
+		}
+		return "";
+	}
+
+	static void xboxWheelPutIconPixel(u8* icon, s32 x, s32 y, s32 scale, u8 pixel)
+	{
+		if (!pixel) return;
+		for (s32 yy = 0; yy < scale; yy++)
+		{
+			const s32 dy = y + yy;
+			if (dy < 0 || dy >= XBOX_WHEEL_ICON_SIZE) continue;
+			for (s32 xx = 0; xx < scale; xx++)
+			{
+				const s32 dx = x + xx;
+				if (dx >= 0 && dx < XBOX_WHEEL_ICON_SIZE)
+				{
+					icon[dy * XBOX_WHEEL_ICON_SIZE + dx] = pixel;
+				}
+			}
+		}
+	}
+
+	static JBool xboxDecodeDeltToIcon(const u8* data, u8* icon)
+	{
+		if (!data || !icon) return JFALSE;
+		memset(icon, 0, XBOX_WHEEL_ICON_SIZE * XBOX_WHEEL_ICON_SIZE);
+
+		static u8 scratch[320 * 200];
+		memset(scratch, 0, sizeof(scratch));
+
+		const u8* srcImage = data + sizeof(s16) * 4;
+		s32 minX = 320;
+		s32 minY = 200;
+		s32 maxX = -1;
+		s32 maxY = -1;
+		while (1)
+		{
+			const s16* deltaLine = (const s16*)srcImage;
+			const s16 sizeAndType = deltaLine[0];
+			if (sizeAndType == 0) break;
+			s32 xCur = deltaLine[1];
+			const s32 yCur = deltaLine[2];
+			srcImage += sizeof(s16) * 3;
+
+			const JBool rle = (sizeAndType & 1) ? JTRUE : JFALSE;
+			s32 pixelCount = (sizeAndType >> 1) & 0x3fff;
+			while (pixelCount > 0)
+			{
+				if (rle)
+				{
+					u8 count = *srcImage; srcImage++;
+					if (!(count & 1))
+					{
+						count >>= 1;
+						for (s32 p = 0; p < count; p++, srcImage++, xCur++)
+						{
+							if (*srcImage && xCur >= 0 && xCur < 320 && yCur >= 0 && yCur < 200)
+							{
+								scratch[yCur * 320 + xCur] = *srcImage;
+								if (xCur < minX) minX = xCur;
+								if (xCur > maxX) maxX = xCur;
+								if (yCur < minY) minY = yCur;
+								if (yCur > maxY) maxY = yCur;
+							}
+						}
+						pixelCount -= count;
+					}
+					else
+					{
+						count >>= 1;
+						const u8 pixel = *srcImage; srcImage++;
+						for (s32 p = 0; p < count; p++, xCur++)
+						{
+							if (pixel && xCur >= 0 && xCur < 320 && yCur >= 0 && yCur < 200)
+							{
+								scratch[yCur * 320 + xCur] = pixel;
+								if (xCur < minX) minX = xCur;
+								if (xCur > maxX) maxX = xCur;
+								if (yCur < minY) minY = yCur;
+								if (yCur > maxY) maxY = yCur;
+							}
+						}
+						pixelCount -= count;
+					}
+				}
+				else
+				{
+					for (s32 p = 0; p < pixelCount; p++, srcImage++, xCur++)
+					{
+						if (*srcImage && xCur >= 0 && xCur < 320 && yCur >= 0 && yCur < 200)
+						{
+							scratch[yCur * 320 + xCur] = *srcImage;
+							if (xCur < minX) minX = xCur;
+							if (xCur > maxX) maxX = xCur;
+							if (yCur < minY) minY = yCur;
+							if (yCur > maxY) maxY = yCur;
+						}
+					}
+					pixelCount = 0;
+				}
+			}
+		}
+		if (maxX < minX || maxY < minY) return JFALSE;
+
+		const s32 cropW = maxX - minX + 1;
+		const s32 cropH = maxY - minY + 1;
+		const s32 maxDst = XBOX_WHEEL_ICON_SIZE - 8;
+		s32 dstW = maxDst;
+		s32 dstH = maxDst;
+		if (cropW > cropH)
+		{
+			dstH = (cropH * maxDst + cropW / 2) / cropW;
+			if (dstH < 1) dstH = 1;
+		}
+		else
+		{
+			dstW = (cropW * maxDst + cropH / 2) / cropH;
+			if (dstW < 1) dstW = 1;
+		}
+		const s32 xBase = (XBOX_WHEEL_ICON_SIZE - dstW) / 2;
+		const s32 yBase = (XBOX_WHEEL_ICON_SIZE - dstH) / 2;
+		for (s32 y = 0; y < dstH; y++)
+		{
+			const s32 sy = minY + (y * cropH) / dstH;
+			for (s32 x = 0; x < dstW; x++)
+			{
+				const s32 sx = minX + (x * cropW) / dstW;
+				icon[(yBase + y) * XBOX_WHEEL_ICON_SIZE + xBase + x] = scratch[sy * 320 + sx];
+			}
+		}
+		return JTRUE;
+	}
+
+	static void xboxLoadWeaponWheelIcons()
+	{
+		if (s_xboxWeaponWheelIconsTried) return;
+		s_xboxWeaponWheelIconsTried = JTRUE;
+
+		static const s32 frameForWeapon[WPN_COUNT] =
+		{
+			-1, // fist
+			 0, // pistol
+			 1, // rifle
+			 2, // thermal detonator
+			 3, // repeater
+			 4, // fusion cutter
+			 6, // mortar
+			 5, // land mine
+			 7, // concussion rifle
+			 8  // assault cannon
+		};
+
+		s32 loadedCount = 0;
+		for (s32 w = WPN_PISTOL; w < WPN_COUNT; w++)
+		{
+			const s32 frame = frameForWeapon[w];
+			if (frame >= 0 && frame < 10)
+			{
+				memcpy(s_xboxWeaponWheelIcons[w], c_xboxWeaponWheelGunIcons[frame], sizeof(u32) * XBOX_WHEEL_ICON_SIZE * XBOX_WHEEL_ICON_SIZE);
+				s_xboxWeaponWheelIconValid[w] = JTRUE;
+				loadedCount++;
+			}
+		}
+		s_xboxWeaponWheelIconsLoaded = loadedCount > 0 ? JTRUE : JFALSE;
+		TFE_System::logWrite(LOG_MSG, "WeaponWheel", "loaded baked Datapad weapon icons count=%d", loadedCount);
+	}
+
+	static JBool xboxWeaponWheelAvailable(s32 weapon)
+	{
+		switch (weapon)
+		{
+			case WPN_FIST:        return JTRUE;
+			case WPN_PISTOL:      return s_playerInfo.itemPistol;
+			case WPN_RIFLE:       return s_playerInfo.itemRifle;
+			case WPN_THERMAL_DET: return s_playerInfo.ammoDetonator > 0 ? JTRUE : JFALSE;
+			case WPN_REPEATER:    return s_playerInfo.itemAutogun;
+			case WPN_FUSION:      return s_playerInfo.itemFusion;
+			case WPN_MORTAR:      return s_playerInfo.itemMortar;
+			case WPN_MINE:        return s_playerInfo.ammoMine > 0 ? JTRUE : JFALSE;
+			case WPN_CONCUSSION:  return s_playerInfo.itemConcussion;
+			case WPN_CANNON:      return s_playerInfo.itemCannon;
+		}
+		return JFALSE;
+	}
+
+	static s32 xboxWeaponWheelSelectionFromStick(f32 x, f32 y)
+	{
+		if (x < -1.0f) x = -1.0f;
+		if (x >  1.0f) x =  1.0f;
+		if (y < -1.0f) y = -1.0f;
+		if (y >  1.0f) y =  1.0f;
+
+		const f32 mag2 = x * x + y * y;
+		if (mag2 < 0.18f * 0.18f)
+		{
+			return -1;
+		}
+
+		s32 row = (s32)((1.0f - y) * 2.5f);
+		if (row < 0) row = 0;
+		if (row > 4) row = 4;
+		return (x >= 0.0f ? 5 : 0) + row;
+	}
+
+	static JBool xboxUpdateWeaponWheel()
+	{
+		const bool held = TFE_Input::buttonDown(CONTROLLER_BUTTON_RIGHTSHOULDER);
+		if (!held)
+		{
+			if (s_xboxWeaponWheelOpen)
+			{
+				if (s_xboxWeaponWheelHadAim &&
+					s_xboxWeaponWheelSelection >= 0 &&
+					s_xboxWeaponWheelSelection < WPN_COUNT &&
+					xboxWeaponWheelAvailable(s_xboxWeaponWheelSelection))
+				{
+					s_playerInfo.newWeapon = s_xboxWeaponWheelSelection;
+				}
+				TFE_RenderBackend::xboxSetWeaponWheel(false, NULL);
+			}
+			s_xboxWeaponWheelOpen = JFALSE;
+			s_xboxWeaponWheelHadAim = JFALSE;
+			s_xboxWeaponWheelSelection = -1;
+			return JFALSE;
+		}
+
+		inputMapping_removeState(IADF_CYCLEWPN_NEXT);
+		s_xboxWeaponWheelOpen = JTRUE;
+		xboxLoadWeaponWheelIcons();
+
+		const f32 x = TFE_Input::getAxis(AXIS_RIGHT_X);
+		const f32 y = TFE_Input::getAxis(AXIS_RIGHT_Y);
+		const s32 stickSelection = xboxWeaponWheelSelectionFromStick(x, y);
+		if (stickSelection >= 0)
+		{
+			s_xboxWeaponWheelSelection = stickSelection;
+			s_xboxWeaponWheelHadAim = JTRUE;
+		}
+
+		TFE_RenderBackend::XboxWeaponWheelInfo info;
+		memset(&info, 0, sizeof(info));
+		info.selected = s_xboxWeaponWheelSelection >= 0 ? s_xboxWeaponWheelSelection : s_playerInfo.curWeapon;
+		info.current = s_playerInfo.curWeapon;
+		info.iconWidth = XBOX_WHEEL_ICON_SIZE;
+		info.iconHeight = XBOX_WHEEL_ICON_SIZE;
+		info.selectedName = xboxWeaponWheelName(info.selected);
+		info.selectedAmmo = xboxWeaponWheelAmmo(info.selected);
+		for (s32 i = 0; i < WPN_COUNT; i++)
+		{
+			info.available[i] = xboxWeaponWheelAvailable(i) ? true : false;
+			info.icons[i] = (s_xboxWeaponWheelIconsLoaded && s_xboxWeaponWheelIconValid[i]) ? s_xboxWeaponWheelIcons[i] : NULL;
+		}
+		TFE_RenderBackend::xboxSetWeaponWheel(true, &info);
+		return JTRUE;
+	}
+#endif
 
 	RSector* s_playerSector = nullptr;
 	SecObject* s_playerObject = nullptr;
@@ -1750,15 +2075,20 @@ namespace TFE_DarkForces
 		s32 mdx, mdy;
 		TFE_Input::getAccumulatedMouseMove(&mdx, &mdy);
 		InputConfig* inputConfig = TFE_Input::inputMapping_get();
+#ifdef _XBOX
+		const JBool blockLook = xboxUpdateWeaponWheel();
+#else
+		const JBool blockLook = JFALSE;
+#endif
 
 		// Yaw change
-		if ((inputConfig->mouseMode == MMODE_TURN || inputConfig->mouseMode == MMODE_LOOK) && !s_disablePlayerRotation)
+		if ((inputConfig->mouseMode == MMODE_TURN || inputConfig->mouseMode == MMODE_LOOK) && !s_disablePlayerRotation && !blockLook)
 		{
 			s_playerYaw += s32(f32(mdx * PLAYER_MOUSE_TURN_SPD) * inputMapping_getHorzMouseSensitivity());
 			s_playerYaw &= ANGLE_MASK;
 		}
 		// Pitch change
-		if (inputConfig->mouseMode == MMODE_LOOK)
+		if (inputConfig->mouseMode == MMODE_LOOK && !s_disablePlayerRotation && !blockLook)
 		{
 			f32 pitchDelta = f32(mdy * PLAYER_MOUSE_TURN_SPD) * inputMapping_getVertMouseSensitivity();
 			// Counteract the tan() call later in the delta in order to make the movement perceptually linear.
@@ -1886,7 +2216,7 @@ namespace TFE_DarkForces
 		// Pitch and Roll controls.
 		if (s_automapLocked)
 		{
-			if (inputMapping_getActionState(IADF_TURN_LT) && !s_disablePlayerRotation)
+			if (inputMapping_getActionState(IADF_TURN_LT) && !s_disablePlayerRotation && !blockLook)
 			{
 				fixed16_16 turnSpeed = PLAYER_KB_TURN_SPD;	// angle units per second.
 				fixed16_16 dYaw = mul16(turnSpeed, s_deltaTime);
@@ -1896,7 +2226,7 @@ namespace TFE_DarkForces
 				s_playerYaw -= dYaw;
 				s_playerYaw &= ANGLE_MASK;
 			}
-			else if (inputMapping_getActionState(IADF_TURN_RT) && !s_disablePlayerRotation)
+			else if (inputMapping_getActionState(IADF_TURN_RT) && !s_disablePlayerRotation && !blockLook)
 			{
 				fixed16_16 turnSpeed = PLAYER_KB_TURN_SPD;	// angle units per second.
 				fixed16_16 dYaw = mul16(turnSpeed, s_deltaTime);
@@ -1906,14 +2236,14 @@ namespace TFE_DarkForces
 				s_playerYaw += dYaw;
 				s_playerYaw &= ANGLE_MASK;
 			}
-			else if (inputMapping_getAnalogAxis(AA_LOOK_HORZ) && !s_disablePlayerRotation)
+			else if (inputMapping_getAnalogAxis(AA_LOOK_HORZ) && !s_disablePlayerRotation && !blockLook)
 			{
 				fixed16_16 turnSpeed = mul16(mul16(PLAYER_CONTROLLER_TURN_SPD, s_deltaTime), floatToFixed16(inputMapping_getAnalogAxis(AA_LOOK_HORZ)));
 				s_playerYaw += turnSpeed;
 				s_playerYaw &= ANGLE_MASK;
 			}
 
-			if (inputMapping_getActionState(IADF_LOOK_UP))
+			if (inputMapping_getActionState(IADF_LOOK_UP) && !s_disablePlayerRotation && !blockLook)
 			{
 				fixed16_16 turnSpeed = PLAYER_KB_TURN_SPD;	// angle units per second.
 				fixed16_16 dPitch = mul16(turnSpeed, s_deltaTime);
@@ -1921,7 +2251,7 @@ namespace TFE_DarkForces
 				dPitch >>= s_playerSlow;	// half for "slow"
 				s_playerPitch = clamp(s_playerPitch + dPitch, -PITCH_LIMIT, PITCH_LIMIT);
 			}
-			else if (inputMapping_getActionState(IADF_LOOK_DN))
+			else if (inputMapping_getActionState(IADF_LOOK_DN) && !s_disablePlayerRotation && !blockLook)
 			{
 				fixed16_16 turnSpeed = PLAYER_KB_TURN_SPD;	// angle units per second.
 				fixed16_16 dPitch = mul16(turnSpeed, s_deltaTime);
@@ -1929,7 +2259,7 @@ namespace TFE_DarkForces
 				dPitch >>= s_playerSlow;	// half for "slow"
 				s_playerPitch = clamp(s_playerPitch - dPitch, -PITCH_LIMIT, PITCH_LIMIT);
 			}
-			else if (inputMapping_getAnalogAxis(AA_LOOK_VERT))
+			else if (inputMapping_getAnalogAxis(AA_LOOK_VERT) && !s_disablePlayerRotation && !blockLook)
 			{
 				fixed16_16 turnSpeed = mul16(mul16(PLAYER_CONTROLLER_PITCH_SPD, s_deltaTime), floatToFixed16(inputMapping_getAnalogAxis(AA_LOOK_VERT)));
 				// Counteract the tan() call later in the delta in order to make the movement perceptually linear.

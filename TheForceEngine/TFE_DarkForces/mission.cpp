@@ -756,7 +756,9 @@ namespace TFE_DarkForces
 				{
 					TFE_System::logWrite(LOG_MSG, "PauseMenu", "mission handling action=QuickSave");
 					hud_sendTextMessage("Saving...", 0, true);
-					const bool saved = TFE_SaveSystem::saveGame(TFE_SaveSystem::c_quickSaveName, "Quicksave");
+					char quickSaveName[TFE_MAX_PATH];
+					TFE_SaveSystem::getQuickSaveFilename(quickSaveName, TFE_MAX_PATH);
+					const bool saved = TFE_SaveSystem::saveGame(quickSaveName, "Quicksave");
 					TFE_System::logWrite(saved ? LOG_MSG : LOG_ERROR, "PauseMenu", "quick save %s", saved ? "complete" : "failed");
 					hud_sendTextMessage(saved ? "Game Saved" : "Save Failed", 0, true);
 					s_gamePaused = JFALSE;
@@ -1578,6 +1580,13 @@ namespace TFE_DarkForces
 					hud_sendTextMessage(24);
 				}
 			}
+
+#ifdef _XBOX
+			if (TFE_Input::buttonDown(CONTROLLER_BUTTON_RIGHTSHOULDER))
+			{
+				inputMapping_removeState(IADF_CYCLEWPN_NEXT);
+			}
+#endif
 
 			if (inputMapping_getActionState(IADF_CYCLEWPN_PREV) == STATE_PRESSED)
 			{

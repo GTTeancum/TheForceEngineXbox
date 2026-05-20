@@ -42,6 +42,46 @@ namespace TFE_SaveSystem
 	static u32* s_imageBuffer[2] = { nullptr, nullptr };
 	static size_t s_imageBufferSize[2] = { 0 };
 
+	static u32 quickSaveHash(const char* text)
+	{
+		u32 hash = 2166136261u;
+		if (!text) return hash;
+		for (const char* p = text; *p; p++)
+		{
+			char c = *p;
+			if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+			hash ^= (u8)c;
+			hash *= 16777619u;
+		}
+		return hash ? hash : 1u;
+	}
+
+	void getQuickSaveFilenameForMod(const char* modName, char* filename, u32 size)
+	{
+		if (!filename || size == 0) return;
+		filename[0] = 0;
+		if (!modName || !modName[0])
+		{
+			strncpy(filename, c_quickSaveName, size - 1);
+			filename[size - 1] = 0;
+			return;
+		}
+
+		snprintf(filename, size, "quicksave_%08x.tfe", quickSaveHash(modName));
+		filename[size - 1] = 0;
+	}
+
+	void getQuickSaveFilename(char* filename, u32 size)
+	{
+		char modList[256];
+		modList[0] = 0;
+		if (s_game)
+		{
+			s_game->getModList(modList);
+		}
+		getQuickSaveFilenameForMod(modList, filename, size);
+	}
+
 	bool versionValid(s32 version)
 	{
 		return version == SVER_CUR;
@@ -432,16 +472,20 @@ namespace TFE_SaveSystem
 		}
 		else if (inputMapping_getActionState(IAS_QUICK_SAVE) == STATE_PRESSED && canSave)
 		{
-			saveGame(c_quickSaveName, "Quicksave");
+			char quickSaveName[TFE_MAX_PATH];
+			getQuickSaveFilename(quickSaveName, TFE_MAX_PATH);
+			saveGame(quickSaveName, "Quicksave");
 			lastState = 1;
 		}
 		else if (inputMapping_getActionState(IAS_QUICK_LOAD) == STATE_PRESSED && !lastState)
 		{
+			char quickSaveName[TFE_MAX_PATH];
+			getQuickSaveFilename(quickSaveName, TFE_MAX_PATH);
 			char filePath[TFE_MAX_PATH];
-			sprintf(filePath, "%s%s", s_gameSavePath, c_quickSaveName);
+			sprintf(filePath, "%s%s", s_gameSavePath, quickSaveName);
 			if (FileUtil::exists(filePath))
 			{
-				postLoadRequest(c_quickSaveName);
+				postLoadRequest(quickSaveName);
 				lastState = 1;
 			}
 			else

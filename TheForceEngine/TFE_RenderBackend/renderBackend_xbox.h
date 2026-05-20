@@ -40,6 +40,18 @@ namespace TFE_RenderBackend
         s32 maxValue;
     };
 
+    struct XboxWeaponWheelInfo
+    {
+        s32 selected;
+        s32 current;
+        bool available[10];
+        const u32* icons[10];
+        s32 iconWidth;
+        s32 iconHeight;
+        const char* selectedName;
+        const char* selectedAmmo;
+    };
+
     struct XboxModInfo
     {
         bool valid;
@@ -48,6 +60,7 @@ namespace TFE_RenderBackend
         const char* version;
         const char* description;
         s32 missionCount;
+        bool hasQuickSave;
     };
 
     // Single-vertex layout for untextured colored geometry. Matches
@@ -157,6 +170,7 @@ namespace TFE_RenderBackend
     void xboxSetModScreen(bool enabled, s32 selection, u32 frame, const XboxModInfo* mods, s32 modCount);
     void xboxSetOptionsScreen(bool enabled, bool pauseStyle, s32 selection, s32 scroll, u32 frame, const XboxOptionsItem* items, s32 itemCount);
     void xboxSetMissionCompleteScreen(bool enabled, s32 selection, u32 frame, const XboxMissionCompleteInfo* info);
+    void xboxSetWeaponWheel(bool enabled, const XboxWeaponWheelInfo* info);
 }
 
 #endif // _XBOX

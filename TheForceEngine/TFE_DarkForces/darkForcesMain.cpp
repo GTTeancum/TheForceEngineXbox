@@ -74,6 +74,8 @@ using namespace TFE_Input;
 namespace TFE_DarkForces
 {
 #ifdef _XBOX
+	static bool s_xboxIntroOnly = false;
+	static bool s_xboxStartAtBriefing = false;
 	static bool s_xboxMissionCompleteOpen = false;
 	static s32 s_xboxMissionCompleteSelection = 0;
 	static u32 s_xboxMissionCompleteFrame = 0;
@@ -675,7 +677,28 @@ namespace TFE_DarkForces
 				s_runGameState.abortLevel = JFALSE;
 				s_runGameState.levelIndex = s_runGameState.startLevel;
 				s_runGameState.startLevel = 0;
-				skipToLevelNextScene(s_runGameState.levelIndex);
+#ifdef _XBOX
+				if (s_xboxStartAtBriefing)
+				{
+					s_xboxStartAtBriefing = false;
+					s_invalidLevelIndex = JTRUE;
+					for (s32 i = 0; i < TFE_ARRAYSIZE(s_cutsceneData); i++)
+					{
+						if (s_cutsceneData[i].levelIndex >= 0 &&
+							s_cutsceneData[i].levelIndex == s_runGameState.levelIndex &&
+							s_cutsceneData[i].nextGameMode == GMODE_BRIEFING)
+						{
+							s_runGameState.cutsceneIndex = i;
+							s_invalidLevelIndex = JFALSE;
+							break;
+						}
+					}
+				}
+				else
+#endif
+				{
+					skipToLevelNextScene(s_runGameState.levelIndex);
+				}
 				lmusic_reset();
 				agent_setNextLevelByIndex(s_runGameState.levelIndex);
 				startNextMode();
@@ -690,6 +713,15 @@ namespace TFE_DarkForces
 				agent_setNextLevelByIndex(1);
 				if (!cutscene_play(10))
 				{
+#ifdef _XBOX
+					if (s_xboxIntroOnly)
+					{
+						TFE_System::logWrite(LOG_ERROR, "Main", "Xbox startup intro scene 10 failed; returning to start menu");
+						s_xboxIntroOnly = false;
+						TFE_XboxReturnToStartMenu();
+						break;
+					}
+#endif
 					s_runGameState.cutsceneIndex = 0;
 					startNextMode();
 				}
@@ -751,6 +783,15 @@ namespace TFE_DarkForces
 			}
 			else
 			{
+#ifdef _XBOX
+				if (s_xboxIntroOnly)
+				{
+					TFE_System::logWrite(LOG_MSG, "Main", "Xbox startup intro complete; returning to start menu");
+					s_xboxIntroOnly = false;
+					TFE_XboxReturnToStartMenu();
+					break;
+				}
+#endif
 				s_runGameState.cutsceneIndex++;
 				if (s_cutsceneData[s_runGameState.cutsceneIndex].nextGameMode == GMODE_END)
 				{
@@ -826,7 +867,9 @@ namespace TFE_DarkForces
 
 					if (saveSelected)
 					{
-						TFE_SaveSystem::saveGame(TFE_SaveSystem::c_quickSaveName, "Autosave");
+						char quickSaveName[TFE_MAX_PATH];
+						TFE_SaveSystem::getQuickSaveFilename(quickSaveName, TFE_MAX_PATH);
+						TFE_SaveSystem::saveGame(quickSaveName, "Autosave");
 					}
 					TFE_RenderBackend::xboxSetMissionCompleteScreen(false, 0, 0, NULL);
 					s_xboxMissionCompleteOpen = false;
@@ -1031,6 +1074,8 @@ namespace TFE_DarkForces
 	{
 		s_sharedState.customGobName[0] = 0;
 #ifdef _XBOX
+		s_xboxIntroOnly = false;
+		s_xboxStartAtBriefing = false;
 		agent_clearXboxCustomLevelName();
 #endif
 		TFE_Settings::clearModSettings();
@@ -1055,6 +1100,16 @@ namespace TFE_DarkForces
 				{
 					loadCustomGob(arg + 2);
 				}
+#ifdef _XBOX
+				else if ((c == 'x' || c == 'X') && strcasecmp(arg + 2, "intro") == 0)
+				{
+					s_xboxIntroOnly = true;
+				}
+				else if ((c == 'x' || c == 'X') && strcasecmp(arg + 2, "briefing") == 0)
+				{
+					s_xboxStartAtBriefing = true;
+				}
+#endif
 			}
 		}
 
