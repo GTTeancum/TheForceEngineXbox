@@ -17,6 +17,7 @@
 #include <TFE_DarkForces/Landru/lactorAnim.h>
 #include <TFE_DarkForces/Landru/lactor.h>
 #include <TFE_DarkForces/xboxWeaponWheelIcons.inc>
+#include <TFE_DarkForces/xboxWeaponWheelFistIcon.inc>
 #endif
 #include <TFE_System/system.h>
 #include <TFE_FrontEndUI/console.h>
@@ -439,6 +440,10 @@ namespace TFE_DarkForces
 		};
 
 		s32 loadedCount = 0;
+		memcpy(s_xboxWeaponWheelIcons[WPN_FIST], c_xboxWeaponWheelFistIcon, sizeof(u32) * XBOX_WHEEL_ICON_SIZE * XBOX_WHEEL_ICON_SIZE);
+		s_xboxWeaponWheelIconValid[WPN_FIST] = JTRUE;
+		loadedCount++;
+
 		for (s32 w = WPN_PISTOL; w < WPN_COUNT; w++)
 		{
 			const s32 frame = frameForWeapon[w];

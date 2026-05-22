@@ -38,6 +38,7 @@
 #include <TFE_RenderBackend/xboxFooterFont.inc>
 #include <TFE_RenderBackend/xboxBriefingPromptFont.inc>
 #include <TFE_RenderBackend/xboxWheelFont.inc>
+#include <TFE_RenderBackend/xboxPdaFrame.inc>
 
 // ---------------------------------------------------------------------------
 // Output resolution
@@ -168,6 +169,14 @@ namespace TFE_RenderBackend
     static u32  s_optionsFrame = 0;
     static XboxOptionsItem s_optionsItems[12];
     static s32  s_optionsItemCount = 0;
+    static bool s_cheatScreenEnabled = false;
+    static s32  s_cheatSelection = 0;
+    static s32  s_cheatScroll = 0;
+    static XboxCheatItem s_cheatItems[12];
+    static s32  s_cheatItemCount = 0;
+    static bool s_pdaOverlayEnabled = false;
+    static s32  s_pdaOverlayMode = 0;
+    static s32  s_pdaOverlayLayer = 0;
     static bool s_missionCompleteScreenEnabled = false;
     static s32  s_missionCompleteSelection = 0;
     static u32  s_missionCompleteFrame = 0;
@@ -189,6 +198,14 @@ namespace TFE_RenderBackend
     static const s32 XPAUSE_PANEL_HEIGHT  = 300;
     static const s32 XPAUSE_ROW_WIDTH     = 330;
     static const s32 XPAUSE_ROW_STEP      = 38;
+    static const s32 XPDA_SCREEN_SRC_X    = 20;
+    static const s32 XPDA_SCREEN_SRC_Y    = 24;
+    static const s32 XPDA_SCREEN_SRC_W    = 592;
+    static const s32 XPDA_SCREEN_SRC_H    = 314;
+    static const s32 XPAUSE_SCREEN_SRC_X  = 46;
+    static const s32 XPAUSE_SCREEN_SRC_Y  = 60;
+    static const s32 XPAUSE_SCREEN_SRC_W  = 540;
+    static const s32 XPAUSE_SCREEN_SRC_H  = 251;
 
     static inline s32 pauseClamp(s32 v, s32 lo, s32 hi)
     {
@@ -228,18 +245,60 @@ namespace TFE_RenderBackend
         }
     }
 
+    static void pauseFillPdaSourceRect(u32* dst, s32 width, s32 height, s32 frameX, s32 frameY, s32 frameW, s32 frameH, s32 sx, s32 sy, s32 sw, s32 sh, u32 color)
+    {
+        const s32 x0 = frameX + (sx * frameW) / XBOX_PDA_FRAME_WIDTH;
+        const s32 y0 = frameY + (sy * frameH) / XBOX_PDA_FRAME_HEIGHT;
+        const s32 x1 = frameX + ((sx + sw) * frameW) / XBOX_PDA_FRAME_WIDTH;
+        const s32 y1 = frameY + ((sy + sh) * frameH) / XBOX_PDA_FRAME_HEIGHT;
+        pauseFillRect(dst, width, height, x0, y0, x1 - x0, y1 - y0, color);
+    }
+
+    static void pauseFillPdaScreen(u32* dst, s32 width, s32 height, s32 frameX, s32 frameY, s32 frameW, s32 frameH, u32 color)
+    {
+        // The measured pause rect is in 640x400 art/screen coordinates. The
+        // Xbox output is 640x480, so only Y needs conversion.
+        const s32 y0 = (XPAUSE_SCREEN_SRC_Y * height) / XBOX_PDA_FRAME_HEIGHT;
+        const s32 y1 = ((XPAUSE_SCREEN_SRC_Y + XPAUSE_SCREEN_SRC_H) * height) / XBOX_PDA_FRAME_HEIGHT;
+        pauseFillRect(dst, width, height, XPAUSE_SCREEN_SRC_X, y0,
+            XPAUSE_SCREEN_SRC_W, y1 - y0, color);
+    }
+
     static void pauseDrawFrame(u32* dst, s32 width, s32 height, s32 x, s32 y, s32 w, s32 h)
     {
-        pauseFillRect(dst, width, height, x + 5, y + 5, w, h, XPAUSE_GREY_DARK);
-        pauseFillRect(dst, width, height, x, y, w, h, XPAUSE_GREEN_DARK);
-        pauseFillRect(dst, width, height, x, y, w, 3, XPAUSE_GREY);
-        pauseFillRect(dst, width, height, x, y + h - 3, w, 3, XPAUSE_WHITE);
-        pauseFillRect(dst, width, height, x, y, 3, h, XPAUSE_GREY);
-        pauseFillRect(dst, width, height, x + w - 3, y, 3, h, XPAUSE_WHITE);
-        pauseFillRect(dst, width, height, x + 8, y + 8, w - 16, 2, XPAUSE_WHITE);
-        pauseFillRect(dst, width, height, x + 8, y + h - 10, w - 16, 2, XPAUSE_GREEN_EDGE);
-        pauseFillRect(dst, width, height, x + 8, y + 8, 2, h - 16, XPAUSE_WHITE);
-        pauseFillRect(dst, width, height, x + w - 10, y + 8, 2, h - 16, XPAUSE_GREEN_EDGE);
+        const s32 frameW = w + 120;
+        const s32 frameH = h + 60;
+        const s32 frameX = x - 60;
+        const s32 frameY = y - 30;
+
+        pauseFillRect(dst, width, height, x + 8, y + 8, w, h, XPAUSE_GREY_DARK);
+        pauseFillPdaScreen(dst, width, height, frameX, frameY, frameW, frameH, XPAUSE_GREEN_DARK);
+
+        for (s32 dy = 0; dy < frameH; dy++)
+        {
+            const s32 py = frameY + dy;
+            if (py < 0 || py >= height) continue;
+            const s32 sy = (dy * XBOX_PDA_FRAME_HEIGHT) / frameH;
+            for (s32 dx = 0; dx < frameW; dx++)
+            {
+                const s32 px = frameX + dx;
+                if (px < 0 || px >= width) continue;
+                const s32 sx = (dx * XBOX_PDA_FRAME_WIDTH) / frameW;
+                const u32 src = c_xboxPdaFrame[sy * XBOX_PDA_FRAME_WIDTH + sx];
+                const u32 a = (src >> 24) & 0xFFu;
+                if (!a) continue;
+                const s32 greenY0 = (XPAUSE_SCREEN_SRC_Y * height) / XBOX_PDA_FRAME_HEIGHT;
+                const s32 greenY1 = ((XPAUSE_SCREEN_SRC_Y + XPAUSE_SCREEN_SRC_H) * height) / XBOX_PDA_FRAME_HEIGHT;
+                if (px >= XPAUSE_SCREEN_SRC_X && px < XPAUSE_SCREEN_SRC_X + XPAUSE_SCREEN_SRC_W &&
+                    py >= greenY0 && py < greenY1 &&
+                    ((src & 0x00FFFFFFu) == 0))
+                {
+                    continue;
+                }
+                u32* pixel = dst + py * width + px;
+                *pixel = pauseBlend(*pixel | 0xFF000000u, src, a);
+            }
+        }
     }
 
     static void pauseDrawTextRaw(u32* dst, s32 width, s32 height, XboxPauseTextId id, s32 x, s32 y, u32 primary, bool shadow)
@@ -284,12 +343,20 @@ namespace TFE_RenderBackend
         pauseDrawText(dst, width, height, id, x, y, selected);
     }
 
+    static void cheatCompositeOverlay();
+
     static void pauseCompositeOverlay()
     {
         if (!s_pauseOverlayEnabled || !s_vdispWidth || !s_vdispHeight) return;
         const s32 width = (s32)s_vdispWidth;
         const s32 height = (s32)s_vdispHeight;
         pauseDim(s_expandBuf, width, height);
+
+        if (s_cheatScreenEnabled)
+        {
+            cheatCompositeOverlay();
+            return;
+        }
 
         const s32 boxW = XPAUSE_PANEL_WIDTH;
         const s32 boxH = XPAUSE_PANEL_HEIGHT;
@@ -457,6 +524,72 @@ namespace TFE_RenderBackend
         const s32 x = centerX - wheelTextWidth(text) / 2;
         wheelDrawTextRaw(text, x, baselineY, color, true);
         wheelDrawTextRaw(text, x, baselineY, color, false);
+    }
+
+    static void wheelDrawTextRight(const char* text, s32 rightX, s32 baselineY, u32 color)
+    {
+        const s32 x = rightX - wheelTextWidth(text);
+        wheelDrawTextRaw(text, x, baselineY, color, true);
+        wheelDrawTextRaw(text, x, baselineY, color, false);
+    }
+
+    static s32 wheelTextWidthScaled(const char* text, s32 num, s32 den)
+    {
+        return (wheelTextWidth(text) * num) / den;
+    }
+
+    static void wheelDrawTextRawScaled(const char* text, s32 x, s32 baselineY, u32 primary, bool shadow, s32 num, s32 den)
+    {
+        if (!text || num <= 0 || den <= 0) return;
+        const s32 width = (s32)s_vdispWidth;
+        const s32 height = (s32)s_vdispHeight;
+        const s32 ox = shadow ? 1 : 0;
+        const s32 oy = shadow ? 1 : 0;
+        s32 penX = x + ox;
+        while (*text)
+        {
+            const XboxWheelGlyph* g = wheelFindGlyph(*text++);
+            if (!g)
+            {
+                penX += (10 * num) / den;
+                continue;
+            }
+            const s32 gx = penX + (g->xOffset * num) / den;
+            const s32 gy = baselineY + oy + (g->yOffset * num) / den;
+            const s32 dw = pauseClamp((g->width * num) / den, 1, 128);
+            const s32 dh = pauseClamp((g->height * num) / den, 1, 128);
+            for (s32 py = 0; py < dh; py++)
+            {
+                const s32 dy = gy + py;
+                if (dy < 0 || dy >= height) continue;
+                const s32 sy = pauseClamp((py * den) / num, 0, g->height - 1);
+                for (s32 px = 0; px < dw; px++)
+                {
+                    const s32 dx = gx + px;
+                    if (dx < 0 || dx >= width) continue;
+                    const s32 sx = pauseClamp((px * den) / num, 0, g->width - 1);
+                    const u8 cov = g->data[sy * g->width + sx];
+                    if (!cov) continue;
+                    const u32 src = shadow ? XPAUSE_BLACK : primary;
+                    const u32 a = shadow ? (u32)(cov * 46) : (u32)(cov * 72);
+                    u32* pixel = s_expandBuf + dy * width + dx;
+                    *pixel = pauseBlend(*pixel | 0xFF000000u, src, (u32)pauseClamp((s32)a, 0, 255));
+                }
+            }
+            penX += (g->xAdvance * num) / den;
+        }
+    }
+
+    static void wheelDrawTextScaled(const char* text, s32 x, s32 baselineY, u32 color, s32 num, s32 den)
+    {
+        wheelDrawTextRawScaled(text, x, baselineY, color, true, num, den);
+        wheelDrawTextRawScaled(text, x, baselineY, color, false, num, den);
+    }
+
+    static void wheelDrawTextCenterScaled(const char* text, s32 centerX, s32 baselineY, u32 color, s32 num, s32 den)
+    {
+        const s32 x = centerX - wheelTextWidthScaled(text, num, den) / 2;
+        wheelDrawTextScaled(text, x, baselineY, color, num, den);
     }
 
     static void weaponWheelDrawSegment(s32 index, f32 centerDeg)
@@ -801,6 +934,211 @@ namespace TFE_RenderBackend
     {
         if (!text) return;
         loadDrawText(dst, width, height, text, centerX - loadTextWidth(text, scale) / 2, y, scale, color);
+    }
+
+    static const char* pdaModeName(s32 mode)
+    {
+        switch (mode)
+        {
+            case 0: return "MAP";
+            case 1: return "WEAPONS";
+            case 2: return "INVENTORY";
+            case 3: return "OBJECTIVES";
+            case 4: return "MISSION";
+            default: return "DATAPAD";
+        }
+    }
+
+    static void pdaDrawSmallText(const char* text, s32 x, s32 y, u32 color)
+    {
+        wheelDrawTextRaw(text, x, y - 8, color, true);
+        wheelDrawTextRaw(text, x, y - 8, color, false);
+    }
+
+    static void pdaDrawMiniText(const char* text, s32 x, s32 y, u32 color)
+    {
+        loadDrawText(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight, text, x + 1, y + 1, 2, 0xFF050505u);
+        loadDrawText(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight, text, x, y, 2, color);
+    }
+
+    static void pdaDrawControlLine(const char* key, const char* text, s32 x, s32 y, u32 keyColor)
+    {
+        const s32 keyW = wheelTextWidth(key) + 10;
+        pauseFillRect(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight, x, y - 14, keyW, 18, 0xFF050A06u);
+        pauseFillRect(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight, x, y - 14, keyW, 1, keyColor);
+        pauseFillRect(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight, x, y + 3, keyW, 1, keyColor);
+        pauseFillRect(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight, x, y - 14, 1, 18, keyColor);
+        pauseFillRect(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight, x + keyW - 1, y - 14, 1, 18, keyColor);
+        pdaDrawSmallText(key, x + 5, y, keyColor);
+        pdaDrawSmallText(text, x + keyW + 8, y, 0xFFE0D8B8u);
+    }
+
+    static void pdaDrawFrameImage(s32 dstX, s32 dstY, s32 dstW, s32 dstH)
+    {
+        const s32 width = (s32)s_vdispWidth;
+        const s32 height = (s32)s_vdispHeight;
+        if (dstW <= 0 || dstH <= 0) return;
+        for (s32 dy0 = 0; dy0 < dstH; dy0++)
+        {
+            const s32 dy = dstY + dy0;
+            if (dy < 0 || dy >= height) continue;
+            const s32 sy = (dy0 * XBOX_PDA_FRAME_HEIGHT) / dstH;
+            for (s32 dx0 = 0; dx0 < dstW; dx0++)
+            {
+                const s32 sx = (dx0 * XBOX_PDA_FRAME_WIDTH) / dstW;
+                if (sx >= XPDA_SCREEN_SRC_X && sx < XPDA_SCREEN_SRC_X + XPDA_SCREEN_SRC_W &&
+                    sy >= XPDA_SCREEN_SRC_Y && sy < XPDA_SCREEN_SRC_Y + XPDA_SCREEN_SRC_H)
+                {
+                    continue;
+                }
+                const s32 dx = dstX + dx0;
+                if (dx < 0 || dx >= width) continue;
+                const u32 src = c_xboxPdaFrame[sy * XBOX_PDA_FRAME_WIDTH + sx];
+                const u32 a = (src >> 24) & 0xFFu;
+                if (!a) continue;
+                u32* pixel = s_expandBuf + dy * width + dx;
+                *pixel = pauseBlend(*pixel | 0xFF000000u, src, a);
+            }
+        }
+    }
+
+    static s32 pdaScaleFrameY(s32 sourceY)
+    {
+        return (sourceY * (s32)s_vdispHeight) / XBOX_PDA_FRAME_HEIGHT;
+    }
+
+    static void pdaDrawNativeTab(const char* label, s32 x, s32 y, s32 w, s32 h, bool selected)
+    {
+        if (selected)
+        {
+            pauseFillRect(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight, x, y, w, h, XPAUSE_GREEN_MID);
+            pauseFillRect(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight, x, y, w, 2, 0xFF26E026u);
+            pauseFillRect(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight, x, y + h - 2, w, 2, 0xFF0D4E0Du);
+            pauseFillRect(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight, x, y, 2, h, 0xFF26E026u);
+            pauseFillRect(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight, x + w - 2, y, 2, h, 0xFF0D4E0Du);
+        }
+        wheelDrawTextCenterScaled(label, x + w / 2, pdaScaleFrameY(358), selected ? XPAUSE_WHITE : 0xFF8FB28Fu, 7, 10);
+    }
+
+    static void pdaDrawLayerStackKey(s32 x, s32 y)
+    {
+        const u32 edge = 0xFFFF9A22u;
+        const s32 width = (s32)s_vdispWidth;
+        const s32 height = (s32)s_vdispHeight;
+
+        wheelDrawTextCenterScaled("WHITE", x + 32, y, XPAUSE_WHITE, 11, 20);
+        for (s32 r = 0; r < 14; r++)
+        {
+            pauseFillRect(s_expandBuf, width, height, x + 31 - r, y + 28 + r, r * 2 + 3, 2, edge);
+        }
+        pauseFillRect(s_expandBuf, width, height, x + 26, y + 36, 12, 22, edge);
+
+        pauseFillRect(s_expandBuf, width, height, x + 12, y + 76, 40, 24, edge);
+        pauseFillRect(s_expandBuf, width, height, x + 16, y + 80, 32, 16, XPAUSE_BLACK);
+        char layerNumber[8];
+        sprintf(layerNumber, "%d", s_pdaOverlayLayer);
+        wheelDrawTextCenterScaled(layerNumber, x + 32, y + 82, XPAUSE_WHITE, 7, 10);
+
+        for (s32 r = 0; r < 14; r++)
+        {
+            pauseFillRect(s_expandBuf, width, height, x + 31 - r, y + 136 - r, r * 2 + 3, 2, edge);
+        }
+        pauseFillRect(s_expandBuf, width, height, x + 26, y + 106, 12, 22, edge);
+        wheelDrawTextCenterScaled("BLACK", x + 32, y + 152, XPAUSE_WHITE, 11, 20);
+    }
+
+    static void pdaCompositeOverlay()
+    {
+        if (!s_pdaOverlayEnabled || !s_vdispWidth || !s_vdispHeight) return;
+
+        const s32 width = (s32)s_vdispWidth;
+        const s32 height = (s32)s_vdispHeight;
+        const s32 frameX = 0;
+        const s32 frameY = 0;
+        const s32 frameW = width;
+        const s32 frameH = height;
+        pdaDrawFrameImage(frameX, frameY, frameW, frameH);
+
+        const s32 tabY0 = pdaScaleFrameY(353);
+        const s32 tabY1 = pdaScaleFrameY(379);
+        const s32 tabH = tabY1 - tabY0;
+        pdaDrawNativeTab("MAP", 153, pdaScaleFrameY(355), 48, pdaScaleFrameY(378) - pdaScaleFrameY(355), s_pdaOverlayMode == 0);
+        pdaDrawNativeTab("WEAP", 233, tabY0, 58, tabH, s_pdaOverlayMode == 1);
+        pdaDrawNativeTab("INV", 294, tabY0, 49, tabH, s_pdaOverlayMode == 2);
+        pdaDrawNativeTab("OBJ", 347, tabY0, 56, tabH, s_pdaOverlayMode == 3);
+        pdaDrawNativeTab("MIS", 437, tabY0, 48, tabH, s_pdaOverlayMode == 4);
+
+        if (s_pdaOverlayMode == 0)
+        {
+            const s32 keyX = 448;
+            const s32 textX = 478;
+            const s32 y0 = 62;
+            const s32 step = 24;
+            wheelDrawTextRawScaled("LS", keyX, y0, 0xFFE0D8B8u, true, 13, 20);
+            wheelDrawTextRawScaled("LS", keyX, y0, 0xFFE0D8B8u, false, 13, 20);
+            wheelDrawTextScaled("PAN", textX, y0, 0xFFE0D8B8u, 13, 20);
+            wheelDrawTextRawScaled("A", keyX, y0 + step, 0xFF33D033u, true, 13, 20);
+            wheelDrawTextRawScaled("A", keyX, y0 + step, 0xFF33D033u, false, 13, 20);
+            wheelDrawTextScaled("ZOOM OUT", textX, y0 + step, 0xFF33D033u, 13, 20);
+            wheelDrawTextRawScaled("X", keyX, y0 + step * 2, 0xFF64A8FFu, true, 13, 20);
+            wheelDrawTextRawScaled("X", keyX, y0 + step * 2, 0xFF64A8FFu, false, 13, 20);
+            wheelDrawTextScaled("ZOOM IN", textX, y0 + step * 2, 0xFF64A8FFu, 13, 20);
+            pdaDrawLayerStackKey(520, 150);
+        }
+    }
+
+    static void cheatCompositeOverlay()
+    {
+        const s32 width = (s32)s_vdispWidth;
+        const s32 height = (s32)s_vdispHeight;
+        const s32 boxW = XPAUSE_PANEL_WIDTH;
+        const s32 boxH = XPAUSE_PANEL_HEIGHT;
+        const s32 originX = (width - XPAUSE_DESIGN_WIDTH) / 2;
+        const s32 originY = (height - XPAUSE_DESIGN_HEIGHT) / 2;
+        const s32 boxX = originX + (XPAUSE_DESIGN_WIDTH - boxW) / 2;
+        const s32 boxY = originY + (XPAUSE_DESIGN_HEIGHT - boxH) / 2 - 34;
+        pauseDrawFrame(s_expandBuf, width, height, boxX, boxY, boxW, boxH);
+
+        const s32 visible = 7;
+        const s32 rowX = boxX + 62;
+        const s32 rowY = boxY + 24;
+        const s32 rowH = 32;
+        const s32 rowW = boxW - 124;
+        for (s32 i = 0; i < visible; i++)
+        {
+            const s32 index = s_cheatScroll + i;
+            if (index < 0 || index >= s_cheatItemCount) continue;
+            const bool selected = index == s_cheatSelection;
+            const bool enabled = s_cheatItems[index].enabled;
+            const s32 y = rowY + i * rowH;
+            if (selected)
+            {
+                pauseFillRect(s_expandBuf, width, height, rowX - 18, y + 2, rowW, 26, XPAUSE_GREEN_MID);
+                pauseDrawText(s_expandBuf, width, height, XPT_ARROW, rowX - 4, y + 2, true);
+            }
+            wheelDrawTextRaw(s_cheatItems[index].label, rowX + 22, y, enabled ? 0xFFFF3030u : (selected ? XPAUSE_WHITE : XPAUSE_GREY), true);
+            wheelDrawTextRaw(s_cheatItems[index].label, rowX + 22, y, enabled ? 0xFFFF3030u : (selected ? XPAUSE_WHITE : XPAUSE_GREY), false);
+            wheelDrawTextRight(enabled ? "ON" : "OFF", boxX + boxW - 82, y, enabled ? 0xFFFF3030u : 0xFF8A8A8Au);
+        }
+
+        if (s_cheatScroll > 0)
+        {
+            const s32 ax = boxX + boxW - 34;
+            const s32 ay = rowY - 8;
+            for (s32 r = 0; r < 8; r++)
+            {
+                pauseFillRect(s_expandBuf, width, height, ax - r, ay + r, r * 2 + 1, 1, XPAUSE_GREY);
+            }
+        }
+        if (s_cheatScroll + visible < s_cheatItemCount)
+        {
+            const s32 ax = boxX + boxW - 34;
+            const s32 ay = rowY + visible * rowH + 4;
+            for (s32 r = 0; r < 8; r++)
+            {
+                pauseFillRect(s_expandBuf, width, height, ax - r, ay - r, r * 2 + 1, 1, XPAUSE_GREY);
+            }
+        }
     }
 
     static void loadStrokeRect(u32* dst, s32 width, s32 height, s32 x, s32 y, s32 w, s32 h, u32 color)
@@ -1534,6 +1872,7 @@ namespace TFE_RenderBackend
 
         pauseCompositeOverlay();
         briefingCompositeFooter();
+        pdaCompositeOverlay();
         weaponWheelComposite();
 
         s_vdispCalls++;
@@ -1611,6 +1950,25 @@ namespace TFE_RenderBackend
         {
             s_optionsItems[i] = items[i];
         }
+    }
+
+    void xboxSetCheatScreen(bool enabled, s32 selection, s32 scroll, const XboxCheatItem* items, s32 itemCount)
+    {
+        s_cheatScreenEnabled = enabled;
+        s_cheatItemCount = pauseClamp(itemCount, 0, 12);
+        s_cheatSelection = pauseClamp(selection, 0, s_cheatItemCount > 0 ? s_cheatItemCount - 1 : 0);
+        s_cheatScroll = pauseClamp(scroll, 0, s_cheatItemCount > 7 ? s_cheatItemCount - 7 : 0);
+        for (s32 i = 0; i < s_cheatItemCount; i++)
+        {
+            s_cheatItems[i] = items[i];
+        }
+    }
+
+    void xboxSetPdaOverlay(bool enabled, s32 mode, s32 layer)
+    {
+        s_pdaOverlayEnabled = enabled;
+        s_pdaOverlayMode = pauseClamp(mode, 0, 4);
+        s_pdaOverlayLayer = layer;
     }
 
     void xboxSetMissionCompleteScreen(bool enabled, s32 selection, u32 frame, const XboxMissionCompleteInfo* info)

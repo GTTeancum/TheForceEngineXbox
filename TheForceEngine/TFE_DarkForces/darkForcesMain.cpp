@@ -182,25 +182,22 @@ namespace TFE_DarkForces
 
 	static CutsceneData s_cutsceneData[] =
 	{
-		{ 1,  GMODE_CUTSCENE, 100 },
+		// Startup intro is handled separately through scene 10. This table is
+		// the campaign flow after Start Game / Agent Menu selection. Only list
+		// scene IDs that actually exist in CUTSCENE.LST; missing placeholder
+		// IDs make progression look broken even when the fallback skip works.
 		{ 1,  GMODE_BRIEFING,   0 },
 		{ 1,  GMODE_MISSION,	0 },
-		{ 1,  GMODE_CUTSCENE, 150 },
 
 		{ 2,  GMODE_CUTSCENE, 200 },
 		{ 2,  GMODE_BRIEFING,   0 },
 		{ 2,  GMODE_MISSION,    0 },
-		{ 2,  GMODE_CUTSCENE, 250 },
 
-		{ 3,  GMODE_CUTSCENE, 300 },
 		{ 3,  GMODE_BRIEFING,   0 },
 		{ 3,  GMODE_MISSION,	0 },
-		{ 3,  GMODE_CUTSCENE, 350 },
 
-		{ 4,  GMODE_CUTSCENE, 400 },
 		{ 4,  GMODE_BRIEFING,   0 },
 		{ 4,  GMODE_MISSION,    0 },
-		{ 4,  GMODE_CUTSCENE, 450 },
 
 		{ 5,  GMODE_CUTSCENE, 500 },
 		{ 5,  GMODE_BRIEFING,	0 },
@@ -210,42 +207,31 @@ namespace TFE_DarkForces
 		{ 6,  GMODE_CUTSCENE, 600 },
 		{ 6,  GMODE_BRIEFING,	0 },
 		{ 6,  GMODE_MISSION,	0 },
-		{ 6,  GMODE_CUTSCENE, 650 },
 
-		{ 7,  GMODE_CUTSCENE, 700 },
 		{ 7,  GMODE_BRIEFING,	0 },
 		{ 7,  GMODE_MISSION,	0 },
-		{ 7,  GMODE_CUTSCENE, 750 },
 
 		{ 8,  GMODE_CUTSCENE, 800 },
 		{ 8,  GMODE_BRIEFING,	0 },
 		{ 8,  GMODE_MISSION, 	0 },
 		{ 8,  GMODE_CUTSCENE, 850 },
 
-		{ 9,  GMODE_CUTSCENE, 900 },
 		{ 9,  GMODE_BRIEFING,	0 },
 		{ 9,  GMODE_MISSION,	0 },
-		{ 9,  GMODE_CUTSCENE, 950 },
 
 		{ 10, GMODE_CUTSCENE,1000 },
 		{ 10, GMODE_BRIEFING,   0 },
 		{ 10, GMODE_MISSION,	0 },
 		{ 10, GMODE_CUTSCENE,1050 },
 
-		{ 11, GMODE_CUTSCENE,1100 },
 		{ 11, GMODE_BRIEFING,	0 },
 		{ 11, GMODE_MISSION,	0 },
-		{ 11, GMODE_CUTSCENE,1150 },
 
-		{ 12, GMODE_CUTSCENE,1200 },
 		{ 12, GMODE_BRIEFING,	0 },
 		{ 12, GMODE_MISSION,	0 },
-		{ 12, GMODE_CUTSCENE,1250 },
 
-		{ 13, GMODE_CUTSCENE,1300 },
 		{ 13, GMODE_BRIEFING,	0 },
 		{ 13, GMODE_MISSION,	0 },
-		{ 13, GMODE_CUTSCENE,1350 },
 
 		{ 14, GMODE_CUTSCENE,1400 },
 		{ 14, GMODE_BRIEFING,   0 },

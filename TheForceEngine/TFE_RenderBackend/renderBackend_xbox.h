@@ -40,6 +40,12 @@ namespace TFE_RenderBackend
         s32 maxValue;
     };
 
+    struct XboxCheatItem
+    {
+        const char* label;
+        bool enabled;
+    };
+
     struct XboxWeaponWheelInfo
     {
         s32 selected;
@@ -169,6 +175,8 @@ namespace TFE_RenderBackend
     void xboxSetLoadScreen(bool enabled, s32 selection, u32 frame, const XboxLoadSlotInfo* slots, s32 slotCount);
     void xboxSetModScreen(bool enabled, s32 selection, u32 frame, const XboxModInfo* mods, s32 modCount);
     void xboxSetOptionsScreen(bool enabled, bool pauseStyle, s32 selection, s32 scroll, u32 frame, const XboxOptionsItem* items, s32 itemCount);
+    void xboxSetCheatScreen(bool enabled, s32 selection, s32 scroll, const XboxCheatItem* items, s32 itemCount);
+    void xboxSetPdaOverlay(bool enabled, s32 mode, s32 layer = 0);
     void xboxSetMissionCompleteScreen(bool enabled, s32 selection, u32 frame, const XboxMissionCompleteInfo* info);
     void xboxSetWeaponWheel(bool enabled, const XboxWeaponWheelInfo* info);
 }

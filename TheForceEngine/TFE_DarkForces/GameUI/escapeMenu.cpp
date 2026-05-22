@@ -7,6 +7,8 @@
 #include <TFE_DarkForces/util.h>
 #include <TFE_DarkForces/hud.h>
 #include <TFE_DarkForces/config.h>
+#include <TFE_DarkForces/cheats.h>
+#include <TFE_DarkForces/player.h>
 #include <TFE_Game/saveSystem.h>
 #include <TFE_Game/reticle.h>
 #include <TFE_Archive/archive.h>
@@ -16,6 +18,7 @@
 #include <TFE_RenderShared/texturePacker.h>
 #include <TFE_Jedi/Renderer/RClassic_GPU/screenDrawGPU.h>
 #include <TFE_Jedi/Renderer/jediRenderer.h>
+#include <TFE_Jedi/Renderer/rcommon.h>
 #include <TFE_Jedi/Math/core_math.h>
 #include <TFE_Jedi/Level/rtexture.h>
 #include <TFE_Jedi/Level/roffscreenBuffer.h>
@@ -133,6 +136,12 @@ namespace TFE_DarkForces
 		bool  optionsStickLeftHeld;
 		bool  optionsStickRightHeld;
 		TFE_RenderBackend::XboxOptionsItem optionsItems[7];
+		bool  cheatsOpen;
+		s32   cheatsSelection;
+		s32   cheatsScroll;
+		bool  cheatsStickUpHeld;
+		bool  cheatsStickDownHeld;
+		TFE_RenderBackend::XboxCheatItem cheatsItems[9];
 #endif
 
 		RenderTargetHandle renderTarget;
@@ -149,6 +158,8 @@ namespace TFE_DarkForces
 			, optionsOpen(false), optionsSelection(0), optionsScroll(0), optionsFrame(0)
 			, optionsStickUpHeld(false), optionsStickDownHeld(false)
 			, optionsStickLeftHeld(false), optionsStickRightHeld(false)
+			, cheatsOpen(false), cheatsSelection(0), cheatsScroll(0)
+			, cheatsStickUpHeld(false), cheatsStickDownHeld(false)
 #endif
 			, renderTarget(NULL), langKeys(NULL)
 		{
@@ -168,6 +179,7 @@ namespace TFE_DarkForces
 	EscapeMenuAction escapeMenu_updateXboxUI();
 	const char* escapeMenu_xboxButtonName(s32 button);
 	static void xboxOpenOptions();
+	static void xboxOpenCheats();
 #endif
 
 	extern void pauseLevelSound();
@@ -179,6 +191,7 @@ namespace TFE_DarkForces
 #ifdef _XBOX
 		TFE_RenderBackend::xboxSetPauseOverlay(false, 0, 0, false);
 		TFE_RenderBackend::xboxSetOptionsScreen(false, true, 0, 0, 0, NULL, 0);
+		TFE_RenderBackend::xboxSetCheatScreen(false, 0, 0, NULL, 0);
 #endif
 		// TFE: GPU Support.
 		if (s_emState.renderTarget)
@@ -710,7 +723,8 @@ namespace TFE_DarkForces
 				}
 				break;
 			case ESC_BTN_CHEAT:
-				TFE_System::logWrite(LOG_MSG, "PauseMenu", "Enter Cheat Code selected: no cheat-entry UI wired yet");
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "Cheats selected");
+				xboxOpenCheats();
 				break;
 			case ESC_BTN_ABORT:
 				TFE_System::logWrite(LOG_MSG, "PauseMenu", "open Abort Mission confirm");
@@ -907,7 +921,7 @@ namespace TFE_DarkForces
 			case ESC_BTN_ABORT:   return "Abort Mission";
 			case ESC_BTN_QUICKSAVE: return "Quick Save";
 			case ESC_BTN_OPTIONS: return "Options";
-			case ESC_BTN_CHEAT:   return "Enter Cheat Code";
+			case ESC_BTN_CHEAT:   return "Cheats";
 		}
 		return "Unknown";
 	}
@@ -1148,6 +1162,99 @@ namespace TFE_DarkForces
 		return ESC_CONTINUE;
 	}
 
+	static void xboxRefreshCheatItems()
+	{
+		s_emState.cheatsItems[0].label = "FULL INVINCIBILITY";
+		s_emState.cheatsItems[0].enabled = s_invincibility != 0;
+		s_emState.cheatsItems[1].label = "FLY MODE";
+		s_emState.cheatsItems[1].enabled = s_flyMode ? true : false;
+		s_emState.cheatsItems[2].label = "NO CLIP";
+		s_emState.cheatsItems[2].enabled = s_noclip ? true : false;
+		s_emState.cheatsItems[3].label = "FULL-BRIGHT";
+		s_emState.cheatsItems[3].enabled = TFE_Jedi::s_fullBright ? true : false;
+		s_emState.cheatsItems[4].label = "PONDERING";
+		s_emState.cheatsItems[4].enabled = !s_aiActive;
+		s_emState.cheatsItems[5].label = "ONE-HIT KILL";
+		s_emState.cheatsItems[5].enabled = s_oneHitKillEnabled ? true : false;
+		s_emState.cheatsItems[6].label = "HARDCORE MODE";
+		s_emState.cheatsItems[6].enabled = s_instaDeathEnabled ? true : false;
+		s_emState.cheatsItems[7].label = "INSECT MODE";
+		s_emState.cheatsItems[7].enabled = s_smallModeEnabled ? true : false;
+		s_emState.cheatsItems[8].label = "HEIGHT CHECK";
+		s_emState.cheatsItems[8].enabled = !s_limitStepHeight;
+	}
+
+	static CheatID xboxCheatIdForIndex(s32 index)
+	{
+		static const CheatID ids[9] =
+		{
+			CHEAT_LAIMLAME,
+			CHEAT_LAFLY,
+			CHEAT_LANOCLIP,
+			CHEAT_LABRIGHT,
+			CHEAT_LAREDLITE,
+			CHEAT_LAIMDEATH,
+			CHEAT_LAHARDCORE,
+			CHEAT_LABUG,
+			CHEAT_LAPOGO
+		};
+		return (index >= 0 && index < 9) ? ids[index] : CHEAT_NONE;
+	}
+
+	static void xboxOpenCheats()
+	{
+		xboxRefreshCheatItems();
+		s_emState.cheatsOpen = true;
+		s_emState.cheatsSelection = 0;
+		s_emState.cheatsScroll = 0;
+		s_emState.cheatsStickUpHeld = s_emState.cheatsStickDownHeld = false;
+		TFE_RenderBackend::xboxSetPauseOverlay(true, s_emState.buttonPressed, s_emState.buttonPressed, false);
+		TFE_RenderBackend::xboxSetCheatScreen(true, s_emState.cheatsSelection, s_emState.cheatsScroll, s_emState.cheatsItems, 9);
+	}
+
+	static void xboxCloseCheats()
+	{
+		s_emState.cheatsOpen = false;
+		TFE_RenderBackend::xboxSetCheatScreen(false, 0, 0, NULL, 0);
+	}
+
+	static void xboxMoveCheats(s32 delta)
+	{
+		s_emState.cheatsSelection += delta;
+		if (s_emState.cheatsSelection < 0) s_emState.cheatsSelection = 8;
+		if (s_emState.cheatsSelection > 8) s_emState.cheatsSelection = 0;
+		if (s_emState.cheatsSelection < s_emState.cheatsScroll) s_emState.cheatsScroll = s_emState.cheatsSelection;
+		if (s_emState.cheatsSelection >= s_emState.cheatsScroll + 6) s_emState.cheatsScroll = s_emState.cheatsSelection - 5;
+	}
+
+	static EscapeMenuAction xboxUpdateCheats()
+	{
+		const f32 ly = TFE_Input::getAxis(AXIS_LEFT_Y);
+		const bool stickUp = ly > 0.55f;
+		const bool stickDown = ly < -0.55f;
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_UP) || (stickUp && !s_emState.cheatsStickUpHeld)) xboxMoveCheats(-1);
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_DOWN) || (stickDown && !s_emState.cheatsStickDownHeld)) xboxMoveCheats(1);
+		s_emState.cheatsStickUpHeld = stickUp;
+		s_emState.cheatsStickDownHeld = stickDown;
+
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A))
+		{
+			CheatID id = xboxCheatIdForIndex(s_emState.cheatsSelection);
+			TFE_System::logWrite(LOG_MSG, "PauseMenu", "cheat toggle selection=%d id=%d", s_emState.cheatsSelection, (s32)id);
+			executeCheat(id);
+			xboxRefreshCheatItems();
+		}
+
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_B) ||
+			inputMapping_getActionState(IADF_MENU_TOGGLE) == STATE_PRESSED)
+		{
+			xboxCloseCheats();
+		}
+
+		TFE_RenderBackend::xboxSetCheatScreen(s_emState.cheatsOpen, s_emState.cheatsSelection, s_emState.cheatsScroll, s_emState.cheatsItems, 9);
+		return ESC_CONTINUE;
+	}
+
 	static void xboxMoveSelection(s32 delta)
 	{
 		if (s_emState.confirmState != CONFIRM_STATE_NONE)
@@ -1176,6 +1283,10 @@ namespace TFE_DarkForces
 		if (s_emState.optionsOpen)
 		{
 			return xboxUpdateOptions();
+		}
+		if (s_emState.cheatsOpen)
+		{
+			return xboxUpdateCheats();
 		}
 
 		if (s_emState.quickSaveStatus != 0)

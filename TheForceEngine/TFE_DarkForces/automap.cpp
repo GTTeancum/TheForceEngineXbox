@@ -102,6 +102,7 @@ namespace TFE_DarkForces
 	void automap_drawPlayer(s32 layer);
 	void automap_drawSectors();
 	void automap_updateDeltaCoords(s32 x, s32 z);
+	JBool automap_layerDiscovered(s32 layer);
 
 	void automap_serialize(Stream* stream)
 	{
@@ -280,11 +281,25 @@ namespace TFE_DarkForces
 			} break;
 			case MAP_LAYER_UP:
 			{
-				s_mapLayer = min(s_levelState.maxLayer, s_mapLayer + 1);
+				for (s32 layer = s_mapLayer + 1; layer <= s_levelState.maxLayer; layer++)
+				{
+					if (automap_layerDiscovered(layer))
+					{
+						s_mapLayer = layer;
+						break;
+					}
+				}
 			} break;
 			case MAP_LAYER_DOWN:
 			{
-				s_mapLayer = max(s_levelState.minLayer, s_mapLayer - 1);
+				for (s32 layer = s_mapLayer - 1; layer >= s_levelState.minLayer; layer--)
+				{
+					if (automap_layerDiscovered(layer))
+					{
+						s_mapLayer = layer;
+						break;
+					}
+				}
 			} break;
 			case MAP_ENABLE_AUTOCENTER:
 			{
@@ -619,6 +634,33 @@ namespace TFE_DarkForces
 		}
 
 		return color;
+	}
+
+	JBool automap_layerDiscovered(s32 layer)
+	{
+		RSector* sector = s_levelState.sectors;
+		for (u32 i = 0; i < s_levelState.sectorCount; i++, sector++)
+		{
+			if (sector->layer != layer)
+			{
+				continue;
+			}
+
+			if (sector->flags1 & SEC_FLAGS1_RENDERED)
+			{
+				return JTRUE;
+			}
+
+			RWall* wall = sector->walls;
+			for (s32 w = 0; w < sector->wallCount; w++, wall++)
+			{
+				if (wall->seen)
+				{
+					return JTRUE;
+				}
+			}
+		}
+		return JFALSE;
 	}
 
 	void automap_drawSector(RSector* sector)

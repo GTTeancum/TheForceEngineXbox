@@ -13,15 +13,17 @@
 //   Right trigger      -> IADF_PRIMARY_FIRE
 //   Left trigger       -> IADF_SECONDARY_FIRE
 //   A                  -> IADF_JUMP   (also: MBUTTON_LEFT for menu clicks)
-//   B                  -> IADF_RUN (sprint)
+//   B                  -> IADF_CROUCH
 //   X                  -> IADF_USE
-//   Y                  -> IADF_CROUCH
 //   Start              -> IADF_PAUSE / IADF_MENU_TOGGLE
 //   Back               -> IADF_AUTOMAP
 //   Left shoulder      -> IADF_CYCLEWPN_PREV
 //   Right shoulder     -> IADF_CYCLEWPN_NEXT
-//   D-pad up/down      -> IADF_INC_SCREENSIZE / IADF_DEC_SCREENSIZE
-//   Left stick click   -> IADF_CENTER_VIEW
+//   D-pad right        -> IADF_HEAD_LAMP_TOGGLE
+//   D-pad up           -> IADF_CLEATS_TOGGLE
+//   D-pad left         -> IADF_NIGHT_VISION_TOG
+//   D-pad down         -> IADF_GAS_MASK_TOGGLE
+//   Left stick click   -> IADF_RUN toggle
 //
 // Menu cursor synthesis: the Landru / agent / escape / mission-briefing
 // menus are mouse-driven. They call TFE_Input::getMousePos() and read

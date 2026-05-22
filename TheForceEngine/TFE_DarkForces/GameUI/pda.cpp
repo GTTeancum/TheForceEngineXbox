@@ -20,6 +20,9 @@
 #include <TFE_Input/input.h>
 #include <TFE_Input/inputMapping.h>
 #include <TFE_RenderBackend/renderBackend.h>
+#ifdef _XBOX
+#include <TFE_RenderBackend/renderBackend_xbox.h>
+#endif
 #include <TFE_Jedi/Math/core_math.h>
 #include <TFE_Jedi/Renderer/virtualFramebuffer.h>
 #include <TFE_Jedi/Renderer/screenDraw.h>
@@ -106,8 +109,16 @@ namespace TFE_DarkForces
 	static s16 s_briefY;
 	static s32 mouseOldPosX = 0, mouseOldPosZ = 0;
 	static bool mouseMoveReset = true;
+#ifdef _XBOX
+	static const s32 PDA_NATIVE_SCREEN_LEFT = 20;
+	static const s32 PDA_NATIVE_SCREEN_RIGHT = 611;
+	static const s32 PDA_NATIVE_SCREEN_TOP = 29;
+	static const s32 PDA_NATIVE_SCREEN_BOTTOM = 404;
+#endif
 		
 	void pda_handleInput();
+	void pda_drawNativeXbox();
+	void pda_blitOverlayNativeXbox();
 	void pda_drawCommonButtons();
 	void pda_drawMapButtons();
 	void pdaDrawBriefingButtons();
@@ -219,6 +230,9 @@ namespace TFE_DarkForces
 			return;
 		}
 		lpalette_setScreenPal(s_palette);
+#ifdef _XBOX
+		vfb_setResolution(640, 480);
+#endif
 
 		s_pdaOpen = JTRUE;
 		s_buttonPressed = -1;
@@ -235,6 +249,9 @@ namespace TFE_DarkForces
 
 	void pda_releaseLoadedResources()
 	{
+#ifdef _XBOX
+		TFE_RenderBackend::xboxSetPdaOverlay(false, 0);
+#endif
 		lactor_removeActor(s_briefing);
 		lactor_removeActor(s_pdaArt);
 		lactor_removeActor(s_goalsActor);
@@ -282,6 +299,9 @@ namespace TFE_DarkForces
 	void pda_close()
 	{
 		TFE_System::logWrite(LOG_MSG, "Datapad", "close requested");
+#ifdef _XBOX
+		TFE_RenderBackend::xboxSetPdaOverlay(false, 0);
+#endif
 		// Clear the screen to black during the palette transition.
 		pda_clearToBlack();
 
@@ -333,6 +353,9 @@ namespace TFE_DarkForces
 		{
 			return;
 		}
+#ifdef _XBOX
+		TFE_RenderBackend::xboxSetPdaOverlay(true, (s32)s_pdaMode, automap_getLayer());
+#endif
 
 		// Main view
 		u32 outWidth, outHeight;
@@ -340,39 +363,7 @@ namespace TFE_DarkForces
 		memset(vfb_getCpuBuffer(), 0, outWidth * outHeight);
 
 #ifdef _XBOX
-		// The Xbox PDA frame is an upgraded opaque plate, unlike the original
-		// asset which used color 79 holes for the content area. Draw the frame
-		// first, then populate the clipped content area so the frame cannot
-		// cover the map/briefing/inventory layers.
-		lcanvas_eraseRect(&s_viewBounds);
-		lactor_setState(s_pdaArt, 0, 0);
-		lactorAnim_draw(s_pdaArt, &s_viewBounds, &s_viewBounds, 0, 0, JTRUE);
-
-		pda_drawCommonButtons();
-		if (s_pdaMode == PDA_MODE_MAP)
-		{
-			pda_drawMapButtons();
-
-			Font* mapNumFont = getMapNumFont();
-			if (mapNumFont)
-			{
-				char str[10];
-				memset(str, 0, 10);
-				snprintf(str, 10, "%d", automap_getLayer());
-				if (str[0] == '-') { str[0] = ':'; }
-				s32 leftAdj = font_getStringLength(mapNumFont, str) / 2;
-				pda_displayFontString(mapNumFont, 275 - leftAdj, 127, str);
-			}
-		}
-		else if (s_pdaMode == PDA_MODE_BRIEF)
-		{
-			pdaDrawBriefingButtons();
-		}
-
-		screenDraw_setTransColor(79);
-		menu_blitToScreen(nullptr, JTRUE/*transparent*/, JFALSE/*swap*/);
-		screenDraw_setTransColor(0);
-
+		pda_drawNativeXbox();
 		pda_drawOverlay();
 		vfb_swap();
 		return;
@@ -742,12 +733,12 @@ namespace TFE_DarkForces
 			return;
 		}
 
-		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_LEFTSHOULDER))
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_LEFT))
 		{
 			s_pdaMode = (s_pdaMode == PDA_MODE_MAP) ? PDA_MODE_BRIEF : PdaMode(s_pdaMode - 1);
 			TFE_System::logWrite(LOG_MSG, "Datapad", "tab previous mode=%d", s_pdaMode);
 		}
-		else if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_RIGHTSHOULDER))
+		else if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_RIGHT))
 		{
 			s_pdaMode = (s_pdaMode == PDA_MODE_BRIEF) ? PDA_MODE_MAP : PdaMode(s_pdaMode + 1);
 			TFE_System::logWrite(LOG_MSG, "Datapad", "tab next mode=%d", s_pdaMode);
@@ -762,47 +753,47 @@ namespace TFE_DarkForces
 
 		if (s_frameReady && s_pdaMode == PDA_MODE_MAP)
 		{
-			if (TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_UP) || stickUp)
+			if (stickUp)
 			{
 				automap_updateMapData(MAP_MOVE1_UP);
 			}
-			else if (TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_DOWN) || stickDown)
+			else if (stickDown)
 			{
 				automap_updateMapData(MAP_MOVE1_DN);
 			}
-			if (TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_LEFT) || stickLeft)
+			if (stickLeft)
 			{
 				automap_updateMapData(MAP_MOVE1_LEFT);
 			}
-			else if (TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_RIGHT) || stickRight)
+			else if (stickRight)
 			{
 				automap_updateMapData(MAP_MOVE1_RIGHT);
 			}
-			if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A))
+			if (TFE_Input::buttonDown(CONTROLLER_BUTTON_A))
 			{
 				automap_updateMapData(MAP_ZOOM_OUT);
 			}
-			else if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_X))
+			else if (TFE_Input::buttonDown(CONTROLLER_BUTTON_X))
 			{
 				automap_updateMapData(MAP_ZOOM_IN);
 			}
-			if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_Y))
+			if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_RIGHTSHOULDER))
 			{
 				automap_updateMapData(MAP_LAYER_UP);
 			}
-			else if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_BACK))
+			else if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_LEFTSHOULDER))
 			{
 				automap_updateMapData(MAP_LAYER_DOWN);
 			}
 		}
 		else if (s_frameReady && s_pdaMode == PDA_MODE_BRIEF)
 		{
-			if ((TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_UP) || stickUp) && s_briefY > -BRIEF_VERT_MARGIN)
+			if (stickUp && s_briefY > -BRIEF_VERT_MARGIN)
 			{
 				s_briefY -= BRIEF_LINE_SCROLL;
 				if (s_briefY < -BRIEF_VERT_MARGIN) s_briefY = -BRIEF_VERT_MARGIN;
 			}
-			else if ((TFE_Input::buttonDown(CONTROLLER_BUTTON_DPAD_DOWN) || stickDown) && s_briefY != s_briefingMaxY)
+			else if (stickDown && s_briefY != s_briefingMaxY)
 			{
 				s_briefY += BRIEF_LINE_SCROLL;
 				if (s_briefY > s_briefingMaxY) s_briefY = s_briefingMaxY;
@@ -877,6 +868,53 @@ namespace TFE_DarkForces
 		pda_handleButtons();
 	}
 
+	void pda_drawNativeXbox()
+	{
+#ifdef _XBOX
+		u32 width, height;
+		vfb_getResolution(&width, &height);
+		if (width != 640 || height != 480)
+		{
+			vfb_setResolution(640, 480);
+		}
+		u8* fb = vfb_getCpuBuffer();
+		if (!fb) { return; }
+		memset(fb, 0, 640 * 480);
+#endif
+	}
+
+	void pda_blitOverlayNativeXbox()
+	{
+#ifdef _XBOX
+		static const s32 dstLeft = PDA_NATIVE_SCREEN_LEFT;
+		static const s32 dstTop = PDA_NATIVE_SCREEN_TOP;
+		static const s32 dstRight = PDA_NATIVE_SCREEN_RIGHT;
+		static const s32 dstBottom = PDA_NATIVE_SCREEN_BOTTOM;
+		const s32 dstW = dstRight - dstLeft + 1;
+		const s32 dstH = dstBottom - dstTop + 1;
+		const s32 srcLeft = s_overlayRect.left;
+		const s32 srcTop = s_overlayRect.top;
+		const s32 srcW = s_overlayRect.right - s_overlayRect.left + 1;
+		const s32 srcH = s_overlayRect.bottom - s_overlayRect.top + 1;
+		u8* dst = vfb_getCpuBuffer();
+		u8* src = ldraw_getBitmap();
+		if (!dst || !src || srcW <= 0 || srcH <= 0) { return; }
+
+		for (s32 y = 0; y < dstH; y++)
+		{
+			const s32 sy = srcTop + (y * srcH) / dstH;
+			if (sy < 0 || sy >= 200) { continue; }
+			u8* out = dst + (dstTop + y) * 640 + dstLeft;
+			for (s32 x = 0; x < dstW; x++)
+			{
+				const s32 sx = srcLeft + (x * srcW) / dstW;
+				if (sx < 0 || sx >= 320) { continue; }
+				out[x] = src[sy * 320 + sx];
+			}
+		}
+#endif
+	}
+
 	void pda_drawButton(PdaButton id)
 	{
 		s32 pressed = 0;
@@ -921,6 +959,13 @@ namespace TFE_DarkForces
 	{
 		if (s_pdaMode == PDA_MODE_MAP)
 		{
+			ScreenRect clipRect;
+#ifdef _XBOX
+			clipRect.left = PDA_NATIVE_SCREEN_LEFT;
+			clipRect.right = PDA_NATIVE_SCREEN_RIGHT;
+			clipRect.top = PDA_NATIVE_SCREEN_TOP;
+			clipRect.bot = PDA_NATIVE_SCREEN_BOTTOM;
+#else
 			ScreenRect* uiRect = vfb_getScreenRect(VFB_RECT_UI);
 			fixed16_16 xScale = vfb_getXScale();
 			fixed16_16 yScale = vfb_getYScale();
@@ -928,11 +973,11 @@ namespace TFE_DarkForces
 			s32 virtualWidth = floor16(mul16(intToFixed16(320), xScale));
 			s32 offset = max(0, ((uiRect->right - uiRect->left + 1) - virtualWidth) / 2);
 
-			ScreenRect clipRect;
 			clipRect.left = offset + floor16(mul16(intToFixed16(s_pdaRect.left), xScale) + xScale);
 			clipRect.right = offset + floor16(mul16(intToFixed16(s_pdaRect.right), xScale) - xScale);
 			clipRect.top = floor16(mul16(intToFixed16(s_pdaRect.top), yScale) + yScale);
 			clipRect.bot = floor16(mul16(intToFixed16(s_pdaRect.bottom), yScale) - yScale);
+#endif
 
 			vfb_setScreenRect(VFB_RECT_RENDER, &clipRect);
 			automap_draw(vfb_getCpuBuffer());
@@ -953,7 +998,11 @@ namespace TFE_DarkForces
 			}
 
 			lcanvas_clearClipRect();
-			menu_blitToScreen(nullptr, JFALSE);
+#ifdef _XBOX
+			pda_blitOverlayNativeXbox();
+#else
+			menu_blitToScreen(nullptr, JFALSE, JFALSE);
+#endif
 		}
 		else if (s_pdaMode == PDA_MODE_INV && s_items)
 		{
@@ -970,7 +1019,11 @@ namespace TFE_DarkForces
 			}
 
 			lcanvas_clearClipRect();
-			menu_blitToScreen(nullptr, JFALSE);
+#ifdef _XBOX
+			pda_blitOverlayNativeXbox();
+#else
+			menu_blitToScreen(nullptr, JFALSE, JFALSE);
+#endif
 		}
 		else if (s_pdaMode == PDA_MODE_BRIEF && s_briefing)
 		{
@@ -982,7 +1035,11 @@ namespace TFE_DarkForces
 			lcanvas_setClip(&s_overlayRect);
 			lactorDelt_draw(s_briefing, &s_overlayRect, &s_overlayRect, x, y, JTRUE);
 			lcanvas_clearClipRect();
-			menu_blitToScreen(nullptr, JFALSE);
+#ifdef _XBOX
+			pda_blitOverlayNativeXbox();
+#else
+			menu_blitToScreen(nullptr, JFALSE, JFALSE);
+#endif
 		}
 		else if (s_pdaMode == PDA_MODE_GOALS && s_goalsActor)
 		{
@@ -1039,7 +1096,11 @@ namespace TFE_DarkForces
 			lfont_drawTextClipped(secretStr);
 
 			lcanvas_clearClipRect();
-			menu_blitToScreen(nullptr, JFALSE);
+#ifdef _XBOX
+			pda_blitOverlayNativeXbox();
+#else
+			menu_blitToScreen(nullptr, JFALSE, JFALSE);
+#endif
 		}
 	}
 
