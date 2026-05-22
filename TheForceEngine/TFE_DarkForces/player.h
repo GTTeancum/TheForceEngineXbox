@@ -205,6 +205,7 @@ namespace TFE_DarkForces
 	void cheat_fullAmmo();
 	void cheat_unlock();
 	void cheat_maxout();
+	void cheat_giveAll();
 	void cheat_godMode();
 
 	// New TFE Cheats

@@ -36,6 +36,7 @@
 #include <TFE_RenderBackend/xboxStartLogo.inc>
 #include <TFE_RenderBackend/xboxStartFont.inc>
 #include <TFE_RenderBackend/xboxFooterFont.inc>
+#include <TFE_RenderBackend/xboxDukeButtons.inc>
 #include <TFE_RenderBackend/xboxBriefingPromptFont.inc>
 #include <TFE_RenderBackend/xboxWheelFont.inc>
 #include <TFE_RenderBackend/xboxPdaFrame.inc>
@@ -829,6 +830,83 @@ namespace TFE_RenderBackend
         footerDrawTextRaw(id, x, y, color, false);
     }
 
+    static s32 dukeIconWidthForHeight(XboxDukeButtonIconId id, s32 targetH)
+    {
+        if (id < 0 || id >= XDB_COUNT || targetH <= 0) return 0;
+        const XboxDukeButtonIcon* icon = &c_xboxDukeButtons[id];
+        return (icon->width * targetH + icon->height / 2) / icon->height;
+    }
+
+    static void dukeDrawIconTo(u32* dst, s32 dstW, s32 dstH, XboxDukeButtonIconId id, s32 x, s32 y, s32 targetH, u32 tint)
+    {
+        if (!dst || id < 0 || id >= XDB_COUNT || targetH <= 0) return;
+        const XboxDukeButtonIcon* icon = &c_xboxDukeButtons[id];
+        const s32 targetW = dukeIconWidthForHeight(id, targetH);
+        if (targetW <= 0) return;
+
+        const u32 tintA = (tint >> 24) & 0xFFu;
+        const u32 tintR = (tint >> 16) & 0xFFu;
+        const u32 tintG = (tint >> 8) & 0xFFu;
+        const u32 tintB = tint & 0xFFu;
+        const bool useTint = tint != 0xFFFFFFFFu;
+
+        for (s32 dy = 0; dy < targetH; dy++)
+        {
+            const s32 py = y + dy;
+            if (py < 0 || py >= dstH) continue;
+            const s32 sy = (dy * icon->height) / targetH;
+            for (s32 dx = 0; dx < targetW; dx++)
+            {
+                const s32 px = x + dx;
+                if (px < 0 || px >= dstW) continue;
+                const s32 sx = (dx * icon->width) / targetW;
+                u32 src = icon->data[sy * icon->width + sx];
+                u32 a = (src >> 24) & 0xFFu;
+                if (!a) continue;
+                if (useTint)
+                {
+                    const u32 r = (((src >> 16) & 0xFFu) * tintR) / 255u;
+                    const u32 g = (((src >> 8) & 0xFFu) * tintG) / 255u;
+                    const u32 b = ((src & 0xFFu) * tintB) / 255u;
+                    a = (a * tintA) / 255u;
+                    src = (a << 24) | (r << 16) | (g << 8) | b;
+                }
+                u32* pixel = dst + py * dstW + px;
+                *pixel = pauseBlend(*pixel | 0xFF000000u, src, a);
+            }
+        }
+    }
+
+    static void dukeDrawIcon(XboxDukeButtonIconId id, s32 x, s32 y, s32 targetH)
+    {
+        dukeDrawIconTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, id, x, y, targetH, 0xFFFFFFFFu);
+    }
+
+    static XboxDukeButtonIconId footerIconForItem(XboxFooterTextId id)
+    {
+        switch (id)
+        {
+            case XFT_A_SELECT:
+            case XFT_A_LOAD:
+            case XFT_A_START:
+            case XFT_A_APPLY:
+            case XFT_A_CONFIRM:
+                return XDB_A;
+            case XFT_B_BACK:
+            case XFT_B_ABORT:
+                return XDB_B;
+            case XFT_X_RESUME:
+            case XFT_X_DIFF_EASY:
+            case XFT_X_DIFF_MEDIUM:
+            case XFT_X_DIFF_HARD:
+                return XDB_X;
+            case XFT_DPAD_ADJUST:
+                return XDB_DPAD;
+            default:
+                return XDB_A;
+        }
+    }
+
     static void footerDrawBar(u32 ruleColor)
     {
         pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 0, 424, XBOX_OUTPUT_WIDTH, 56, XPAUSE_BLACK);
@@ -837,7 +915,10 @@ namespace TFE_RenderBackend
 
     static void footerDrawItem(XboxFooterTextId id, s32 x, u32 color)
     {
-        footerDrawText(id, x, 443, color);
+        const s32 iconH = (id == XFT_DPAD_ADJUST) ? 19 : 18;
+        const XboxDukeButtonIconId icon = footerIconForItem(id);
+        dukeDrawIcon(icon, x, 441, iconH);
+        footerDrawText(id, x + dukeIconWidthForHeight(icon, iconH) + 8, 443, color);
     }
 
     static const char* loadGlyphRows(char c, s32 row)
@@ -1026,7 +1107,11 @@ namespace TFE_RenderBackend
         const s32 width = (s32)s_vdispWidth;
         const s32 height = (s32)s_vdispHeight;
 
-        wheelDrawTextCenterScaled("WHITE", x + 32, y, XPAUSE_WHITE, 11, 20);
+        {
+            const s32 iconH = 20;
+            const s32 iconW = dukeIconWidthForHeight(XDB_WHITE, iconH);
+            dukeDrawIconTo(s_expandBuf, width, height, XDB_WHITE, x + 32 - iconW / 2, y - 2, iconH, 0xFFFFFFFFu);
+        }
         for (s32 r = 0; r < 14; r++)
         {
             pauseFillRect(s_expandBuf, width, height, x + 31 - r, y + 28 + r, r * 2 + 3, 2, edge);
@@ -1037,14 +1122,18 @@ namespace TFE_RenderBackend
         pauseFillRect(s_expandBuf, width, height, x + 16, y + 80, 32, 16, XPAUSE_BLACK);
         char layerNumber[8];
         sprintf(layerNumber, "%d", s_pdaOverlayLayer);
-        wheelDrawTextCenterScaled(layerNumber, x + 32, y + 82, XPAUSE_WHITE, 7, 10);
+        wheelDrawTextCenterScaled(layerNumber, x + 32, y + 78, XPAUSE_WHITE, 7, 10);
 
         for (s32 r = 0; r < 14; r++)
         {
             pauseFillRect(s_expandBuf, width, height, x + 31 - r, y + 136 - r, r * 2 + 3, 2, edge);
         }
         pauseFillRect(s_expandBuf, width, height, x + 26, y + 106, 12, 22, edge);
-        wheelDrawTextCenterScaled("BLACK", x + 32, y + 152, XPAUSE_WHITE, 11, 20);
+        {
+            const s32 iconH = 20;
+            const s32 iconW = dukeIconWidthForHeight(XDB_BLACK, iconH);
+            dukeDrawIconTo(s_expandBuf, width, height, XDB_BLACK, x + 32 - iconW / 2, y + 150, iconH, 0xFFFFFFFFu);
+        }
     }
 
     static void pdaCompositeOverlay()
@@ -1071,17 +1160,14 @@ namespace TFE_RenderBackend
         if (s_pdaOverlayMode == 0)
         {
             const s32 keyX = 448;
-            const s32 textX = 478;
+            const s32 textX = 480;
             const s32 y0 = 62;
             const s32 step = 24;
-            wheelDrawTextRawScaled("LS", keyX, y0, 0xFFE0D8B8u, true, 13, 20);
-            wheelDrawTextRawScaled("LS", keyX, y0, 0xFFE0D8B8u, false, 13, 20);
+            dukeDrawIconTo(s_expandBuf, width, height, XDB_LSTICK_SMALL, keyX - 1, y0 - 4, 21, 0xFFFFFFFFu);
             wheelDrawTextScaled("PAN", textX, y0, 0xFFE0D8B8u, 13, 20);
-            wheelDrawTextRawScaled("A", keyX, y0 + step, 0xFF33D033u, true, 13, 20);
-            wheelDrawTextRawScaled("A", keyX, y0 + step, 0xFF33D033u, false, 13, 20);
+            dukeDrawIconTo(s_expandBuf, width, height, XDB_A, keyX, y0 + step - 3, 18, 0xFFFFFFFFu);
             wheelDrawTextScaled("ZOOM OUT", textX, y0 + step, 0xFF33D033u, 13, 20);
-            wheelDrawTextRawScaled("X", keyX, y0 + step * 2, 0xFF64A8FFu, true, 13, 20);
-            wheelDrawTextRawScaled("X", keyX, y0 + step * 2, 0xFF64A8FFu, false, 13, 20);
+            dukeDrawIconTo(s_expandBuf, width, height, XDB_X, keyX, y0 + step * 2 - 3, 18, 0xFFFFFFFFu);
             wheelDrawTextScaled("ZOOM IN", textX, y0 + step * 2, 0xFF64A8FFu, 13, 20);
             pdaDrawLayerStackKey(520, 150);
         }

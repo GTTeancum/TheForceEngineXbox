@@ -1636,6 +1636,13 @@ namespace TFE_DarkForces
 		giveAllInventoryAndHealth();
 		hud_sendTextMessage(710);
 	}
+
+	void cheat_giveAll()
+	{
+		giveAllInventoryAndHealth();
+		s_lifeCount = 9;
+		hud_sendTextMessage(710);
+	}
 		
 	void cheat_godMode()
 	{

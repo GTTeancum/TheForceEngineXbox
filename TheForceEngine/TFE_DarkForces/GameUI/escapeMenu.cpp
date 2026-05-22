@@ -85,6 +85,11 @@ namespace TFE_DarkForces
 		CONFIRM_YES,
 		CONFIRM_BTN_COUNT
 	};
+	enum
+	{
+		XBOX_CHEAT_COUNT = 10,
+		XBOX_CHEAT_GIVE_ALL = 9
+	};
 	static Vec2i c_escButtons[ESC_BTN_COUNT] =
 	{
 #ifdef _XBOX
@@ -141,7 +146,7 @@ namespace TFE_DarkForces
 		s32   cheatsScroll;
 		bool  cheatsStickUpHeld;
 		bool  cheatsStickDownHeld;
-		TFE_RenderBackend::XboxCheatItem cheatsItems[9];
+		TFE_RenderBackend::XboxCheatItem cheatsItems[XBOX_CHEAT_COUNT];
 #endif
 
 		RenderTargetHandle renderTarget;
@@ -1182,11 +1187,13 @@ namespace TFE_DarkForces
 		s_emState.cheatsItems[7].enabled = s_smallModeEnabled ? true : false;
 		s_emState.cheatsItems[8].label = "HEIGHT CHECK";
 		s_emState.cheatsItems[8].enabled = !s_limitStepHeight;
+		s_emState.cheatsItems[XBOX_CHEAT_GIVE_ALL].label = "GIVE ALL";
+		s_emState.cheatsItems[XBOX_CHEAT_GIVE_ALL].enabled = false;
 	}
 
 	static CheatID xboxCheatIdForIndex(s32 index)
 	{
-		static const CheatID ids[9] =
+		static const CheatID ids[XBOX_CHEAT_COUNT] =
 		{
 			CHEAT_LAIMLAME,
 			CHEAT_LAFLY,
@@ -1196,9 +1203,10 @@ namespace TFE_DarkForces
 			CHEAT_LAIMDEATH,
 			CHEAT_LAHARDCORE,
 			CHEAT_LABUG,
-			CHEAT_LAPOGO
+			CHEAT_LAPOGO,
+			CHEAT_NONE
 		};
-		return (index >= 0 && index < 9) ? ids[index] : CHEAT_NONE;
+		return (index >= 0 && index < XBOX_CHEAT_COUNT) ? ids[index] : CHEAT_NONE;
 	}
 
 	static void xboxOpenCheats()
@@ -1209,7 +1217,7 @@ namespace TFE_DarkForces
 		s_emState.cheatsScroll = 0;
 		s_emState.cheatsStickUpHeld = s_emState.cheatsStickDownHeld = false;
 		TFE_RenderBackend::xboxSetPauseOverlay(true, s_emState.buttonPressed, s_emState.buttonPressed, false);
-		TFE_RenderBackend::xboxSetCheatScreen(true, s_emState.cheatsSelection, s_emState.cheatsScroll, s_emState.cheatsItems, 9);
+		TFE_RenderBackend::xboxSetCheatScreen(true, s_emState.cheatsSelection, s_emState.cheatsScroll, s_emState.cheatsItems, XBOX_CHEAT_COUNT);
 	}
 
 	static void xboxCloseCheats()
@@ -1221,8 +1229,8 @@ namespace TFE_DarkForces
 	static void xboxMoveCheats(s32 delta)
 	{
 		s_emState.cheatsSelection += delta;
-		if (s_emState.cheatsSelection < 0) s_emState.cheatsSelection = 8;
-		if (s_emState.cheatsSelection > 8) s_emState.cheatsSelection = 0;
+		if (s_emState.cheatsSelection < 0) s_emState.cheatsSelection = XBOX_CHEAT_COUNT - 1;
+		if (s_emState.cheatsSelection >= XBOX_CHEAT_COUNT) s_emState.cheatsSelection = 0;
 		if (s_emState.cheatsSelection < s_emState.cheatsScroll) s_emState.cheatsScroll = s_emState.cheatsSelection;
 		if (s_emState.cheatsSelection >= s_emState.cheatsScroll + 6) s_emState.cheatsScroll = s_emState.cheatsSelection - 5;
 	}
@@ -1239,9 +1247,17 @@ namespace TFE_DarkForces
 
 		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A))
 		{
-			CheatID id = xboxCheatIdForIndex(s_emState.cheatsSelection);
-			TFE_System::logWrite(LOG_MSG, "PauseMenu", "cheat toggle selection=%d id=%d", s_emState.cheatsSelection, (s32)id);
-			executeCheat(id);
+			if (s_emState.cheatsSelection == XBOX_CHEAT_GIVE_ALL)
+			{
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "cheat give all");
+				cheat_giveAll();
+			}
+			else
+			{
+				CheatID id = xboxCheatIdForIndex(s_emState.cheatsSelection);
+				TFE_System::logWrite(LOG_MSG, "PauseMenu", "cheat toggle selection=%d id=%d", s_emState.cheatsSelection, (s32)id);
+				executeCheat(id);
+			}
 			xboxRefreshCheatItems();
 		}
 
@@ -1251,7 +1267,7 @@ namespace TFE_DarkForces
 			xboxCloseCheats();
 		}
 
-		TFE_RenderBackend::xboxSetCheatScreen(s_emState.cheatsOpen, s_emState.cheatsSelection, s_emState.cheatsScroll, s_emState.cheatsItems, 9);
+		TFE_RenderBackend::xboxSetCheatScreen(s_emState.cheatsOpen, s_emState.cheatsSelection, s_emState.cheatsScroll, s_emState.cheatsItems, XBOX_CHEAT_COUNT);
 		return ESC_CONTINUE;
 	}
 
