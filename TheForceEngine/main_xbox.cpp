@@ -716,7 +716,7 @@ static void refreshLoadSlots()
             }
         }
         s_loadSlots[i].valid = valid;
-        s_loadSlots[i].autosave = false;
+        s_loadSlots[i].autosave = valid && (!strcasecmp(filename, "save000.tfe") || !strcasecmp(s_loadHeaders[i].saveName, "Autosave"));
         s_loadSlots[i].fileName = valid ? s_loadHeaders[i].fileName : filename;
         s_loadSlots[i].saveName = valid ? s_loadHeaders[i].saveName : "";
         s_loadSlots[i].dateTime = valid ? s_loadDateDisplay[i] : "";

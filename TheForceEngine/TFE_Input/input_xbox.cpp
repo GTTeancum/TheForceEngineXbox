@@ -104,8 +104,15 @@ namespace TFE_InputXbox
     static int    s_openRetryCounter  = 0;   // throttle retries to ~1/sec @ 60fps
     static int    s_pollCounter       = 0;   // total polls since startup
     static int    s_edgeLogBudget     = 0;   // edge-event logs stall hardware menus; enable only while bringing input up.
+    // Dark Forces Remaster defaults observed from kexengine.cfg:
+    //   cl_joylookspeed_x=1.0, cl_joylookspeed_y=0.5,
+    //   in_joystick_laxisdeadzone=0.24, in_joystick_raxisdeadzone=0.265,
+    //   cl_joyLogCurve=2.  The Xbox path already uses a quadratic curve;
+    //   keep one exposed sensitivity slider, but match the vertical scale
+    //   and right-stick deadzone as the baseline.
     static f32    s_lookSensitivity   = 1.0f;
-    static f32    s_stickDeadzone     = 0.09f;
+    static f32    s_lookVerticalScale = 0.5f;
+    static f32    s_stickDeadzone     = 0.265f;
 
     // Synthesized mouse cursor state (screen-space, accumulated across frames).
     // Initialized to screen center on init().
@@ -290,10 +297,10 @@ namespace TFE_InputXbox
         // Stick UP -> look UP. Raw XInput RY is +ve when pushed up,
         // and player.cpp adds AA_LOOK_VERT to s_playerPitch where +ve
         // pitch = look up - so DON'T negate.
-        TFE_Input::setAxis(AXIS_RIGHT_Y, ry * s_lookSensitivity);
+        TFE_Input::setAxis(AXIS_RIGHT_Y, ry * s_lookSensitivity * s_lookVerticalScale);
 #else
         // Pre-Phase-12 behavior: negate.
-        TFE_Input::setAxis(AXIS_RIGHT_Y, -ry * s_lookSensitivity);
+        TFE_Input::setAxis(AXIS_RIGHT_Y, -ry * s_lookSensitivity * s_lookVerticalScale);
 #endif
 
         // ---------------------------------------------------------------
