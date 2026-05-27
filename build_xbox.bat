@@ -373,6 +373,13 @@ copy /y "%~dp0TheForceEngine\XboxAssets\titleimage.xbx" "%~dp0build\xbox\release
 copy /y "%~dp0TheForceEngine\XboxAssets\saveimage.xbx" "%~dp0build\xbox\release\SaveImage.xbx" >nul
 copy /y "%~dp0TheForceEngine\XboxAssets\TitleMeta.xbx" "%~dp0build\xbox\release\TitleMeta.xbx" >nul
 
+REM Copy the compact DF-21 catalog runtime pack. These are bounded, Xbox-ready
+REM sidecar assets used only for installed extracted mods.
+if exist "%~dp0TheForceEngine\ExternalData\DarkForces\Mods\DF21" (
+    if not exist "%~dp0build\xbox\release\ExternalData\DarkForces\Mods" mkdir "%~dp0build\xbox\release\ExternalData\DarkForces\Mods"
+    xcopy /e /i /y "%~dp0TheForceEngine\ExternalData\DarkForces\Mods\DF21" "%~dp0build\xbox\release\ExternalData\DarkForces\Mods\DF21" >nul
+)
+
 echo.
 echo ============================================================
 echo  BUILD SUCCEEDED

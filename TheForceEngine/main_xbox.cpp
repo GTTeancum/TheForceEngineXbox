@@ -63,6 +63,7 @@
 #include <TFE_ExternalData/dfLogics.h>
 #include <TFE_ExternalData/pickupExternal.h>
 #include <TFE_ExternalData/weaponExternal.h>
+#include <TFE_System/cJSON.h>
 #include <TFE_DarkForces/hud.h>
 #include <TFE_DarkForces/mission.h>
 
@@ -154,11 +155,29 @@ struct XboxModEntry
     char quickSaveName[TFE_MAX_PATH];
     bool hasQuickSave;
 };
+
+struct XboxDf21CatalogEntry
+{
+    char slug[48];
+    char installBase[96];
+    char zipBase[96];
+    char title[64];
+    char author[64];
+    char version[32];
+    char description[256];
+    char thumbPath[TFE_MAX_PATH];
+};
+
 static XboxModEntry s_modEntries[12];
 static TFE_RenderBackend::XboxModInfo s_modUi[12];
 static u32 s_modThumbs[12][TFE_SaveSystem::SAVE_IMAGE_WIDTH * TFE_SaveSystem::SAVE_IMAGE_HEIGHT];
 static bool s_modThumbValid[12];
+static u32 s_modCatalogThumbs[12][TFE_SaveSystem::SAVE_IMAGE_WIDTH * TFE_SaveSystem::SAVE_IMAGE_HEIGHT];
+static bool s_modCatalogThumbValid[12];
 static s32 s_modCount = 0;
+static XboxDf21CatalogEntry s_df21Catalog[240];
+static s32 s_df21CatalogCount = 0;
+static bool s_df21CatalogLoaded = false;
 static bool s_returnToStartRequested = false;
 static bool s_menuMusicReady = false;
 static bool s_menuMusicPlaying = false;
@@ -845,6 +864,252 @@ static void copyPathLeaf(char* dst, size_t dstSize, const char* path)
     }
 }
 
+static const char* jsonString(cJSON* object, const char* key)
+{
+    cJSON* item = object ? cJSON_GetObjectItem(object, key) : NULL;
+    return (item && cJSON_IsString(item) && item->valuestring) ? item->valuestring : "";
+}
+
+static void makeDf21ThumbPath(char* dst, size_t dstSize, const char* relativePath)
+{
+    if (!dst || dstSize == 0) return;
+    dst[0] = 0;
+    if (!relativePath || !relativePath[0]) return;
+
+    char normalized[TFE_MAX_PATH];
+    copyString(normalized, sizeof(normalized), relativePath);
+    for (char* c = normalized; *c; c++)
+    {
+        if (*c == '/') *c = '\\';
+    }
+
+    snprintf(dst, dstSize, "%sExternalData\\DarkForces\\Mods\\DF21\\%s",
+        TFE_Paths::getPath(PATH_PROGRAM), normalized);
+}
+
+static void df21SetFromCurrentVersion(XboxDf21CatalogEntry* entry, cJSON* currentVersion)
+{
+    if (!entry || !currentVersion) return;
+
+    const char* filename = jsonString(currentVersion, "filename");
+    if (filename && filename[0])
+    {
+        FileUtil::getFileNameFromPath(filename, entry->zipBase, false);
+    }
+
+    const char* installDir = jsonString(currentVersion, "installDir");
+    if (installDir && installDir[0])
+    {
+        copyPathLeaf(entry->installBase, sizeof(entry->installBase), installDir);
+    }
+
+    if (!entry->installBase[0] && entry->zipBase[0])
+    {
+        copyString(entry->installBase, sizeof(entry->installBase), entry->zipBase);
+    }
+
+    const char* version = jsonString(currentVersion, "key");
+    if (version && version[0])
+    {
+        copyString(entry->version, sizeof(entry->version), version);
+    }
+}
+
+static bool loadDf21Catalog()
+{
+    if (s_df21CatalogLoaded) return s_df21CatalogCount > 0;
+    s_df21CatalogLoaded = true;
+    s_df21CatalogCount = 0;
+    memset(s_df21Catalog, 0, sizeof(s_df21Catalog));
+
+    char catalogPath[TFE_MAX_PATH];
+    snprintf(catalogPath, TFE_MAX_PATH, "%sExternalData\\DarkForces\\Mods\\DF21\\df21_catalog_xbox.json",
+        TFE_Paths::getPath(PATH_PROGRAM));
+
+    FileStream file;
+    if (!file.open(catalogPath, Stream::MODE_READ))
+    {
+        TFE_System::logWrite(LOG_WARNING, "DF21", "catalog not found '%s'", catalogPath);
+        return false;
+    }
+
+    size_t size = file.getSize();
+    if (size == 0 || size > 768u * 1024u)
+    {
+        file.close();
+        TFE_System::logWrite(LOG_WARNING, "DF21", "catalog size rejected path='%s' size=%u", catalogPath, (u32)size);
+        return false;
+    }
+
+    char* data = (char*)malloc(size + 1);
+    if (!data)
+    {
+        file.close();
+        TFE_System::logWrite(LOG_ERROR, "DF21", "catalog alloc failed size=%u", (u32)size);
+        return false;
+    }
+    memset(data, 0, size + 1);
+    file.readBuffer(data, 1, (u32)size);
+    file.close();
+
+    cJSON* root = cJSON_Parse(data);
+    free(data);
+    if (!root)
+    {
+        TFE_System::logWrite(LOG_WARNING, "DF21", "catalog parse failed '%s'", catalogPath);
+        return false;
+    }
+
+    cJSON* levels = cJSON_GetObjectItem(root, "levels");
+    if (!levels || !cJSON_IsArray(levels))
+    {
+        cJSON_Delete(root);
+        TFE_System::logWrite(LOG_WARNING, "DF21", "catalog missing levels array");
+        return false;
+    }
+
+    cJSON* level = levels->child;
+    while (level && s_df21CatalogCount < (s32)(sizeof(s_df21Catalog) / sizeof(s_df21Catalog[0])))
+    {
+        if (cJSON_IsObject(level))
+        {
+            XboxDf21CatalogEntry* entry = &s_df21Catalog[s_df21CatalogCount];
+            memset(entry, 0, sizeof(*entry));
+            copyString(entry->slug, sizeof(entry->slug), jsonString(level, "slug"));
+            copyString(entry->title, sizeof(entry->title), jsonString(level, "title"));
+            copyString(entry->author, sizeof(entry->author), jsonString(level, "author"));
+            copyString(entry->description, sizeof(entry->description), jsonString(level, "description"));
+            makeDf21ThumbPath(entry->thumbPath, sizeof(entry->thumbPath), jsonString(level, "thumbnail"));
+            cJSON* currentVersion = cJSON_GetObjectItem(level, "currentVersion");
+            if (currentVersion && cJSON_IsObject(currentVersion))
+            {
+                df21SetFromCurrentVersion(entry, currentVersion);
+            }
+            if (!entry->version[0])
+            {
+                copyString(entry->version, sizeof(entry->version), "DF-21");
+            }
+            if (entry->slug[0] && entry->title[0] && entry->installBase[0])
+            {
+                s_df21CatalogCount++;
+            }
+        }
+        level = level->next;
+    }
+
+    cJSON_Delete(root);
+    TFE_System::logWrite(LOG_MSG, "DF21", "catalog loaded count=%d path='%s'", s_df21CatalogCount, catalogPath);
+    return s_df21CatalogCount > 0;
+}
+
+static bool loadDf21XbtThumb(const char* path, u32* outImage)
+{
+    if (!path || !path[0] || !outImage) return false;
+
+    FileStream file;
+    if (!file.open(path, Stream::MODE_READ))
+    {
+        if (s_frontendVerbose) { TFE_System::logWrite(LOG_MSG, "DF21", "thumb missing '%s'", path); }
+        return false;
+    }
+
+    const u32 expectedPixels = TFE_SaveSystem::SAVE_IMAGE_WIDTH * TFE_SaveSystem::SAVE_IMAGE_HEIGHT;
+    const u32 expectedSize = 12 + expectedPixels * 2;
+    size_t size = file.getSize();
+    if (size != expectedSize)
+    {
+        file.close();
+        TFE_System::logWrite(LOG_WARNING, "DF21", "thumb size rejected path='%s' size=%u expected=%u",
+            path, (u32)size, expectedSize);
+        return false;
+    }
+
+    u8 header[12];
+    memset(header, 0, sizeof(header));
+    file.readBuffer(header, 1, sizeof(header));
+    const u16 version = (u16)(header[4] | (header[5] << 8));
+    const u16 width = (u16)(header[6] | (header[7] << 8));
+    const u16 height = (u16)(header[8] | (header[9] << 8));
+    const u16 format = (u16)(header[10] | (header[11] << 8));
+    if (memcmp(header, "XBT1", 4) != 0 || version != 1 ||
+        width != TFE_SaveSystem::SAVE_IMAGE_WIDTH ||
+        height != TFE_SaveSystem::SAVE_IMAGE_HEIGHT ||
+        format != 1)
+    {
+        file.close();
+        TFE_System::logWrite(LOG_WARNING, "DF21", "thumb header rejected path='%s' magic=%c%c%c%c v=%u w=%u h=%u f=%u",
+            path, header[0], header[1], header[2], header[3], version, width, height, format);
+        return false;
+    }
+
+    for (u32 i = 0; i < expectedPixels; i++)
+    {
+        u8 px[2];
+        file.readBuffer(px, 1, 2);
+        const u16 c = (u16)(px[0] | (px[1] << 8));
+        const u32 r5 = (c >> 11) & 31;
+        const u32 g6 = (c >> 5) & 63;
+        const u32 b5 = c & 31;
+        const u32 r = (r5 << 3) | (r5 >> 2);
+        const u32 g = (g6 << 2) | (g6 >> 4);
+        const u32 b = (b5 << 3) | (b5 >> 2);
+        outImage[i] = 0xFF000000u | (r << 16) | (g << 8) | b;
+    }
+    file.close();
+    return true;
+}
+
+static const XboxDf21CatalogEntry* findDf21CatalogForMod(const XboxModEntry* mod)
+{
+    if (!mod || !loadDf21Catalog()) return NULL;
+
+    char folderBase[96];
+    copyPathLeaf(folderBase, sizeof(folderBase), mod->path);
+    char archiveBase[96];
+    FileUtil::getFileNameFromPath(mod->archiveName, archiveBase, false);
+
+    for (s32 i = 0; i < s_df21CatalogCount; i++)
+    {
+        const XboxDf21CatalogEntry* entry = &s_df21Catalog[i];
+        if ((folderBase[0] && !strcasecmp(folderBase, entry->installBase)) ||
+            (folderBase[0] && !strcasecmp(folderBase, entry->zipBase)) ||
+            (archiveBase[0] && !strcasecmp(archiveBase, entry->slug)) ||
+            (archiveBase[0] && !strcasecmp(archiveBase, entry->zipBase)))
+        {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static const u32* applyDf21CatalogToMod(XboxModEntry* mod, s32 index)
+{
+    if (!mod || index < 0 || index >= 12) return NULL;
+
+    const XboxDf21CatalogEntry* entry = findDf21CatalogForMod(mod);
+    if (!entry) return NULL;
+
+    copyString(mod->title, sizeof(mod->title), entry->title);
+    copyString(mod->author, sizeof(mod->author), entry->author[0] ? entry->author : "-");
+    copyString(mod->version, sizeof(mod->version), entry->version[0] ? entry->version : "DF-21");
+    copyString(mod->description, sizeof(mod->description), entry->description[0] ? entry->description : "DF-21 custom mission.");
+    mod->ui.title = mod->title;
+    mod->ui.author = mod->author;
+    mod->ui.version = mod->version;
+    mod->ui.description = mod->description;
+    if (mod->ui.missionCount == 0) mod->ui.missionCount = 1;
+
+    s_modCatalogThumbValid[index] = false;
+    if (!s_modThumbValid[index] && entry->thumbPath[0] && loadDf21XbtThumb(entry->thumbPath, s_modCatalogThumbs[index]))
+    {
+        s_modCatalogThumbValid[index] = true;
+    }
+
+    TFE_System::logWrite(LOG_MSG, "DF21", "matched mod title='%s' slug='%s' install='%s' thumb=%d",
+        mod->title, entry->slug, entry->installBase, s_modCatalogThumbValid[index] ? 1 : 0);
+    return s_modCatalogThumbValid[index] ? s_modCatalogThumbs[index] : NULL;
+}
+
 static void assignModDefaults(XboxModEntry* mod, s32 index, const char* folderPath, const char* archiveName)
 {
     memset(mod, 0, sizeof(XboxModEntry));
@@ -1259,13 +1524,14 @@ static void addModEntry(const char* dir, const char* archiveName)
     copyString(mod->saveKey, sizeof(mod->saveKey), archiveName);
     TFE_SaveSystem::getQuickSaveFilenameForMod(mod->saveKey, mod->quickSaveName, TFE_MAX_PATH);
     updateModQuickSaveState(mod, s_modCount, true);
-    setModUiImage(mod, s_modCount, NULL);
     readModManifest(mod);
+    const u32* catalogImage = applyDf21CatalogToMod(mod, s_modCount);
+    setModUiImage(mod, s_modCount, catalogImage);
     s_modUi[s_modCount] = mod->ui;
     TFE_System::logWrite(LOG_MSG, "ModMenu",
         "mod[%d] title='%s' archive='%s' saveKey='%s' quickSave='%s' hasQuickSave=%d imageSource='%s'",
         s_modCount, mod->title, mod->archiveName, mod->saveKey, mod->quickSaveName,
-        mod->hasQuickSave ? 1 : 0, s_modThumbValid[s_modCount] ? "quicksave" : "none");
+        mod->hasQuickSave ? 1 : 0, s_modThumbValid[s_modCount] ? "quicksave" : (catalogImage ? "df21" : "none"));
     s_modCount++;
 }
 
@@ -1307,6 +1573,8 @@ static void refreshModSlots()
     memset(s_modUi, 0, sizeof(s_modUi));
     memset(s_modThumbs, 0, sizeof(s_modThumbs));
     memset(s_modThumbValid, 0, sizeof(s_modThumbValid));
+    memset(s_modCatalogThumbs, 0, sizeof(s_modCatalogThumbs));
+    memset(s_modCatalogThumbValid, 0, sizeof(s_modCatalogThumbValid));
     s_modCount = 0;
 
     addRemasterExtrasEntry();

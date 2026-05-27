@@ -938,6 +938,7 @@ namespace TFE_RenderBackend
         static const char* sp[7] = { "00000","00000","00000","00000","00000","00000","00000" };
         static const char* dash[7]={ "00000","00000","00000","11111","00000","00000","00000" };
         static const char* dot[7] = { "00000","00000","00000","00000","00000","01100","01100" };
+        static const char* apos[7]= { "01100","01100","00100","00000","00000","00000","00000" };
         static const char* slash[7]={"00001","00010","00010","00100","01000","01000","10000" };
         static const char* colon[7]={"00000","01100","01100","00000","01100","01100","00000" };
         static const char* zero[7]={ "01110","10001","10011","10101","11001","10001","01110" };
@@ -980,7 +981,7 @@ namespace TFE_RenderBackend
         if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
         switch (c)
         {
-            case '-': glyph = dash; break; case '.': glyph = dot; break; case '/': glyph = slash; break; case ':': glyph = colon; break;
+            case '-': glyph = dash; break; case '.': glyph = dot; break; case '\'': glyph = apos; break; case '/': glyph = slash; break; case ':': glyph = colon; break;
             case '0': glyph = zero; break; case '1': glyph = one; break; case '2': glyph = two; break; case '3': glyph = three; break; case '4': glyph = four; break;
             case '5': glyph = five; break; case '6': glyph = six; break; case '7': glyph = seven; break; case '8': glyph = eight; break; case '9': glyph = nine; break;
             case 'A': glyph = a; break; case 'B': glyph = b; break; case 'C': glyph = c_; break; case 'D': glyph = d; break; case 'E': glyph = e; break; case 'F': glyph = f; break;
@@ -1405,6 +1406,25 @@ namespace TFE_RenderBackend
             if (len > 70) len = 70;
             memcpy(line, p, len);
             line[len] = 0;
+            const char* next = p + len;
+            while (*next == ' ') next++;
+            if (lineIndex == maxLines - 1 && *next)
+            {
+                s32 end = len;
+                while (end > 0 && line[end - 1] == ' ') end--;
+                const s32 maxEnd = maxChars - 3;
+                if (end > maxEnd)
+                {
+                    s32 wordEnd = maxEnd;
+                    while (wordEnd > 0 && line[wordEnd] != ' ') wordEnd--;
+                    end = wordEnd > 0 ? wordEnd : maxEnd;
+                }
+                if (end < 0) end = 0;
+                line[end++] = '.';
+                line[end++] = '.';
+                line[end++] = '.';
+                line[end] = 0;
+            }
             loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, line, x, y + lineIndex * 15, 1, color);
             p += len;
         }
@@ -1449,7 +1469,7 @@ namespace TFE_RenderBackend
         const s32 panelX = 446;
         const s32 panelY = 112;
         const s32 panelW = 168;
-        const s32 panelH = 264;
+        const s32 panelH = 292;
         pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xFF080604u);
         loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xFF4F4A34u);
         pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 10, panelY + 10, panelW - 20, 84, 0xFF160F08u);
