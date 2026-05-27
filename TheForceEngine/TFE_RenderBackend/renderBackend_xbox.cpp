@@ -1355,8 +1355,8 @@ namespace TFE_RenderBackend
                 loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, slot->dateTime, listX + 206, y + 20, 1, selected ? 0xFFFF3030u : 0xFFE0D8B8u);
                 if (slot->autosave)
                 {
-                    loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, listX + rowW - 62, y + 5, 54, 12, 0xFF00A000u);
-                    loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "AUTOSAVE", listX + rowW - 59, y + 7, 1, 0xFF33FF33u);
+                    loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, listX + 56, y + 20, 54, 12, 0xFF00A000u);
+                    loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "AUTOSAVE", listX + 59, y + 22, 1, 0xFF33FF33u);
                 }
             }
             else

@@ -216,15 +216,8 @@ namespace TFE_Input
 		s_inputConfig.axis[AA_MOVE]        = AXIS_LEFT_Y;
 		s_inputConfig.ctrlSensitivity[0]   = 1.0f;
 		s_inputConfig.ctrlSensitivity[1]   = 1.0f;
-#ifdef _XBOX
-		// Xbox applies stick deadzone in the platform input layer so the
-		// controller options menu reports the actual hardware threshold.
-		s_inputConfig.ctrlDeadzone[0]      = 0.0f;
-		s_inputConfig.ctrlDeadzone[1]      = 0.0f;
-#else
 		s_inputConfig.ctrlDeadzone[0]      = 0.1f;
 		s_inputConfig.ctrlDeadzone[1]      = 0.1f;
-#endif
 
 		s_inputConfig.mouseFlags           = 0;
 		s_inputConfig.mouseMode            = MMODE_LOOK;
@@ -301,10 +294,6 @@ namespace TFE_Input
 			s_inputConfig.ctrlDeadzone[0] = 0.1f;
 			s_inputConfig.ctrlDeadzone[1] = 0.1f;
 		}
-#ifdef _XBOX
-		s_inputConfig.ctrlDeadzone[0] = 0.0f;
-		s_inputConfig.ctrlDeadzone[1] = 0.0f;
-#endif
 
 		file.read(&s_inputConfig.mouseFlags);
 		file.readBuffer(&s_inputConfig.mouseMode, sizeof(MouseMode));
