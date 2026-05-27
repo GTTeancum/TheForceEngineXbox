@@ -371,6 +371,7 @@ REM XBE, but some replacement dashboards also look for title-level files next
 REM to default.xbe.
 copy /y "%~dp0TheForceEngine\XboxAssets\titleimage.xbx" "%~dp0build\xbox\release\TitleImage.xbx" >nul
 copy /y "%~dp0TheForceEngine\XboxAssets\saveimage.xbx" "%~dp0build\xbox\release\SaveImage.xbx" >nul
+copy /y "%~dp0TheForceEngine\XboxAssets\TitleMeta.xbx" "%~dp0build\xbox\release\TitleMeta.xbx" >nul
 
 echo.
 echo ============================================================

@@ -67,6 +67,7 @@
 #include <TFE_DarkForces/mission.h>
 
 #include "xbox_avenger_thumb.inc"
+#include "xbox_dashboard_assets.inc"
 
 // AppState is defined in frontEndUi.h which pulls in STL and ImGui.
 // Redeclare the enum directly here for Xbox to avoid those dependencies.
@@ -173,6 +174,68 @@ static const bool s_menuMusicVerbose = false;
 static const bool s_frontendVerbose = false;
 static u32 s_frontendPresentPhase = 0;
 static AppState s_lastPresentedFrontendState = APP_STATE_UNINIT;
+
+#ifdef _XBOX
+static bool xboxReadFileEquals(const char* path, const unsigned char* data, u32 size)
+{
+    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE) return false;
+
+    DWORD fileSize = GetFileSize(h, NULL);
+    if (fileSize != size)
+    {
+        CloseHandle(h);
+        return false;
+    }
+
+    bool equal = true;
+    unsigned char buffer[512];
+    u32 offset = 0;
+    while (offset < size)
+    {
+        DWORD want = size - offset;
+        if (want > sizeof(buffer)) want = sizeof(buffer);
+        DWORD got = 0;
+        if (!ReadFile(h, buffer, want, &got, NULL) || got != want || memcmp(buffer, data + offset, want) != 0)
+        {
+            equal = false;
+            break;
+        }
+        offset += want;
+    }
+
+    CloseHandle(h);
+    return equal;
+}
+
+static void xboxWriteDashboardMetadataFile(const char* path, const unsigned char* data, u32 size)
+{
+    if (xboxReadFileEquals(path, data, size))
+    {
+        return;
+    }
+
+    HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+    {
+        TFE_XboxLogf("DashboardMeta", "open failed %s err=%lu", path, GetLastError());
+        return;
+    }
+
+    DWORD written = 0;
+    BOOL ok = WriteFile(h, data, size, &written, NULL);
+    CloseHandle(h);
+    TFE_XboxLogf("DashboardMeta", "write %s ok=%d bytes=%lu/%u err=%lu",
+        path, (ok && written == size) ? 1 : 0, written, size, (ok && written == size) ? 0 : GetLastError());
+}
+
+static void xboxEnsureDashboardMetadata()
+{
+    xboxWriteDashboardMetadataFile("U:\\TitleMeta.xbx", s_xboxDashboardTitleMetaXbx, s_xboxDashboardTitleMetaXbxSize);
+    xboxWriteDashboardMetadataFile("U:\\TitleImage.xbx", s_xboxDashboardTitleImageXbx, s_xboxDashboardTitleImageXbxSize);
+    xboxWriteDashboardMetadataFile("U:\\SaveImage.xbx", s_xboxDashboardSaveImageXbx, s_xboxDashboardSaveImageXbxSize);
+}
+#endif
 
 #ifdef _XBOX
 static void logXboxResourceSnapshot(const char* tag)
@@ -1767,6 +1830,8 @@ void __cdecl main()
     TFE_XboxLogf("Main", "calling setUserDocumentsPath");
     TFE_Paths::setUserDocumentsPath("TFE");
     TFE_XboxLogf("Main", "setUserDocumentsPath returned");
+    TFE_XboxLogf("DashboardMeta", "ensuring title metadata");
+    xboxEnsureDashboardMetadata();
 
     // ----- CP block: pre-logWrite probe. logWrite uses time()/localtime()/
     // strftime() which may hang if the Xbox CRT time-of-day isn't set up.
