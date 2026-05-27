@@ -9,11 +9,9 @@
 //  - TFE_FrontEndUI::logToConsole calls removed (no ImGui console)
 //  - osShellExecute / postErrorMessageBox stubbed (no shell on Xbox)
 //  - TFE_XboxLog() exported for early boot logging before log file is open
-//  - Log goes through NtCreateFile to \Device\Harddisk0\PartitionN\<filename>
-//    (Strategy 1, primary), with CreateFileA on D:/T:/E:/bare as Strategy 2
-//    fallback. Both modes use synchronous WRITE_THROUGH so entries hit disk
-//    immediately and survive crashes. Direct port of OpenJKDF2 xbox_debug.c.
-//    Single log overwritten per boot (no rotation).
+//  - Log writes to D:\<filename> only. Debug-output mirroring and write-through
+//    are disabled in normal runtime because they stall real Xbox hardware
+//    during menu/level transitions. Single log overwritten per boot.
 //  - vsync state read from settings; no RenderBackend query in update()
 //    (RenderBackend handles its own present interval on Xbox)
 
@@ -31,27 +29,15 @@
 #include <xtl.h>   // XDK umbrella header
 
 // ---------------------------------------------------------------------------
-// NT API for direct partition access (mirrors OpenJKDF2 xbox_debug.c).
-// Real-hardware dashboards don't always mount E:\ as a DOS drive letter, so
-// CreateFileA("E:\\...") can fail silently. NtCreateFile on
-// \Device\Harddisk0\PartitionN\ goes straight to the volume regardless of
-// drive-letter mount state.
-// ---------------------------------------------------------------------------
-typedef struct { unsigned short Length; unsigned short MaximumLength; char* Buffer; } XDB_STR;
-typedef struct { HANDLE RootDirectory; XDB_STR* ObjectName; unsigned long Attributes; } XDB_OA;
-typedef struct { union { long Status; void* Pointer; }; unsigned long Information; } XDB_IOSB;
-
-extern "C" long __stdcall NtCreateFile(HANDLE*, unsigned long, XDB_OA*, XDB_IOSB*,
-    LARGE_INTEGER*, unsigned long, unsigned long, unsigned long, unsigned long);
-extern "C" long __stdcall NtClose(HANDLE);
-extern "C" long __stdcall NtWriteFile(HANDLE, HANDLE, void*, void*, XDB_IOSB*,
-    void*, unsigned long, LARGE_INTEGER*);
-
-// ---------------------------------------------------------------------------
 // Log buffer sizes
 // ---------------------------------------------------------------------------
 #define LOG_WORK_BUF  4096
 #define LOG_MSG_BUF   4096
+
+// OutputDebugStringA and FILE_FLAG_WRITE_THROUGH are both expensive on real
+// Xbox hardware. Keep this at 0 for playable builds; the file log remains.
+#define XBOX_LOG_MIRROR_DEBUG_OUTPUT 0
+#define XBOX_LOG_WRITE_THROUGH       0
 
 namespace TFE_System
 {
@@ -79,7 +65,6 @@ namespace TFE_System
     // Log state
     // -----------------------------------------------------------------------
     static HANDLE       s_logFile        = INVALID_HANDLE_VALUE;
-    static bool         s_logIsNtHandle  = false;  // true = NtCreateFile, false = CreateFileA
     static char         s_workStr[LOG_WORK_BUF];
     static char         s_msgStr[LOG_MSG_BUF];
     static bool         s_logTimeEnabled = true;
@@ -111,46 +96,13 @@ namespace TFE_System
     }
 
     // -----------------------------------------------------------------------
-    // s_logWriteRaw - dispatch a write to the right kernel API based on which
-    // call opened the handle.
+    // s_logWriteRaw
     // -----------------------------------------------------------------------
     static void s_logWriteRaw(const char* msg, DWORD len)
     {
         if (s_logFile == INVALID_HANDLE_VALUE || !msg || len == 0) return;
-        if (s_logIsNtHandle)
-        {
-            XDB_IOSB iosb;
-            NtWriteFile(s_logFile, NULL, NULL, NULL, &iosb, (void*)msg, len, NULL);
-        }
-        else
-        {
-            DWORD written = 0;
-            WriteFile(s_logFile, msg, len, &written, NULL);
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // s_ntCreateLog - thin NtCreateFile wrapper matching OpenJKDF2 xdbg_NtCreate.
-    // FILE_OVERWRITE_IF (5) gives "create or truncate" semantics.
-    // SYNCHRONOUS_IO_NONALERT | WRITE_THROUGH | NON_DIRECTORY ensures each
-    // NtWriteFile hits disk before returning, so log survives a hard crash.
-    // -----------------------------------------------------------------------
-    static long s_ntCreateLog(const char* path, HANDLE* out)
-    {
-        XDB_STR name; XDB_OA oa; XDB_IOSB iosb;
-        name.Buffer = (char*)path;
-        name.Length = (unsigned short)strlen(path);
-        name.MaximumLength = name.Length + 1;
-        oa.RootDirectory = NULL;
-        oa.ObjectName = &name;
-        oa.Attributes = 0x40;
-        return NtCreateFile(out,
-            GENERIC_WRITE | 0x00100000,             // GENERIC_WRITE | SYNCHRONIZE
-            &oa, &iosb, NULL,
-            FILE_ATTRIBUTE_NORMAL,
-            0,                                      // ShareAccess = exclusive
-            5,                                      // FILE_OVERWRITE_IF
-            0x20 | 0x02 | 0x40);                    // SYNCHRONOUS_IO_NONALERT | WRITE_THROUGH | NON_DIRECTORY
+        DWORD written = 0;
+        WriteFile(s_logFile, msg, len, &written, NULL);
     }
 
     static const char* c_typeNames[] =
@@ -163,17 +115,17 @@ namespace TFE_System
 
     // -----------------------------------------------------------------------
     // TFE_XboxLog - raw log shim used before the log file is open.
-    // Writes to OutputDebugString only; safe to call at any time.
+    // Safe to call at any time.
     // Exported (extern "C" linkage) so paths_xbox.cpp can call it without
     // pulling in the full TFE_System namespace.
     // -----------------------------------------------------------------------
     extern "C" void TFE_XboxLog(const char* msg)
     {
         if (!msg) return;
+#if XBOX_LOG_MIRROR_DEBUG_OUTPUT
         OutputDebugStringA(msg);
-        // Forward to the log file if open. WRITE_THROUGH (Win32) /
-        // SYNCHRONOUS_IO_NONALERT|WRITE_THROUGH (Nt) means each call
-        // hits disk before returning - no flush needed.
+#endif
+        // Forward to the log file if open.
         s_logWriteRaw(msg, (DWORD)strlen(msg));
     }
 
@@ -396,59 +348,32 @@ namespace TFE_System
     // -----------------------------------------------------------------------
     void logTimeToggle() { s_logTimeEnabled = !s_logTimeEnabled; }
 
-    // Faithful port of OpenJKDF2 xbox_debug_Startup - try strategies in order
-    // until one opens the log file. The 'append' flag is ignored (single log
-    // overwritten per boot, per project decision).
+    // Xbox log path is deliberately fixed to D:\ only; other roots made
+    // hardware behavior unpredictable and can stop some boxes from launching.
     bool logOpen(const char* filename, bool /*append*/)
     {
         if (!filename || !filename[0]) return false;
 
         char logPath[TFE_MAX_PATH];
-
-        // Strategy 1: NtCreateFile to HDD partition roots.
-        // Works on real hardware AND CXBX-R, regardless of dashboard
-        // drive-letter mappings. Partition1 is the utility partition (=E:\).
+        sprintf(logPath, "D:\\%s", filename);
+        s_logFile = CreateFileA(logPath, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+                                CREATE_ALWAYS,
+                                FILE_ATTRIBUTE_NORMAL
+#if XBOX_LOG_WRITE_THROUGH
+                                | FILE_FLAG_WRITE_THROUGH
+#endif
+                                ,
+                                NULL);
+        if (s_logFile != INVALID_HANDLE_VALUE)
         {
-            static const char* ntPrefixes[] = {
-                "\\Device\\Harddisk0\\Partition1\\",
-                "\\Device\\Harddisk0\\Partition6\\",
-                "\\Device\\Harddisk0\\Partition7\\",
-                NULL
-            };
-            for (int i = 0; ntPrefixes[i]; i++)
-            {
-                sprintf(logPath, "%s%s", ntPrefixes[i], filename);
-                long status = s_ntCreateLog(logPath, &s_logFile);
-                if (status >= 0)
-                {
-                    s_logIsNtHandle = true;
-                    TFE_XboxLogf("Log", "open success path=%s (Nt)", logPath);
-                    return true;
-                }
-            }
-        }
-
-        // Strategy 2: CreateFileA with drive letters (dashboard-mapped).
-        {
-            static const char* caPrefixes[] = { "D:\\", "T:\\", "E:\\", "", NULL };
-            for (int i = 0; caPrefixes[i]; i++)
-            {
-                sprintf(logPath, "%s%s", caPrefixes[i], filename);
-                s_logFile = CreateFileA(logPath, GENERIC_WRITE, FILE_SHARE_READ, NULL,
-                                        CREATE_ALWAYS,
-                                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH,
-                                        NULL);
-                if (s_logFile != INVALID_HANDLE_VALUE)
-                {
-                    s_logIsNtHandle = false;
-                    TFE_XboxLogf("Log", "open success path=%s (Win32)", logPath);
-                    return true;
-                }
-            }
+            TFE_XboxLogf("Log", "open success path=%s (Win32)", logPath);
+            return true;
         }
 
         s_logFile = INVALID_HANDLE_VALUE;
-        OutputDebugStringA("[Log] all open strategies failed\r\n");
+#if XBOX_LOG_MIRROR_DEBUG_OUTPUT
+        OutputDebugStringA("[Log] D:\\ log open failed\r\n");
+#endif
         return false;
     }
 
@@ -457,10 +382,7 @@ namespace TFE_System
         if (s_logFile != INVALID_HANDLE_VALUE)
         {
             TFE_XboxLogf("Log", "close");
-            if (s_logIsNtHandle)
-                NtClose(s_logFile);
-            else
-                CloseHandle(s_logFile);
+            CloseHandle(s_logFile);
             s_logFile = INVALID_HANDLE_VALUE;
         }
     }
@@ -475,7 +397,10 @@ namespace TFE_System
         vsprintf(s_msgStr, str, arg);
         va_end(arg);
         sprintf(s_workStr, "[%s] %s\r\n", tag, s_msgStr);
+#if XBOX_LOG_MIRROR_DEBUG_OUTPUT
         OutputDebugStringA(s_workStr);
+#endif
+        s_logWriteRaw(s_workStr, (DWORD)strlen(s_workStr));
         LeaveCriticalSection(&s_logCS);
     }
 
@@ -512,10 +437,14 @@ namespace TFE_System
         else
             sprintf(s_workStr, "%s[%s] %s\r\n", timeStr, tag, s_msgStr);
 
-        // Write to debug output always.
+        // Debug output mirroring is disabled for playable Xbox builds. It can
+        // stall the title on every transition when a debugger/listener is
+        // attached.
+#if XBOX_LOG_MIRROR_DEBUG_OUTPUT
         OutputDebugStringA(s_workStr);
+#endif
 
-        // Write to log file if open (synchronous via WRITE_THROUGH).
+        // Write to log file if open.
         s_logWriteRaw(s_workStr, (DWORD)strlen(s_workStr));
         LeaveCriticalSection(&s_logCS);
     }

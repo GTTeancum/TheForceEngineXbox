@@ -151,7 +151,24 @@ u32 FileStream::readBuffer(void* ptr, u32 size, u32 count)
 void FileStream::writeBuffer(const void* ptr, u32 size, u32 count)
 {
     assert(m_mode == MODE_WRITE || m_mode == MODE_READWRITE || m_mode == MODE_APPEND);
-    if (m_file) fwrite(ptr, size, count, m_file);
+    if (!m_file || !ptr || !size || !count) { return; }
+
+    // Hardware-safe path: avoid large single fwrite calls. FATX/CRT writes on
+    // Xbox are much happier when we push save data in modest contiguous chunks.
+    const u8* bytes = (const u8*)ptr;
+    u32 remaining = size * count;
+    const u32 chunkSize = 4096;
+    while (remaining)
+    {
+        const u32 chunk = remaining < chunkSize ? remaining : chunkSize;
+        const size_t written = fwrite(bytes, 1, chunk, m_file);
+        bytes += written;
+        remaining -= (u32)written;
+        if (written != chunk)
+        {
+            break;
+        }
+    }
 }
 
 void FileStream::writeString(const char* fmt, ...)

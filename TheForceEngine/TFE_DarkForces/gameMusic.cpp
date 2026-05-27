@@ -24,6 +24,10 @@ static inline void GMUSIC_MSG(const char* fmt, ...) { (void)fmt; }
 
 namespace TFE_DarkForces
 {
+#ifdef _XBOX
+	static const bool s_xboxGameMusicVerboseLog = false;
+#endif
+
 	// Internally, iMuse stores opcodes as integers (ptrdiff_t in TFE, so it is big enough to hold a pointer).
 	// So this macro is a nice way of signifying the intent in the code.
 	#define MUSIC_CALLBACK(c) std::ptrdiff_t(c)
@@ -177,16 +181,28 @@ namespace TFE_DarkForces
 	void gameMusic_start(s32 level)
 	{
 #ifdef _XBOX
-		TFE_System::logWrite(LOG_MSG, "GameMusic", "gameMusic_start level=%d stalk='%s' fight='%s'",
-			level,
-			(level >= 1 && level <= MUS_LEVEL_COUNT) ? c_levelMusic[level-1][MUS_STATE_STALK-1] : "<oob>",
-			(level >= 1 && level <= MUS_LEVEL_COUNT) ? c_levelMusic[level-1][MUS_STATE_FIGHT-1] : "<oob>");
+		if (s_xboxGameMusicVerboseLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "GameMusic", "gameMusic_start level=%d stalk='%s' fight='%s'",
+				level,
+				(level >= 1 && level <= MUS_LEVEL_COUNT) ? c_levelMusic[level-1][MUS_STATE_STALK-1] : "<oob>",
+				(level >= 1 && level <= MUS_LEVEL_COUNT) ? c_levelMusic[level-1][MUS_STATE_FIGHT-1] : "<oob>");
+		}
 #endif
 		memset(s_stateEntrances, 0, MUS_STATE_UNDEFINED * sizeof(s32));
 		s_musicTask = createSubTask("iMuse", gameMusic_taskFunc);
+#ifdef _XBOX
+		if (s_xboxGameMusicVerboseLog) { TFE_System::logWrite(LOG_MSG, "GameMusic", "gameMusic_start task=%p", s_musicTask); }
+#endif
 
 		gameMusic_setLevel(level);
+#ifdef _XBOX
+		if (s_xboxGameMusicVerboseLog) { TFE_System::logWrite(LOG_MSG, "GameMusic", "gameMusic_start setLevel done current=%d", level); }
+#endif
 		gameMusic_setState(MUS_STATE_STALK);
+#ifdef _XBOX
+		if (s_xboxGameMusicVerboseLog) { TFE_System::logWrite(LOG_MSG, "GameMusic", "gameMusic_start setState STALK done"); }
+#endif
 		s_desiredFightState = JFALSE;
 	}
 
@@ -220,7 +236,21 @@ namespace TFE_DarkForces
 					{
 						if (c_levelMusic[s_currentLevel - 1][i - 1][0])
 						{
+#ifdef _XBOX
+							if (s_xboxGameMusicVerboseLog)
+							{
+								TFE_System::logWrite(LOG_MSG, "GameMusic", "loading midi state=%d name='%s'",
+									i, c_levelMusic[s_currentLevel - 1][i - 1]);
+							}
+#endif
 							ImLoadMidi(c_levelMusic[s_currentLevel-1][i-1]);
+#ifdef _XBOX
+							if (s_xboxGameMusicVerboseLog)
+							{
+								TFE_System::logWrite(LOG_MSG, "GameMusic", "loaded midi state=%d name='%s'",
+									i, c_levelMusic[s_currentLevel - 1][i - 1]);
+							}
+#endif
 						}
 					}
 				}

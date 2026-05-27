@@ -1,4 +1,5 @@
 #include <cstring>
+#include <cstdlib>
 
 #include "sound.h"
 #include "player.h"
@@ -24,6 +25,7 @@ namespace TFE_DarkForces
 		u32 time;
 		u8* data;
 		u32 size;
+		bool heapData;
 
 		s32 volume;
 		s32 refCount;
@@ -181,6 +183,11 @@ namespace TFE_DarkForces
 
 	SoundSourceId sound_load(const char* fileName, u32 priority)
 	{
+		if (!fileName || !fileName[0])
+		{
+			return NULL_SOUND;
+		}
+
 		SoundSourceId newId = NULL_SOUND;
 		GameSound* sound = (GameSound*)allocator_getHead(sound_state.gameSoundList);
 		while (sound)
@@ -194,7 +201,8 @@ namespace TFE_DarkForces
 		}
 
 		u32 size = 0;
-		u8* data = readVocFileData(fileName, &size);
+		bool heapData = false;
+		u8* data = readVocFileData(fileName, &size, &heapData);
 		if (data)
 		{
 			sound = (GameSound*)allocator_newItem(sound_state.gameSoundList);
@@ -203,6 +211,7 @@ namespace TFE_DarkForces
 			sound->id = (SoundSourceId)sound;
 			sound->time = s_curTick;
 			sound->data = data;
+			sound->heapData = heapData;
 			strncpy(sound->name, fileName, 13);
 			sound->priority = priority;
 			sound->size = size;
@@ -225,7 +234,14 @@ namespace TFE_DarkForces
 			{
 				if (sound->data)
 				{
-					game_free(sound->data);
+					if (sound->heapData)
+					{
+						free(sound->data);
+					}
+					else
+					{
+						game_free(sound->data);
+					}
 				}
 				sound->data = nullptr;
 				allocator_deleteItem(sound_state.gameSoundList, sound);
@@ -239,7 +255,14 @@ namespace TFE_DarkForces
 		{
 			if (sound->data)
 			{
-				game_free(sound->data);
+				if (sound->heapData)
+				{
+					free(sound->data);
+				}
+				else
+				{
+					game_free(sound->data);
+				}
 			}
 			sound->data = nullptr;
 			allocator_deleteItem(sound_state.gameSoundList, sound);

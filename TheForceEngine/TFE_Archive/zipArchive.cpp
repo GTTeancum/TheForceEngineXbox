@@ -14,6 +14,9 @@ namespace
 {
 	const size_t c_blockShift = 8;	// 256 bytes.
 	const size_t c_blockSize = 1 << c_blockShift;
+#ifdef _XBOX
+	const size_t c_xboxMaxResidentZipBytes = 24u * 1024u * 1024u;
+#endif
 
 	size_t roundBufferSize(size_t size)
 	{
@@ -74,6 +77,14 @@ bool ZipArchive::open(const char *archivePath)
 		return false;
 	}
 	m_zipBufferSize = file.getSize();
+	if (m_zipBufferSize == 0 || m_zipBufferSize > c_xboxMaxResidentZipBytes)
+	{
+		file.close();
+		TFE_System::logWrite(LOG_ERROR, "zipArchive", "Zip Archive '%s' size %u unsupported on Xbox (max %u)",
+			archivePath, (u32)m_zipBufferSize, (u32)c_xboxMaxResidentZipBytes);
+		m_zipBufferSize = 0;
+		return false;
+	}
 	m_zipBuffer = (u8*)malloc(m_zipBufferSize);
 	if (!m_zipBuffer)
 	{
@@ -185,7 +196,16 @@ bool ZipArchive::openFile(const char *file)
 	if (m_curFile != INVALID_FILE && m_tempBufferSize < m_entries[m_curFile].length)
 	{
 		m_tempBufferSize = roundBufferSize(m_entries[m_curFile].length);
-		m_tempBuffer = (u8*)realloc(m_tempBuffer, m_tempBufferSize);
+		u8* newBuffer = (u8*)realloc(m_tempBuffer, m_tempBufferSize);
+		if (!newBuffer)
+		{
+			TFE_System::logWrite(LOG_ERROR, "zipArchive", "Cannot allocate entry buffer for '%s' from '%s' (%u bytes)",
+				file ? file : "", m_archivePath, (u32)m_tempBufferSize);
+			m_tempBufferSize = 0;
+			closeFile();
+			return false;
+		}
+		m_tempBuffer = newBuffer;
 	}
 	m_entryRead = false;
 
@@ -196,7 +216,7 @@ bool ZipArchive::openFile(u32 index)
 {
 	m_curFile = INVALID_FILE;
 	m_fileOffset = 0;
-	if (index <= (u32)m_entryCount)
+	if (index < (u32)m_entryCount)
 	{
 		// Open the system file.
 #ifdef _XBOX
@@ -219,7 +239,16 @@ bool ZipArchive::openFile(u32 index)
 	if (m_curFile != INVALID_FILE && m_tempBufferSize < m_entries[m_curFile].length)
 	{
 		m_tempBufferSize = roundBufferSize(m_entries[m_curFile].length);
-		m_tempBuffer = (u8*)realloc(m_tempBuffer, m_tempBufferSize);
+		u8* newBuffer = (u8*)realloc(m_tempBuffer, m_tempBufferSize);
+		if (!newBuffer)
+		{
+			TFE_System::logWrite(LOG_ERROR, "zipArchive", "Cannot allocate entry buffer for index %u from '%s' (%u bytes)",
+				index, m_archivePath, (u32)m_tempBufferSize);
+			m_tempBufferSize = 0;
+			closeFile();
+			return false;
+		}
+		m_tempBuffer = newBuffer;
 	}
 	m_entryRead = false;
 

@@ -32,6 +32,7 @@ namespace TFE_Paths
     static std::vector<Archive*> s_localArchives;
     static std::vector<std::string> s_searchPaths;
     static std::vector<FileMapping> s_fileMappings;
+    static const bool s_verbosePathLog = false;
 
     // -----------------------------------------------------------------------
     void setPath(TFE_PathType pathType, const char* path)
@@ -187,21 +188,24 @@ namespace TFE_Paths
 
     void clearSearchPaths()
     {
-        TFE_XboxLogf("Paths", "clearSearchPaths paths=%u mappings=%u",
-            (u32)s_searchPaths.size(), (u32)s_fileMappings.size());
+        if (s_verbosePathLog)
+        {
+            TFE_XboxLogf("Paths", "clearSearchPaths paths=%u mappings=%u",
+                (u32)s_searchPaths.size(), (u32)s_fileMappings.size());
+        }
         s_searchPaths.clear();
         s_fileMappings.clear();
     }
 
     void clearLocalArchives()
     {
-        TFE_XboxLogf("Paths", "clearLocalArchives count=%u", (u32)s_localArchives.size());
-        const size_t count = s_localArchives.size();
-        Archive** archive = &s_localArchives[0];
-        for (size_t i = 0; i < count; i++)
+        if (s_verbosePathLog)
         {
-            Archive::freeArchive(archive[i]);
+            TFE_XboxLogf("Paths", "clearLocalArchives count=%u (non-owning)", (u32)s_localArchives.size());
         }
+        // This list is a search stack, not an ownership list. Some callers mount
+        // static archives here (Landru MENU/JEDISFX); cached archives are released
+        // by Archive::freeAllArchives() during the runtime purge.
         s_localArchives.clear();
     }
 
@@ -219,7 +223,7 @@ namespace TFE_Paths
         mapping.fileName = fileNameLC;
         mapping.realPath = filePathFixed;
         s_fileMappings.push_back(mapping);
-        TFE_XboxLogf("Paths", "addSingleFilePath %s -> %s", fileNameLC, filePathFixed);
+        if (s_verbosePathLog) { TFE_XboxLogf("Paths", "addSingleFilePath %s -> %s", fileNameLC, filePathFixed); }
     }
 
     void addLocalSearchPath(const char* localSearchPath)
@@ -228,7 +232,7 @@ namespace TFE_Paths
         snprintf(fullPath, TFE_MAX_PATH, "%s%s", getPath(PATH_SOURCE_DATA), localSearchPath);
         fixupPathAsDirectory(fullPath);
         addSearchPath(fullPath);
-        TFE_XboxLogf("Paths", "addLocalSearchPath %s", fullPath);
+        if (s_verbosePathLog) { TFE_XboxLogf("Paths", "addLocalSearchPath %s", fullPath); }
     }
 
     void addAbsoluteSearchPathToHead(const char* absoluteSearchPath)
@@ -237,7 +241,7 @@ namespace TFE_Paths
         strcpy(fullPath, absoluteSearchPath);
         fixupPathAsDirectory(fullPath);
         addSearchPathToHead(fullPath);
-        TFE_XboxLogf("Paths", "addAbsoluteSearchPathToHead %s", fullPath);
+        if (s_verbosePathLog) { TFE_XboxLogf("Paths", "addAbsoluteSearchPathToHead %s", fullPath); }
     }
 
     void addAbsoluteSearchPath(const char* absoluteSearchPath)
@@ -246,30 +250,32 @@ namespace TFE_Paths
         strcpy(fullPath, absoluteSearchPath);
         fixupPathAsDirectory(fullPath);
         addSearchPath(fullPath);
-        TFE_XboxLogf("Paths", "addAbsoluteSearchPath %s", fullPath);
+        if (s_verbosePathLog) { TFE_XboxLogf("Paths", "addAbsoluteSearchPath %s", fullPath); }
     }
 
     void addLocalArchiveToFront(Archive* archive)
     {
         s_localArchives.insert(s_localArchives.begin(), archive);
-        TFE_XboxLogf("Paths", "addLocalArchiveToFront archive=%p count=%u", archive, (u32)s_localArchives.size());
+        if (s_verbosePathLog) { TFE_XboxLogf("Paths", "addLocalArchiveToFront archive=%p count=%u", archive, (u32)s_localArchives.size()); }
     }
 
     void removeFirstArchive()
     {
-        TFE_XboxLogf("Paths", "removeFirstArchive countBefore=%u", (u32)s_localArchives.size());
+        if (s_verbosePathLog) { TFE_XboxLogf("Paths", "removeFirstArchive countBefore=%u", (u32)s_localArchives.size()); }
+        if (s_localArchives.empty()) { return; }
         s_localArchives.erase(s_localArchives.begin());
     }
 
     void addLocalArchive(Archive* archive)
     {
         s_localArchives.push_back(archive);
-        TFE_XboxLogf("Paths", "addLocalArchive archive=%p count=%u", archive, (u32)s_localArchives.size());
+        if (s_verbosePathLog) { TFE_XboxLogf("Paths", "addLocalArchive archive=%p count=%u", archive, (u32)s_localArchives.size()); }
     }
 
     void removeLastArchive()
     {
-        TFE_XboxLogf("Paths", "removeLastArchive countBefore=%u", (u32)s_localArchives.size());
+        if (s_verbosePathLog) { TFE_XboxLogf("Paths", "removeLastArchive countBefore=%u", (u32)s_localArchives.size()); }
+        if (s_localArchives.empty()) { return; }
         s_localArchives.pop_back();
     }
 
@@ -281,9 +287,9 @@ namespace TFE_Paths
 
         // Search for any filemappings.
         const size_t mappingCount  = s_fileMappings.size();
-        const FileMapping* mapping = &s_fileMappings[0];
-        for (size_t i = 0; i < mappingCount; i++, mapping++)
+        for (size_t i = 0; i < mappingCount; i++)
         {
+            const FileMapping* mapping = &s_fileMappings[i];
             if (mapping->fileName[0] == tolower(fileName[0]) &&
                 strcasecmp(mapping->fileName.c_str(), fileName) == 0)
             {
@@ -294,9 +300,9 @@ namespace TFE_Paths
 
         // Search in the local search paths before local archives.
         const size_t pathCount = s_searchPaths.size();
-        const std::string* localPath = &s_searchPaths[0];
-        for (size_t i = 0; i < pathCount; i++, localPath++)
+        for (size_t i = 0; i < pathCount; i++)
         {
+            const std::string* localPath = &s_searchPaths[i];
             char fullName[TFE_MAX_PATH];
             sprintf(fullName, "%s%s", localPath->c_str(), fileName);
 
@@ -310,15 +316,15 @@ namespace TFE_Paths
 
         // Then archives.
         const size_t archiveCount = s_localArchives.size();
-        Archive** archive = &s_localArchives[0];
-        for (size_t i = 0; i < archiveCount; i++, archive++)
+        for (size_t i = 0; i < archiveCount; i++)
         {
-            if (!(*archive)) { continue; }
+            Archive* archive = s_localArchives[i];
+            if (!archive) { continue; }
 
-            u32 index = (*archive)->getFileIndex(fileName);
+            u32 index = archive->getFileIndex(fileName);
             if (index != INVALID_FILE)
             {
-                outPath->archive = *archive;
+                outPath->archive = archive;
                 outPath->index = index;
                 return true;
             }
@@ -326,6 +332,38 @@ namespace TFE_Paths
 
         return false;
     }
+
+#ifdef _XBOX
+    void getResourceCounts(u32* searchPathCount, u32* localArchiveCount, u32* fileMappingCount)
+    {
+        if (searchPathCount) { *searchPathCount = (u32)s_searchPaths.size(); }
+        if (localArchiveCount) { *localArchiveCount = (u32)s_localArchives.size(); }
+        if (fileMappingCount) { *fileMappingCount = (u32)s_fileMappings.size(); }
+    }
+
+    void debugLogState(const char* tag)
+    {
+        if (!s_verbosePathLog) { return; }
+        TFE_XboxLogf("Paths", "STATE tag='%s' program='%s' source='%s' saves='%s'",
+            tag ? tag : "", s_paths[PATH_PROGRAM], s_paths[PATH_SOURCE_DATA], s_paths[PATH_USER_DOCUMENTS]);
+        TFE_XboxLogf("Paths", "STATE tag='%s' searchPaths=%u archives=%u mappings=%u",
+            tag ? tag : "", (u32)s_searchPaths.size(), (u32)s_localArchives.size(), (u32)s_fileMappings.size());
+
+        for (size_t i = 0; i < s_searchPaths.size(); i++)
+        {
+            TFE_XboxLogf("Paths", "STATE search[%u]='%s'", (u32)i, s_searchPaths[i].c_str());
+        }
+        for (size_t i = 0; i < s_localArchives.size(); i++)
+        {
+            TFE_XboxLogf("Paths", "STATE archive[%u]=%p", (u32)i, s_localArchives[i]);
+        }
+        for (size_t i = 0; i < s_fileMappings.size(); i++)
+        {
+            TFE_XboxLogf("Paths", "STATE mapping[%u] '%s' -> '%s'",
+                (u32)i, s_fileMappings[i].fileName.c_str(), s_fileMappings[i].realPath.c_str());
+        }
+    }
+#endif
 
     void getAllFilesFromSearchPaths(const char* subdirectory, const char* ext, FileList& allFiles)
     {

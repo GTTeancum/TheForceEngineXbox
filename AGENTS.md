@@ -29,6 +29,8 @@ Port **The Force Engine** (TFE, a Dark Forces remake built on the JEDI engine) t
 
 **Critical:** The vcproj uses Platform `Win32` — matching the OpenJKDF2_Xbox.vcproj reference. Do NOT use `Xbox` as the platform name.
 
+**Hardware-first rule:** Treat every Xbox edit as original-hardware code, not emulator code. Prefer deterministic resource lifetimes, bounded caches, explicit teardown before mode changes, and conservative disk/memory assumptions. Transition paths between menus, cutscenes, levels, mods, saves, and audio are high-risk and should be audited as a full handoff, not patched one symptom at a time.
+
 ---
 
 ## Project File

@@ -35,14 +35,35 @@ namespace TFE_DarkForces
 	enum LandruConstants
 	{
 		LANDRU_MEMORY_BASE   = 4 * 1024 * 1024, // 4 MB
-		CUTSCENE_MEMORY_BASE = 8 * 1024 * 1024, // 8 MB
+		// Original Xbox hardware can fail one large contiguous 8 MB allocation
+		// after game startup. The region allocator grows with more blocks, so
+		// use smaller blocks while preserving the cutscene arena behavior.
+		CUTSCENE_MEMORY_BASE = 2 * 1024 * 1024, // 2 MB
 	};
+
+	static MemoryRegion* createLandruRegion(const char* name, u32 preferredSize)
+	{
+		MemoryRegion* region = TFE_Memory::region_create(name, preferredSize);
+		if (region) { return region; }
+
+#ifdef _XBOX
+		u32 fallbackSize = preferredSize >> 1;
+		while (!region && fallbackSize >= 256 * 1024)
+		{
+			TFE_System::logWrite(LOG_WARNING, "Landru", "region '%s' retry with %u byte blocks", name, fallbackSize);
+			region = TFE_Memory::region_create(name, fallbackSize);
+			fallbackSize >>= 1;
+		}
+#endif
+		return region;
+	}
 	
 	void lsystem_init()
 	{
 		if (s_lsystemInit) { return; }
-		s_lmem = TFE_Memory::region_create("Landru", LANDRU_MEMORY_BASE);
-		s_lscene = TFE_Memory::region_create("Cutscene", CUTSCENE_MEMORY_BASE);
+		s_lmem = createLandruRegion("Landru", LANDRU_MEMORY_BASE);
+		s_lscene = createLandruRegion("Cutscene", CUTSCENE_MEMORY_BASE);
+		TFE_System::logWrite(LOG_MSG, "Landru", "regions persistent=%p cutscene=%p", s_lmem, s_lscene);
 		lsystem_setAllocator(LALLOC_PERSISTENT);
 
 		s_lsystemInit = JTRUE;
@@ -101,18 +122,34 @@ namespace TFE_DarkForces
 		lactorDelt_destroy();
 		lactor_destroy();
 
-		TFE_Memory::region_destroy(s_lmem);
-		TFE_Memory::region_destroy(s_lscene);
+		if (s_lmem) { TFE_Memory::region_destroy(s_lmem); }
+		if (s_lscene) { TFE_Memory::region_destroy(s_lscene); }
+		s_archive.close();
+		s_soundFx.close();
+		s_lmem = nullptr;
+		s_lscene = nullptr;
+		s_alloc = nullptr;
 	}
 
 	void lsystem_setAllocator(LAllocator alloc)
 	{
-		s_alloc = (alloc == LALLOC_PERSISTENT) ? s_lmem : s_lscene;
+		MemoryRegion* region = (alloc == LALLOC_PERSISTENT) ? s_lmem : s_lscene;
+		if (!region)
+		{
+			TFE_System::logWrite(LOG_ERROR, "Landru", "allocator %d unavailable; using persistent=%p cutscene=%p", alloc, s_lmem, s_lscene);
+			region = s_lmem ? s_lmem : s_lscene;
+		}
+		s_alloc = region;
 	}
 
 	void lsystem_clearAllocator(LAllocator alloc)
 	{
 		MemoryRegion* region = (alloc == LALLOC_PERSISTENT) ? s_lmem : s_lscene;
+		if (!region)
+		{
+			TFE_System::logWrite(LOG_ERROR, "Landru", "clear allocator %d skipped; persistent=%p cutscene=%p", alloc, s_lmem, s_lscene);
+			return;
+		}
 		TFE_Memory::region_clear(region);
 	}
 }  // namespace TFE_DarkForces

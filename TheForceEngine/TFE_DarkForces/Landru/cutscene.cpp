@@ -1,6 +1,7 @@
 #include "cutscene.h"
 #include "cutscene_player.h"
 #include "lsystem.h"
+#include "lmusic.h"
 #include "lcanvas.h"
 #include <TFE_Game/igame.h>
 #include <TFE_System/system.h>
@@ -76,6 +77,19 @@ namespace TFE_DarkForces
 
 		s_playing = cutscenePlayer_update();
 		return s_playing;
+	}
+
+	void cutscene_shutdown()
+	{
+		if (s_playing)
+		{
+			cutscenePlayer_stop();
+		}
+		lmusic_stop();
+		lsystem_clearAllocator(LALLOC_CUTSCENE);
+		lsystem_setAllocator(LALLOC_PERSISTENT);
+		s_playing = JFALSE;
+		s_playSeq = nullptr;
 	}
 
 	void cutscene_enable(s32 enable)

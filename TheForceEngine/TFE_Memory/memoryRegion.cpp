@@ -234,11 +234,23 @@ namespace TFE_Memory
 	void* region_alloc(MemoryRegion* region, u64 size)
 	{
 		assert(region);
+		if (!region)
+		{
+			TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Failed to allocate %u bytes: region is null.", (u32)size);
+			return nullptr;
+		}
 		if (size == 0) { return nullptr; }
 
+		const u64 requestedSize = size;
 		size = alloc_align(size + sizeof(RegionAllocHeader));
 		assert(size >= 24);	// at least 24 bytes is required to hold the free header.
-		if (size > region->blockSize) { return nullptr; }
+		if (size > region->blockSize)
+		{
+			TFE_System::logWrite(LOG_ERROR, "MemoryRegion",
+				"Allocation of %u bytes in region '%s' exceeds block size %u.",
+				(u32)requestedSize, region->name, (u32)region->blockSize);
+			return nullptr;
+		}
 		
 		for (s32 i = 0; i < region->blockCount; i++)
 		{
@@ -279,18 +291,30 @@ namespace TFE_Memory
 		}
 		
 		// We are all out of memory...
-		TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Failed to allocate %u bytes in region '%s'.", size, region->name);
+		TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Failed to allocate %u bytes in region '%s'.", (u32)size, region->name);
 		return nullptr;
 	}
 
 	void* region_realloc(MemoryRegion* region, void* ptr, u64 size)
 	{
 		assert(region);
+		if (!region)
+		{
+			TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Failed to reallocate %u bytes: region is null.", (u32)size);
+			return nullptr;
+		}
 		if (!ptr) { return region_alloc(region, size); }
 		if (size == 0) { return nullptr; }
 
+		const u64 requestedSize = size;
 		size = alloc_align(size + sizeof(RegionAllocHeader));
-		if (size > region->blockSize) { return nullptr; }
+		if (size > region->blockSize)
+		{
+			TFE_System::logWrite(LOG_ERROR, "MemoryRegion",
+				"Reallocation of %u bytes in region '%s' exceeds block size %u.",
+				(u32)requestedSize, region->name, (u32)region->blockSize);
+			return nullptr;
+		}
 
 		// If the current block is already large enough, skip looping over the memory blocks.
 		RegionAllocHeader* header = (RegionAllocHeader*)((u8*)ptr - sizeof(RegionAllocHeader));

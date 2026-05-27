@@ -11,7 +11,11 @@
 
 #ifdef _XBOX
 #include <xtl.h>
-#define XBOX_AUDIO_LOGF TFE_XboxLogf
+// Keep the real-time audio path quiet on hardware. Log writes contend with
+// the same single CPU that has to feed DirectSound; transition-time logging
+// here showed up as audible menu/level-load stutter on retail Xbox.
+static inline void XboxAudioLogNoop(const char*, const char*, ...) {}
+#define XBOX_AUDIO_LOGF XboxAudioLogNoop
 // Use Win32 CRITICAL_SECTION instead of SDL_mutex on Xbox.
 typedef CRITICAL_SECTION* TFE_Mutex;
 static CRITICAL_SECTION s_critSection;
@@ -138,21 +142,23 @@ namespace TFE_Audio
 			return false;
 		}
 
+		s_mutex = TFE_CreateMutex();
+		if (!s_mutex)
+		{
+			XBOX_AUDIO_LOGF("Audio", "mutex init failed");
+			TFE_System::logWrite(LOG_ERROR, "Audio", "Cannot init audio mutex.");
+			TFE_AudioDevice::destroy();
+			s_nullDevice = true;
+			return false;
+		}
+
 		bool audStream = TFE_AudioDevice::startOutput(audioCallback, NULL, AUDIO_CHANNEL_COUNT, AUDIO_FREQ);
 		if (!audStream)
 		{
 			XBOX_AUDIO_LOGF("Audio", "stream start failed");
 			TFE_System::logWrite(LOG_ERROR, "Audio", "Cannot start audio stream.");
-			s_nullDevice = true;
-			return false;
-		}
-
-		s_mutex = TFE_CreateMutex();
-		if (!s_mutex)
-		{
-			XBOX_AUDIO_LOGF("Audio", "mutex init failed");
-			TFE_System::logWrite(LOG_ERROR, "Audio", "Cannot init SDL_mutex.");
-			TFE_AudioDevice::destroy();
+			TFE_DestroyMutex(s_mutex);
+			s_mutex = NULL;
 			s_nullDevice = true;
 			return false;
 		}

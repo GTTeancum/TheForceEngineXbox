@@ -61,20 +61,40 @@ namespace TFE_Memory
 	{
 		assert(file && region);
 		ChunkedArray* arr = (ChunkedArray*)region_alloc(region, sizeof(ChunkedArray));
+		if (!arr)
+		{
+			TFE_System::logWrite(LOG_ERROR, "ChunkedArray", "restore failed to allocate header");
+			return nullptr;
+		}
 		memset(arr, 0, sizeof(ChunkedArray));
 
 		size_t size = size_t(&arr->chunks) - sizeof(arr);
 		file->readBuffer(arr, (u32)size);
 
 		arr->chunks = (u8**)region_realloc(region, arr->chunks, sizeof(u8*) * arr->chunkCount);
+		if (!arr->chunks && arr->chunkCount)
+		{
+			TFE_System::logWrite(LOG_ERROR, "ChunkedArray", "restore failed to allocate chunk table count=%u", arr->chunkCount);
+			return nullptr;
+		}
 		const u32 chunkAllocSize = arr->elemPerChunk * arr->elemSize;
 		for (u32 i = 0; i < arr->chunkCount; i++)
 		{
 			arr->chunks[i] = (u8*)region_alloc(region, chunkAllocSize);
+			if (!arr->chunks[i])
+			{
+				TFE_System::logWrite(LOG_ERROR, "ChunkedArray", "restore failed to allocate chunk %u bytes=%u", i, chunkAllocSize);
+				return nullptr;
+			}
 			file->read(arr->chunks[i], chunkAllocSize);
 		}
 
 		arr->freeSlots = (u8**)region_realloc(region, arr->freeSlots, sizeof(u8**) * arr->freeSlotCapacity);
+		if (!arr->freeSlots && arr->freeSlotCapacity)
+		{
+			TFE_System::logWrite(LOG_ERROR, "ChunkedArray", "restore failed to allocate free slot table count=%u", arr->freeSlotCapacity);
+			return nullptr;
+		}
 		for (u32 i = 0; i < arr->freeSlotCount; i++)
 		{
 			s32 freeSlotIndex;
@@ -94,6 +114,12 @@ namespace TFE_Memory
 	ChunkedArray* createChunkedArray(u32 elemSize, u32 elemPerChunk, u32 initChunkCount, MemoryRegion* region)
 	{
 		ChunkedArray* arr = (ChunkedArray*)region_alloc(region, sizeof(ChunkedArray));
+		if (!arr)
+		{
+			TFE_System::logWrite(LOG_ERROR, "ChunkedArray", "create failed header elemSize=%u elemPerChunk=%u initChunks=%u",
+				elemSize, elemPerChunk, initChunkCount);
+			return nullptr;
+		}
 		memset(arr, 0, sizeof(ChunkedArray));
 		
 		arr->region = region;
@@ -103,6 +129,11 @@ namespace TFE_Memory
 		arr->elemPerChunk = elemPerChunk;
 		arr->chunkCount = initChunkCount;
 		arr->chunks = (u8**)region_realloc(region, arr->chunks, sizeof(u8*) * initChunkCount);
+		if (!arr->chunks && initChunkCount)
+		{
+			TFE_System::logWrite(LOG_ERROR, "ChunkedArray", "create failed chunk table initChunks=%u", initChunkCount);
+			return nullptr;
+		}
 		
 		arr->freeSlotCount = 0;
 		arr->freeSlotCapacity = 0;
@@ -112,6 +143,11 @@ namespace TFE_Memory
 		for (u32 i = 0; i < initChunkCount; i++)
 		{
 			arr->chunks[i] = (u8*)region_alloc(region, chunkAllocSize);
+			if (!arr->chunks[i])
+			{
+				TFE_System::logWrite(LOG_ERROR, "ChunkedArray", "create failed chunk %u bytes=%u", i, chunkAllocSize);
+				return nullptr;
+			}
 		}
 
 		return arr;
@@ -132,6 +168,7 @@ namespace TFE_Memory
 
 	void* allocFromChunkedArray(ChunkedArray* arr)
 	{
+		if (!arr) { return nullptr; }
 		if (arr->freeSlotCount)
 		{
 			arr->freeSlotCount--;
@@ -144,12 +181,25 @@ namespace TFE_Memory
 		const u32 newChunkCount = newChunkIndex + 1;
 		if (newChunkCount > arr->chunkCount)
 		{
-			arr->chunks = (u8**)region_realloc(arr->region, arr->chunks, sizeof(u8*) * newChunkCount);
+			u8** newChunks = (u8**)region_realloc(arr->region, arr->chunks, sizeof(u8*) * newChunkCount);
+			if (!newChunks)
+			{
+				arr->elemCount--;
+				TFE_System::logWrite(LOG_ERROR, "ChunkedArray", "grow failed chunk table newCount=%u", newChunkCount);
+				return nullptr;
+			}
+			arr->chunks = newChunks;
 
 			const u32 chunkAllocSize = arr->elemPerChunk * arr->elemSize;
 			for (u32 i = arr->chunkCount; i < newChunkCount; i++)
 			{
 				arr->chunks[i] = (u8*)region_alloc(arr->region, chunkAllocSize);
+				if (!arr->chunks[i])
+				{
+					arr->elemCount--;
+					TFE_System::logWrite(LOG_ERROR, "ChunkedArray", "grow failed chunk %u bytes=%u", i, chunkAllocSize);
+					return nullptr;
+				}
 			}
 			arr->chunkCount = newChunkCount;
 		}
@@ -222,10 +272,18 @@ namespace TFE_Memory
 
 	void addFreeSlot(ChunkedArray* arr, u8* ptr)
 	{
+		if (!arr || !ptr) { return; }
 		if (arr->freeSlotCount + 1 >= arr->freeSlotCapacity)
 		{
 			arr->freeSlotCapacity += FREE_SLOT_STEP;
-			arr->freeSlots = (u8**)region_realloc(arr->region, arr->freeSlots, sizeof(u8*) * arr->freeSlotCapacity);
+			u8** newFreeSlots = (u8**)region_realloc(arr->region, arr->freeSlots, sizeof(u8*) * arr->freeSlotCapacity);
+			if (!newFreeSlots)
+			{
+				arr->freeSlotCapacity -= FREE_SLOT_STEP;
+				TFE_System::logWrite(LOG_ERROR, "ChunkedArray", "free slot table grow failed capacity=%u", arr->freeSlotCapacity + FREE_SLOT_STEP);
+				return;
+			}
+			arr->freeSlots = newFreeSlots;
 		}
 		arr->freeSlots[arr->freeSlotCount] = ptr;
 		arr->freeSlotCount++;

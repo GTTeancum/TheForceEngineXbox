@@ -24,8 +24,8 @@ namespace TFE_AudioDevice
     const OutputDeviceInfo* getOutputDeviceList(s32& count, s32& curOutput);
 
 #ifdef _XBOX
-    // Xbox uses a polled-stream model (no audio thread) - call this once per
-    // main-loop tick to refill the DirectSound ring buffer.
+    // Xbox runs a lightweight DirectSound pump thread. Main-loop calls are
+    // still allowed as a fallback/catch-up path.
     void pump();
 #endif
 }

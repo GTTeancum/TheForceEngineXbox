@@ -135,10 +135,52 @@ namespace TFE_System
 		// Serialize s_tfeMessage
 		for (s32 i = 0; i < TFE_MSG_COUNT; i++)
 		{
-			int len = strlen(s_tfeMessage[i]);
-			SERIALIZE(SavVersionTFEMessages, len, 0);
-			SERIALIZE_BUF(SavVersionTFEMessages, s_tfeMessage[i], len);
-
+			if (serialization_getMode() == SMODE_WRITE)
+			{
+				const char* msg = s_tfeMessage[i] ? s_tfeMessage[i] : "";
+				int len = (int)strlen(msg);
+				SERIALIZE(SavVersionTFEMessages, len, 0);
+				if (len > 0)
+				{
+					stream->writeBuffer(msg, len);
+				}
+			}
+			else if (serialization_getMode() == SMODE_READ)
+			{
+				int len = 0;
+				SERIALIZE(SavVersionTFEMessages, len, 0);
+				free(s_tfeMessage[i]);
+				s_tfeMessage[i] = nullptr;
+				if (len > 0)
+				{
+					s_tfeMessage[i] = (char*)malloc(len + 1);
+					if (s_tfeMessage[i])
+					{
+						stream->readBuffer(s_tfeMessage[i], len);
+						s_tfeMessage[i][len] = 0;
+					}
+					else
+					{
+						char scratch[128];
+						int remaining = len;
+						while (remaining > 0)
+						{
+							const int chunk = remaining < (int)sizeof(scratch) ? remaining : (int)sizeof(scratch);
+							stream->readBuffer(scratch, chunk);
+							remaining -= chunk;
+						}
+						s_tfeMessage[i] = strdup("");
+					}
+				}
+				else
+				{
+					s_tfeMessage[i] = strdup("");
+				}
+			}
+		}
+		if (serialization_getMode() == SMODE_READ)
+		{
+			s_messagesLoaded = true;
 		}
 	}
 }

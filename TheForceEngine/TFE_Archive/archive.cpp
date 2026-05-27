@@ -96,16 +96,50 @@ void Archive::freeArchive(Archive* archive)
 	if (!archive) { return; }
 
 	const ArchiveType type = archive->m_type;
-	ArchiveMap::iterator iArchive = s_archives[type].find(archive->m_name);
-	if (iArchive != s_archives[archive->m_type].end())
+	if (type < 0 || type >= ARCHIVE_COUNT)
 	{
-		Archive* foundArchive = iArchive->second;
-		assert(foundArchive == archive);
-		foundArchive->close();
-		delete foundArchive;
-
-		s_archives[type].erase(iArchive);
+		archive->close();
+		delete archive;
+		return;
 	}
+
+	ArchiveMap::iterator iArchive = s_archives[type].begin();
+	for (; iArchive != s_archives[type].end(); ++iArchive)
+	{
+		if (iArchive->second == archive)
+		{
+			archive->close();
+			delete archive;
+			s_archives[type].erase(iArchive);
+			return;
+		}
+	}
+
+	// Older callers pass archives whose map key is the full path, not m_name.
+	// If the pointer is not registered, still close it so transitions do not leak.
+	archive->close();
+	delete archive;
+}
+
+void Archive::deleteCustomArchive(Archive* archive)
+{
+	if (!archive) { return; }
+
+	const ArchiveType type = archive->m_type;
+	if (type >= 0 && type < ARCHIVE_COUNT)
+	{
+		ArchiveMap::iterator iArchive = s_archives[type].begin();
+		for (; iArchive != s_archives[type].end(); ++iArchive)
+		{
+			if (iArchive->second == archive)
+			{
+				s_archives[type].erase(iArchive);
+				break;
+			}
+		}
+	}
+	archive->close();
+	delete archive;
 }
 
 void Archive::freeAllArchives()
@@ -122,6 +156,23 @@ void Archive::freeAllArchives()
 		s_archives[i].clear();
 	}
 }
+
+#ifdef _XBOX
+u32 Archive::getCachedArchiveCount(ArchiveType type)
+{
+	if (type >= 0 && type < ARCHIVE_COUNT)
+	{
+		return (u32)s_archives[type].size();
+	}
+
+	u32 count = 0;
+	for (u32 i = 0; i < ARCHIVE_COUNT; i++)
+	{
+		count += (u32)s_archives[i].size();
+	}
+	return count;
+}
+#endif
 
 Archive* Archive::createCustomArchive(ArchiveType type, const char* path)
 {
@@ -167,16 +218,4 @@ Archive* Archive::createCustomArchive(ArchiveType type, const char* path)
 		(s_archives[type])[path] = archive;
 	}
 	return archive;
-}
-
-void Archive::deleteCustomArchive(Archive* archive)
-{
-	if (!archive) { return; }
-
-	ArchiveMap::iterator iArchive = s_archives[archive->m_type].find(archive->m_name);
-	if (iArchive != s_archives[archive->m_type].end())
-	{
-		s_archives->erase(iArchive);
-	}
-	delete archive;
 }

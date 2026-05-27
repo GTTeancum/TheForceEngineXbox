@@ -82,7 +82,11 @@ namespace TFE_Jedi
 		TASK_PREALLOCATED_CHUNKS = 1,
 
 		TASK_STACK_SIZE = 32 * 1024,	// 32KB of stack memory.
+#ifdef _XBOX
+		TASK_STACK_CHUNK_SIZE = 16,		// 512KB per growth block; avoid 2MB contiguous slabs on OG Xbox.
+#else
 		TASK_STACK_CHUNK_SIZE = 64,		// 2MB of memory for 64 tasks with stack memory.
+#endif
 	};
 
 	ChunkedArray* s_tasks = nullptr;

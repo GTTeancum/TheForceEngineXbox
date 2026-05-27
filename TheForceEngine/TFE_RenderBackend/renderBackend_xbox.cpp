@@ -84,6 +84,9 @@ namespace TFE_RenderBackend
     static IDirect3DTexture8* s_vdispTex   = NULL;   // Virtual display texture (XRGB)
     static IDirect3DSurface8* s_vdispSurf  = NULL;   // Level-0 surface of s_vdispTex
     static IDirect3DTexture8* s_startTex   = NULL;   // 640x480 start screen texture
+    static bool               s_vdispHasAlpha = false;
+    static u32                s_vdispTexWidth = 0;
+    static u32                s_vdispTexHeight = 0;
 
     static u32 s_vdispWidth  = 320;
     static u32 s_vdispHeight = 200;
@@ -136,8 +139,11 @@ namespace TFE_RenderBackend
     static RECT s_destRect;
 
     // Scratch expand buffer (palette -> XRGB).
-    // Max virtual display size: 1280x960 to be safe. ~5MB.
-    #define MAX_VDISP_PIXELS (1280 * 960)
+    // Xbox virtual displays are capped to the fixed 640x480 output. Keeping
+    // these at the old "safe" 1280x960 size reserved almost 10 MB across the
+    // expand/capture buffers, which starves retail hardware before Landru can
+    // allocate a display texture for the boot intro.
+    #define MAX_VDISP_PIXELS (XBOX_OUTPUT_WIDTH * XBOX_OUTPUT_HEIGHT)
     static u32 s_expandBuf[MAX_VDISP_PIXELS];
     static u32 s_captureBuf[MAX_VDISP_PIXELS];
     static bool s_captureBufValid = false;
@@ -590,6 +596,12 @@ namespace TFE_RenderBackend
     static void wheelDrawTextCenterScaled(const char* text, s32 centerX, s32 baselineY, u32 color, s32 num, s32 den)
     {
         const s32 x = centerX - wheelTextWidthScaled(text, num, den) / 2;
+        wheelDrawTextScaled(text, x, baselineY, color, num, den);
+    }
+
+    static void wheelDrawTextRightScaled(const char* text, s32 rightX, s32 baselineY, u32 color, s32 num, s32 den)
+    {
+        const s32 x = rightX - wheelTextWidthScaled(text, num, den);
         wheelDrawTextScaled(text, x, baselineY, color, num, den);
     }
 
@@ -1166,9 +1178,9 @@ namespace TFE_RenderBackend
             dukeDrawIconTo(s_expandBuf, width, height, XDB_LSTICK_SMALL, keyX - 1, y0 - 4, 21, 0xFFFFFFFFu);
             wheelDrawTextScaled("PAN", textX, y0, 0xFFE0D8B8u, 13, 20);
             dukeDrawIconTo(s_expandBuf, width, height, XDB_A, keyX, y0 + step - 3, 18, 0xFFFFFFFFu);
-            wheelDrawTextScaled("ZOOM OUT", textX, y0 + step, 0xFF33D033u, 13, 20);
+            wheelDrawTextScaled("ZOOM IN", textX, y0 + step, 0xFF33D033u, 13, 20);
             dukeDrawIconTo(s_expandBuf, width, height, XDB_X, keyX, y0 + step * 2 - 3, 18, 0xFFFFFFFFu);
-            wheelDrawTextScaled("ZOOM IN", textX, y0 + step * 2, 0xFF64A8FFu, 13, 20);
+            wheelDrawTextScaled("ZOOM OUT", textX, y0 + step * 2, 0xFF64A8FFu, 13, 20);
             pdaDrawLayerStackKey(520, 150);
         }
     }
@@ -1442,6 +1454,8 @@ namespace TFE_RenderBackend
         loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xFF4F4A34u);
         pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 10, panelY + 10, panelW - 20, 84, 0xFF160F08u);
         loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 10, panelY + 10, panelW - 20, 84, 0xFF3F3420u);
+        loadDrawThumb(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+            selectedValid ? selectedMod->imageData : NULL, panelX + 10, panelY + 10, panelW - 20, 84);
         modDrawWrappedText(selectedValid ? selectedMod->description : "Drop ZIP mods into the Mods folder. Use a matching _metadata.txt file for title, author, version, missions, and description.", panelX + 10, panelY + 112, 25, 5, selectedValid ? 0xFFFF3030u : 0xFF8E8B72u);
 
         const s32 valueRightX = panelX + panelW - 12;
@@ -1707,8 +1721,30 @@ namespace TFE_RenderBackend
     // -----------------------------------------------------------------------
     static bool createVdispTexture(u32 width, u32 height)
     {
+        const bool needsAlpha = s_vdispGpuMode;
+        const u32 texWidth = XBOX_OUTPUT_WIDTH;
+        const u32 texHeight = XBOX_OUTPUT_HEIGHT;
+
+        if (width > texWidth || height > texHeight)
+        {
+            RB_LOG_ERROR("Virtual display request too large: logical=%ux%u backing=%ux%u",
+                width, height, texWidth, texHeight);
+            return false;
+        }
+
+        if (s_vdispTex && s_vdispSurf &&
+            s_vdispTexWidth >= width && s_vdispTexHeight >= height &&
+            (!needsAlpha || s_vdispHasAlpha))
+        {
+            RB_LOG_MSG("Virtual display texture reused logical=%ux%u backing=%ux%u alpha=%d",
+                width, height, s_vdispTexWidth, s_vdispTexHeight, s_vdispHasAlpha ? 1 : 0);
+            return true;
+        }
+
         if (s_vdispSurf)  { s_vdispSurf->Release();  s_vdispSurf  = NULL; }
         if (s_vdispTex)   { s_vdispTex->Release();   s_vdispTex   = NULL; }
+        s_vdispTexWidth = 0;
+        s_vdispTexHeight = 0;
 
         // D3DFMT_X8R8G8B8 (0x07) is the SWIZZLED 32-bit format on Xbox; the
         // linear (scanline-major) variant is D3DFMT_LIN_X8R8G8B8 (0x1E). We
@@ -1720,21 +1756,45 @@ namespace TFE_RenderBackend
         // XbConvert.cpp:1105-1132 confirms swizzled vs linear classification.
         // Non-power-of-2 dimensions like 320x200 force linear in any case;
         // making it explicit removes ambiguity.)
-        // A8R8G8B8 (not X8R8G8B8) so Phase 9 HUD overlay can use the
-        // alpha channel for palette-index-0 transparency. In software
-        // mode the alpha is just 0xFF everywhere and looks identical
-        // to the old format.
+        // Allocate a full 640x480 backing texture once and reuse top-left
+        // logical subrects for 320x200 Landru and 640x480 menus/gameplay.
+        // This avoids late texture allocation after Landru/game arenas have
+        // fragmented memory. Prefer alpha so the later GPU HUD overlay path
+        // can also reuse the same surface.
+        s_vdispHasAlpha = true;
+        D3DFORMAT fmt = s_vdispHasAlpha ? D3DFMT_LIN_A8R8G8B8 : D3DFMT_LIN_X8R8G8B8;
         HRESULT hr = s_device->CreateTexture(
-            width, height, 1,
+            texWidth, texHeight, 1,
             0,                      // no render target
-            D3DFMT_LIN_A8R8G8B8,
-            D3DPOOL_MANAGED,
+            fmt,
+            D3DPOOL_DEFAULT,
             &s_vdispTex);
 
         if (FAILED(hr))
         {
-            RB_LOG_ERROR("CreateTexture failed hr=0x%08x", hr);
-            return false;
+            RB_LOG_ERROR("CreateTexture backing=%ux%u logical=%ux%u fmt=0x%08x pool=DEFAULT failed hr=0x%08x",
+                texWidth, texHeight, width, height, fmt, hr);
+            if (s_vdispHasAlpha)
+            {
+                s_vdispHasAlpha = false;
+                fmt = D3DFMT_LIN_X8R8G8B8;
+                hr = s_device->CreateTexture(
+                    texWidth, texHeight, 1,
+                    0,
+                    fmt,
+                    D3DPOOL_DEFAULT,
+                    &s_vdispTex);
+                if (FAILED(hr))
+                {
+                    RB_LOG_ERROR("CreateTexture fallback backing=%ux%u logical=%ux%u fmt=0x%08x pool=DEFAULT failed hr=0x%08x",
+                        texWidth, texHeight, width, height, fmt, hr);
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
         }
 
         hr = s_vdispTex->GetSurfaceLevel(0, &s_vdispSurf);
@@ -1743,10 +1803,15 @@ namespace TFE_RenderBackend
             RB_LOG_ERROR("GetSurfaceLevel failed hr=0x%08x", hr);
             s_vdispTex->Release();
             s_vdispTex = NULL;
+            s_vdispTexWidth = 0;
+            s_vdispTexHeight = 0;
             return false;
         }
 
-        RB_LOG_MSG("Virtual display texture created %ux%u", width, height);
+        s_vdispTexWidth = texWidth;
+        s_vdispTexHeight = texHeight;
+        RB_LOG_MSG("Virtual display texture created logical=%ux%u backing=%ux%u fmt=0x%08x alpha=%d",
+            width, height, texWidth, texHeight, fmt, s_vdispHasAlpha ? 1 : 0);
         return true;
     }
 
@@ -1849,6 +1914,10 @@ namespace TFE_RenderBackend
 
         computeDestRect();
         s_deviceReady = true;
+        if (!createVdispTexture(XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT))
+        {
+            RB_LOG_ERROR("Virtual display prewarm failed");
+        }
         RB_LOG_MSG("D3D8 device created. Output: %dx%d", XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT);
         TFE_XboxLogf("RenderBackend", "device ready dest=%ld,%ld,%ld,%ld",
             s_destRect.left, s_destRect.top, s_destRect.right, s_destRect.bottom);
@@ -1862,6 +1931,9 @@ namespace TFE_RenderBackend
         if (s_startTex)   { s_startTex->Release();   s_startTex   = NULL; }
         if (s_vdispSurf)  { s_vdispSurf->Release();  s_vdispSurf  = NULL; }
         if (s_vdispTex)   { s_vdispTex->Release();   s_vdispTex   = NULL; }
+        s_vdispTexWidth = 0;
+        s_vdispTexHeight = 0;
+        s_vdispHasAlpha = false;
         if (s_device)     { s_device->Release();      s_device     = NULL; }
         if (s_d3d)        { s_d3d->Release();         s_d3d        = NULL; }
         RB_LOG_MSG("destroy");
@@ -2105,7 +2177,8 @@ namespace TFE_RenderBackend
                             | ((src & 0x00FF0000u) >> 16);// src B -> dst B slot
         }
 
-        if (s_paletteCpu[0] != s_lastFirst || s_paletteCpu[1] != s_lastSecond)
+        static const bool s_verbosePaletteLog = false;
+        if (s_verbosePaletteLog && (s_paletteCpu[0] != s_lastFirst || s_paletteCpu[1] != s_lastSecond))
         {
             TFE_XboxLogf("RenderBackend", "palette CHANGED first=0x%08x second=0x%08x",
                 s_paletteCpu[0], s_paletteCpu[1]);
@@ -2207,7 +2280,7 @@ namespace TFE_RenderBackend
 
     static void blitVdispQuad(bool alphaTest)
     {
-        blitTextureQuad(s_vdispTex, s_vdispWidth, s_vdispHeight, alphaTest);
+        blitTextureQuad(s_vdispTex, s_vdispWidth, s_vdispHeight, alphaTest && s_vdispHasAlpha);
     }
 
     void swap(bool blitVirtualDisplay)

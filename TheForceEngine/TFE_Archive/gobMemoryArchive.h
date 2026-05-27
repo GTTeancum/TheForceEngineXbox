@@ -10,13 +10,14 @@
 class GobMemoryArchive : public Archive
 {
 public:
-	GobMemoryArchive() : Archive(ARCHIVE_GOB), m_buffer(nullptr), m_size(0), m_readLoc(0), m_archiveOpen(false), m_curFile(-1) {}
+	GobMemoryArchive() : Archive(ARCHIVE_GOB), m_buffer(nullptr), m_size(0), m_readLoc(0), m_archiveOpen(false), m_ownsBuffer(true), m_curFile(-1) {}
 	~GobMemoryArchive() override;
 
 	// Archive
 	bool create(const char *archivePath) override;
 	bool open(const char *archivePath) override;
 	bool open(const u8* buffer, size_t size);
+	bool openView(const u8* buffer, size_t size);
 	void close() override;
 
 	// File Access
@@ -46,6 +47,7 @@ private:
 	size_t m_size;
 	size_t m_readLoc;
 	bool m_archiveOpen;
+	bool m_ownsBuffer;
 
 	GobArchive::GOB_Header_t* m_header;
 	GobArchive::GOB_Index_t   m_fileList;

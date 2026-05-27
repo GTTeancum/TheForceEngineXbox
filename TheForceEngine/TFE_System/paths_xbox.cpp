@@ -303,8 +303,6 @@ namespace TFE_Paths
     {
         for (int i = 0; i < s_localArchiveCount; i++)
         {
-            if (s_localArchives[i])
-                Archive::freeArchive(s_localArchives[i]);
             s_localArchives[i] = NULL;
         }
         s_localArchiveCount = 0;

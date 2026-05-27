@@ -280,6 +280,11 @@ namespace TFE_Jedi
 		// Process the HD data.
 		texData->scaleFactor = scaleFactor;
 		texData->hdAssetData = (u8*)region_alloc(s_texState.memoryRegion, hdFrameSize * frameCount);
+		if (!texData->hdAssetData)
+		{
+			TFE_System::logWrite(LOG_ERROR, "bitmap_loadHD", "failed to allocate HD texture '%s' bytes=%u", name, (u32)(hdFrameSize * frameCount));
+			return;
+		}
 		memset(texData->hdAssetData, 0, hdFrameSize * frameCount);
 		
 		u8* dstData = texData->hdAssetData;
@@ -353,6 +358,11 @@ namespace TFE_Jedi
 		file.close();
 
 		TextureData* texture = (TextureData*)region_alloc(s_texState.memoryRegion, sizeof(TextureData));
+		if (!texture)
+		{
+			TFE_System::logWrite(LOG_ERROR, "bitmap_load", "failed to allocate texture header '%s'", name ? name : "");
+			return nullptr;
+		}
 		memset(texture, 0, sizeof(TextureData));
 
 		const u8* data = &s_buffer[0];
@@ -399,6 +409,12 @@ namespace TFE_Jedi
 			{
 				texture->dataSize = texture->width * texture->height;
 				texture->image = (u8*)region_alloc(s_texState.memoryRegion, texture->dataSize);
+				if (!texture->image)
+				{
+					TFE_System::logWrite(LOG_ERROR, "bitmap_load", "failed to allocate decompressed image '%s' bytes=%u",
+						name ? name : "", texture->dataSize);
+					return nullptr;
+				}
 
 				const u8* inBuffer = data;
 				data += inSize;
@@ -432,11 +448,23 @@ namespace TFE_Jedi
 			{
 				texture->dataSize = inSize;
 				texture->image = (u8*)region_alloc(s_texState.memoryRegion, texture->dataSize);
+				if (!texture->image)
+				{
+					TFE_System::logWrite(LOG_ERROR, "bitmap_load", "failed to allocate compressed image '%s' bytes=%u",
+						name ? name : "", texture->dataSize);
+					return nullptr;
+				}
 				memcpy(texture->image, data, texture->dataSize);
 				data += texture->dataSize;
 				assert(data <= end);
 
 				texture->columns = (u32*)region_alloc(s_texState.memoryRegion, texture->width * sizeof(u32));
+				if (!texture->columns)
+				{
+					TFE_System::logWrite(LOG_ERROR, "bitmap_load", "failed to allocate columns '%s' width=%u",
+						name ? name : "", (u32)texture->width);
+					return nullptr;
+				}
 				memcpy(texture->columns, data, texture->width * sizeof(u32));
 				data += texture->width * sizeof(u32);
 				assert(data <= end);
@@ -456,6 +484,12 @@ namespace TFE_Jedi
 
 			// Allocate and read the BM image.
 			texture->image = (u8*)region_alloc(s_texState.memoryRegion, texture->dataSize);
+			if (!texture->image)
+			{
+				TFE_System::logWrite(LOG_ERROR, "bitmap_load", "failed to allocate raw image '%s' bytes=%u",
+					name ? name : "", texture->dataSize);
+				return nullptr;
+			}
 			memcpy(texture->image, data, texture->dataSize);
 			data += texture->dataSize;
 			assert(data <= end);
@@ -494,6 +528,11 @@ namespace TFE_Jedi
 	TextureData* bitmap_loadFromMemory(const u8* data, size_t size, u32 decompress)
 	{
 		TextureData* texture = (TextureData*)malloc(sizeof(TextureData));
+		if (!texture)
+		{
+			TFE_System::logWrite(LOG_ERROR, "bitmap_load", "Load From Memory - failed to allocate texture header.");
+			return nullptr;
+		}
 		const u8* fheader = data;
 		data += 3;
 
@@ -531,6 +570,12 @@ namespace TFE_Jedi
 			{
 				texture->dataSize = texture->width * texture->height;
 				texture->image = (u8*)malloc(texture->dataSize);
+				if (!texture->image)
+				{
+					TFE_System::logWrite(LOG_ERROR, "bitmap_load", "Load From Memory - failed to allocate decompressed image bytes=%u.", texture->dataSize);
+					free(texture);
+					return nullptr;
+				}
 
 				const u8* inBuffer = data;
 				data += inSize;
@@ -563,6 +608,12 @@ namespace TFE_Jedi
 			{
 				texture->dataSize = inSize;
 				texture->image = (u8*)malloc(texture->dataSize);
+				if (!texture->image)
+				{
+					TFE_System::logWrite(LOG_ERROR, "bitmap_load", "Load From Memory - failed to allocate compressed image bytes=%u.", texture->dataSize);
+					free(texture);
+					return nullptr;
+				}
 				memcpy(texture->image, data, texture->dataSize);
 				data += texture->dataSize;
 
@@ -570,6 +621,13 @@ namespace TFE_Jedi
 				if (texture->columns)
 				{
 					memcpy(texture->columns, data, texture->width * sizeof(u32));
+				}
+				else
+				{
+					TFE_System::logWrite(LOG_ERROR, "bitmap_load", "Load From Memory - failed to allocate columns width=%u.", (u32)texture->width);
+					free(texture->image);
+					free(texture);
+					return nullptr;
 				}
 				data += texture->width * sizeof(u32);
 			}

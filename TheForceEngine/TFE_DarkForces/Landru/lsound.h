@@ -91,5 +91,5 @@ namespace TFE_DarkForces
 	JBool isSoundKeepable(LSound* sound);
 	void  setSoundName(LSound* sound, u32 type, const char* name);
 
-	u8* readVocFileData(const char* name, u32* size = nullptr);
+	u8* readVocFileData(const char* name, u32* size = nullptr, bool* heapAllocated = nullptr);
 }  // namespace TFE_Jedi

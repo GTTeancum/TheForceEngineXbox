@@ -67,6 +67,7 @@ namespace TFE_RenderBackend
         const char* description;
         s32 missionCount;
         bool hasQuickSave;
+        const u32* imageData;
     };
 
     // Single-vertex layout for untextured colored geometry. Matches

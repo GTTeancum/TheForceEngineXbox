@@ -103,7 +103,7 @@ namespace TFE_InputXbox
     static HANDLE s_hController       = NULL;
     static int    s_openRetryCounter  = 0;   // throttle retries to ~1/sec @ 60fps
     static int    s_pollCounter       = 0;   // total polls since startup
-    static int    s_edgeLogBudget     = 64;  // limit edge-event log spam
+    static int    s_edgeLogBudget     = 0;   // edge-event logs stall hardware menus; enable only while bringing input up.
     static f32    s_lookSensitivity   = 1.0f;
     static f32    s_stickDeadzone     = 0.09f;
 
@@ -115,7 +115,7 @@ namespace TFE_InputXbox
     // On the original Xbox, digital buttons (D-pad, Start, Back, thumbsticks)
     // are bitmask flags in wButtons.  Face buttons (A/B/X/Y) and Black/White
     // are analog values in bAnalogButtons[index].
-    // We map Black -> LeftShoulder and White -> RightShoulder since the
+    // We map White -> LeftShoulder and Black -> RightShoulder since the
     // original Xbox has no shoulder bumpers.
 
     // Digital buttons: bitmask in wButtons.
@@ -148,8 +148,8 @@ namespace TFE_InputXbox
         { XINPUT_GAMEPAD_B,              CONTROLLER_BUTTON_B             },
         { XINPUT_GAMEPAD_X,              CONTROLLER_BUTTON_X             },
         { XINPUT_GAMEPAD_Y,              CONTROLLER_BUTTON_Y             },
-        { XINPUT_GAMEPAD_BLACK,          CONTROLLER_BUTTON_LEFTSHOULDER  },  // Black -> LB
-        { XINPUT_GAMEPAD_WHITE,          CONTROLLER_BUTTON_RIGHTSHOULDER },  // White -> RB
+        { XINPUT_GAMEPAD_WHITE,          CONTROLLER_BUTTON_LEFTSHOULDER  },  // White -> LB
+        { XINPUT_GAMEPAD_BLACK,          CONTROLLER_BUTTON_RIGHTSHOULDER },  // Black -> RB
     };
     static const int c_analogMapCount = sizeof(c_analogMap) / sizeof(c_analogMap[0]);
 

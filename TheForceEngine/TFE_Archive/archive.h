@@ -24,6 +24,9 @@ public:
 	static Archive* getArchive(ArchiveType type, const char* name, const char* path);
 	static void freeArchive(Archive* archive);
 	static void freeAllArchives();
+#ifdef _XBOX
+	static u32 getCachedArchiveCount(ArchiveType type = ARCHIVE_COUNT);
+#endif
 
 	static Archive* createCustomArchive(ArchiveType type, const char* path);
 	static void deleteCustomArchive(Archive* archive);

@@ -15,11 +15,18 @@
 #include <TFE_Jedi/Memory/allocator.h>
 #include <TFE_Jedi/Serialization/serialization.h>
 #include <TFE_ExternalData/weaponExternal.h>
+#include <TFE_System/system.h>
 
 using namespace TFE_Jedi;
 
 namespace TFE_DarkForces
 {
+#ifdef _XBOX
+	static inline void PROJECTILE_LOG(...) {}
+#else
+	#define PROJECTILE_LOG(level, category, fmt, ...) TFE_System::logWrite(level, category, fmt, __VA_ARGS__)
+#endif
+
 	//////////////////////////////////////////////////////////////
 	// Structures and Constants
 	//////////////////////////////////////////////////////////////
@@ -131,32 +138,57 @@ namespace TFE_DarkForces
 	{
 		// TFE: Assets are now listed externally (projectiles.json).
 		TFE_ExternalData::ExternalProjectile* externalProjectiles = TFE_ExternalData::getExternalProjectiles();
+		PROJECTILE_LOG(LOG_MSG, "Projectile", "startup externalProjectiles=%p count=%d", externalProjectiles, PROJ_COUNT);
 		for (u32 p = 0; p < PROJ_COUNT; p++)
 		{
+			const char* type = externalProjectiles[p].type ? externalProjectiles[p].type : "<null>";
+			const char* assetType = externalProjectiles[p].assetType ? externalProjectiles[p].assetType : "";
+			const char* asset = externalProjectiles[p].asset ? externalProjectiles[p].asset : "";
+			const char* cameraSound = externalProjectiles[p].cameraPassSound ? externalProjectiles[p].cameraPassSound : "";
+			const char* reflectSound = externalProjectiles[p].reflectSound ? externalProjectiles[p].reflectSound : "";
+			const char* flightSound = externalProjectiles[p].flightSound ? externalProjectiles[p].flightSound : "";
+			PROJECTILE_LOG(LOG_MSG, "Projectile",
+				"startup[%u] type='%s' assetType='%s' asset='%s' camera='%s' reflect='%s' flight='%s'",
+				p, type, assetType, asset, cameraSound, reflectSound, flightSound);
+
 			// Frame
-			if (strcasecmp(externalProjectiles[p].assetType, "frame") == 0)
+			if (strcasecmp(assetType, "frame") == 0)
 			{
-				s_projectileFrames[p] = TFE_Sprite_Jedi::getFrame(externalProjectiles[p].asset, POOL_GAME);
+				PROJECTILE_LOG(LOG_MSG, "Projectile", "startup[%u] load frame begin '%s'", p, asset);
+				s_projectileFrames[p] = TFE_Sprite_Jedi::getFrame(asset, POOL_GAME);
+				PROJECTILE_LOG(LOG_MSG, "Projectile", "startup[%u] load frame end %p", p, s_projectileFrames[p]);
 			}
 
 			// Wax
-			if (strcasecmp(externalProjectiles[p].assetType, "sprite") == 0)
+			if (strcasecmp(assetType, "sprite") == 0)
 			{
-				s_projectileWaxes[p] = TFE_Sprite_Jedi::getWax(externalProjectiles[p].asset, POOL_GAME);
+				PROJECTILE_LOG(LOG_MSG, "Projectile", "startup[%u] load sprite begin '%s'", p, asset);
+				s_projectileWaxes[p] = TFE_Sprite_Jedi::getWax(asset, POOL_GAME);
+				PROJECTILE_LOG(LOG_MSG, "Projectile", "startup[%u] load sprite end %p", p, s_projectileWaxes[p]);
 			}
 
 			// 3D model
-			if (strcasecmp(externalProjectiles[p].assetType, "3d") == 0)
+			if (strcasecmp(assetType, "3d") == 0)
 			{
-				s_projectileModels[p] = TFE_Model_Jedi::get(externalProjectiles[p].asset, POOL_GAME);
+				PROJECTILE_LOG(LOG_MSG, "Projectile", "startup[%u] load model begin '%s'", p, asset);
+				s_projectileModels[p] = TFE_Model_Jedi::get(asset, POOL_GAME);
+				PROJECTILE_LOG(LOG_MSG, "Projectile", "startup[%u] load model end %p", p, s_projectileModels[p]);
 			}
 
 			// Sounds
-			s_projectileCameraSnd[p] = sound_load(externalProjectiles[p].cameraPassSound, SOUND_PRIORITY_LOW3);
-			s_projectileReflectSnd[p] = sound_load(externalProjectiles[p].reflectSound, SOUND_PRIORITY_LOW1);
-			s_projectileFlightSnd[p] = sound_load(externalProjectiles[p].flightSound, SOUND_PRIORITY_LOW3);
+			PROJECTILE_LOG(LOG_MSG, "Projectile", "startup[%u] load camera sound begin '%s'", p, cameraSound);
+			s_projectileCameraSnd[p] = sound_load(cameraSound, SOUND_PRIORITY_LOW3);
+			PROJECTILE_LOG(LOG_MSG, "Projectile", "startup[%u] load camera sound end %I64d", p, s_projectileCameraSnd[p]);
+			PROJECTILE_LOG(LOG_MSG, "Projectile", "startup[%u] load reflect sound begin '%s'", p, reflectSound);
+			s_projectileReflectSnd[p] = sound_load(reflectSound, SOUND_PRIORITY_LOW1);
+			PROJECTILE_LOG(LOG_MSG, "Projectile", "startup[%u] load reflect sound end %I64d", p, s_projectileReflectSnd[p]);
+			PROJECTILE_LOG(LOG_MSG, "Projectile", "startup[%u] load flight sound begin '%s'", p, flightSound);
+			s_projectileFlightSnd[p] = sound_load(flightSound, SOUND_PRIORITY_LOW3);
+			PROJECTILE_LOG(LOG_MSG, "Projectile", "startup[%u] load flight sound end %I64d", p, s_projectileFlightSnd[p]);
 		}
+		PROJECTILE_LOG(LOG_MSG, "Projectile", "startup load landmine trigger begin");
 		s_landMineTriggerSnd     = sound_load("beep-10.voc",  SOUND_PRIORITY_HIGH3);		// still used!
+		PROJECTILE_LOG(LOG_MSG, "Projectile", "startup load landmine trigger end %I64d", s_landMineTriggerSnd);
 	}
 
 	void projectile_clearState()

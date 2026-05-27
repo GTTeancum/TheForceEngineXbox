@@ -48,6 +48,9 @@ using namespace TFE_Input;
 
 namespace TFE_DarkForces
 {
+#ifdef _XBOX
+	void xboxMaybeRunPendingMissionCompleteAutosave();
+#endif
 	// Show the loading screen for at least 1 second.
 	#define MIN_LOAD_TIME 145
 
@@ -464,18 +467,31 @@ namespace TFE_DarkForces
 
 			if (!s_loadingFromSave)
 			{
+#ifdef _XBOX
+				TFE_System::logWrite(LOG_MSG, "Mission", "mission_startTask load-start begin");
+#endif
 				s_missionMode = MISSION_MODE_LOAD_START;
 				mission_setupTasks();
 				displayLoadingScreen();
+#ifdef _XBOX
+				TFE_System::logWrite(LOG_MSG, "Mission", "mission_startTask before initial yield");
+#endif
 
 				// Add a yield here, so the loading screen is shown immediately.
 				task_yield(TASK_NO_DELAY);
 				s_loadingScreenStart = s_curTick;
 				{
 					const char* levelName = agent_getLevelName();
+#ifdef _XBOX
+					TFE_System::logWrite(LOG_MSG, "Mission", "level_load begin level='%s' difficulty=%d",
+						levelName ? levelName : "", (s32)s_agentData[s_agentId].difficulty);
+#endif
 					// For now always load medium difficulty since it cannot be selected.
 					if (level_load(levelName, s_agentData[s_agentId].difficulty))
 					{
+#ifdef _XBOX
+						TFE_System::logWrite(LOG_MSG, "Mission", "level_load success level='%s'", levelName ? levelName : "");
+#endif
 						setScreenBrightness(ONE_16);
 						setScreenFxLevels(0, 0, 0);
 						setLuminanceMask(0, 0, 0);
@@ -494,6 +510,12 @@ namespace TFE_DarkForces
 
 						reticle_enable(true);
 					}
+#ifdef _XBOX
+					else
+					{
+						TFE_System::logWrite(LOG_ERROR, "Mission", "level_load failed level='%s'", levelName ? levelName : "");
+					}
+#endif
 					s_flatLighting = JFALSE;
 					// Note: I am not sure why this is there but it overrides all player settings
 					// By default the player load disables night vision so it won't carry over from previous maps.
@@ -803,6 +825,9 @@ namespace TFE_DarkForces
 			// vgaSwapBuffers() in the DOS code.
 			TFE_Jedi::endRender();
 			vfb_swap();
+#ifdef _XBOX
+			xboxMaybeRunPendingMissionCompleteAutosave();
+#endif
 
 			// Pump tasks and look for any with a different ID.
 			do

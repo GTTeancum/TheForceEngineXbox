@@ -57,6 +57,9 @@ namespace TFE_Jedi
 	JBool level_load(const char* levelName, u8 difficulty)
 	{
 		if (!levelName) { return JFALSE; }
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "Level", "level_load begin level='%s' difficulty=%d", levelName, (s32)difficulty);
+#endif
 
 		// Clear just in case.
 		for (s32 i = 0; i < NUM_COMPLETE; i++)
@@ -75,13 +78,36 @@ namespace TFE_Jedi
 		loadLevelScript();
 
 		// Load level data.
-		if (!level_loadGeometry(levelName)) { return JFALSE; }
+		if (!level_loadGeometry(levelName))
+		{
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_ERROR, "Level", "level_loadGeometry failed level='%s'", levelName);
+#endif
+			return JFALSE;
+		}
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "Level", "level_loadGeometry done level='%s' sectors=%u textures=%u",
+			levelName, s_levelState.sectorCount, s_levelState.textureCount);
+#endif
 		level_loadObjects(levelName, difficulty);
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "Level", "level_loadObjects done level='%s'", levelName);
+#endif
 		inf_load(levelName);
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "Level", "inf_load done level='%s'", levelName);
+#endif
 		level_loadGoals(levelName);
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "Level", "level_loadGoals done level='%s' secretCount=%u minLayer=%d maxLayer=%d",
+			levelName, s_levelState.secretCount, s_levelState.minLayer, s_levelState.maxLayer);
+#endif
 
 		// TFE - Level Script Level Start
 		startLevelScript(levelName);
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "Level", "level_load end level='%s'", levelName);
+#endif
 
 		return JTRUE;
 	}

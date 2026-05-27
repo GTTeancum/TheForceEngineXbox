@@ -366,6 +366,12 @@ if not exist "%~dp0build\xbox\release\default.xbe" (
     exit /b 1
 )
 
+REM Copy dashboard assets beside the XBE. patchxbe.py embeds these into the
+REM XBE, but some replacement dashboards also look for title-level files next
+REM to default.xbe.
+copy /y "%~dp0TheForceEngine\XboxAssets\titleimage.xbx" "%~dp0build\xbox\release\TitleImage.xbx" >nul
+copy /y "%~dp0TheForceEngine\XboxAssets\saveimage.xbx" "%~dp0build\xbox\release\SaveImage.xbx" >nul
+
 echo.
 echo ============================================================
 echo  BUILD SUCCEEDED

@@ -5,7 +5,12 @@
 class ZipArchive : public Archive
 {
 public:
-	ZipArchive() : Archive(ARCHIVE_ZIP), m_entryCount(0), m_curFile(INVALID_FILE), m_entries(nullptr), m_fileHandle(nullptr) {}
+	ZipArchive() : Archive(ARCHIVE_ZIP), m_entryCount(0), m_curFile(INVALID_FILE), m_entries(nullptr), m_fileHandle(nullptr)
+#ifdef _XBOX
+		, m_zipBuffer(nullptr), m_zipBufferSize(0), m_tempBuffer(nullptr), m_tempBufferSize(0)
+#endif
+		, m_entryRead(false)
+	{}
 	~ZipArchive() override;
 
 	// Archive

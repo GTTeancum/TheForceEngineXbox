@@ -174,8 +174,14 @@ namespace TFE_Settings
 
 	void shutdown()
 	{
+#ifdef _XBOX
+		// Xbox settings are baked in by main_xbox.cpp and the in-game options
+		// screen only affects runtime state. Do not emit settings.ini on Xbox.
+		return;
+#else
 		// Write any settings to disk before shutting down.
 		writeToDisk();
+#endif
 	}
 
 	void autodetectGamePaths()
@@ -338,6 +344,13 @@ namespace TFE_Settings
 
 	bool writeToDisk(bool writeDefaultSettings)
 	{
+#ifdef _XBOX
+		// Keep Xbox builds deterministic: user-editable settings.ini can put
+		// the renderer, paths, resolution, or mod flags into unsupported states.
+		(void)writeDefaultSettings;
+		TFE_System::logWrite(LOG_MSG, "Settings", "Xbox settings.ini write skipped; settings are baked into the XBE.");
+		return true;
+#else
 		static char settingFilePath[TFE_MAX_PATH];
 		if (writeDefaultSettings)
 		{
@@ -368,6 +381,7 @@ namespace TFE_Settings
 		sprintf(msgBuffer, "Cannot write 'settings.ini' to '%s',\nmost likely Documents/ has been set to read-only, is located on One-Drive (currently not supported), or has been added as a Controlled Folder if running on Windows.\n https://www.tenforums.com/tutorials/87858-add-protected-folders-controlled-folder-access-windows-10-a.html", s_settingsPath);
 		TFE_System::postErrorMessageBox(msgBuffer, "Permissions Error");
 		return false;
+#endif
 	}
 
 	// Get and set settings.

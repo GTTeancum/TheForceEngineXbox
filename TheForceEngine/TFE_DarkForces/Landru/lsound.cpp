@@ -1,9 +1,11 @@
 #include <cstring>
+#include <cstdlib>
 
 #include "lsound.h"
 #include <TFE_A11y/accessibility.h>
 #include <TFE_Game/igame.h>
 #include <TFE_Jedi/IMuse/imuse.h>
+#include <TFE_Archive/archive.h>
 #include <TFE_FileSystem/paths.h>
 #include <TFE_FileSystem/filestream.h>
 #include <TFE_System/system.h>
@@ -280,8 +282,13 @@ namespace TFE_DarkForces
 		}
 	}
 
-	u8* readVocFileData(const char* name, u32* sizeOut)
+	u8* readVocFileData(const char* name, u32* sizeOut, bool* heapAllocated)
 	{
+		if (heapAllocated)
+		{
+			*heapAllocated = false;
+		}
+
 		FilePath path;
 		if (strstr(name, ".voc") || strstr(name, ".VOC"))
 		{
@@ -309,10 +316,34 @@ namespace TFE_DarkForces
 			return nullptr;
 		}
 		u32 size = (u32)file.getSize();
-		u8* data = (u8*)game_alloc(size);
+		bool useHeap = false;
+#ifdef _XBOX
+		if (heapAllocated && path.archive)
+		{
+			const char* archivePath = path.archive->getPath();
+			if (archivePath &&
+				(strstr(archivePath, "\\Mods\\") || strstr(archivePath, "/Mods/")) &&
+				size > 128u * 1024u)
+			{
+				useHeap = true;
+				TFE_System::logWrite(LOG_MSG, "Sound",
+					"large mod VOC using heap '%s' bytes=%u archive='%s'",
+					name ? name : "", size, archivePath);
+			}
+		}
+#endif
+		u8* data = useHeap ? (u8*)malloc(size) : (u8*)game_alloc(size);
 		if (!data)
 		{
+			TFE_System::logWrite(LOG_ERROR, "Sound",
+				"VOC allocation failed '%s' bytes=%u heap=%d",
+				name ? name : "", size, useHeap ? 1 : 0);
+			file.close();
 			return nullptr;
+		}
+		if (heapAllocated && useHeap)
+		{
+			*heapAllocated = true;
 		}
 		file.readBuffer(data, size);
 		file.close();

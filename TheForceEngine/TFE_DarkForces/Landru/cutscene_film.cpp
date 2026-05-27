@@ -136,6 +136,7 @@ namespace TFE_DarkForces
 
 	JBool cutsceneFilm_loadResources(FileStream* file, u8** array, s16 arraySize)
 	{
+		TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "loadResources begin count=%d", arraySize);
 		for (s32 i = 0; i < arraySize; i++)
 		{
 			s32 type;
@@ -152,11 +153,16 @@ namespace TFE_DarkForces
 			file->read(&id);
 			file->read(&chunks);
 			file->read(&used);
+			TFE_System::logWrite(LOG_MSG, "CutsceneFilm",
+				"resource[%d] type=0x%08x name='%s' size=%u id=%d chunks=%d used=%d",
+				i, type, name, size, id, chunks, used);
 
 			// Allocate space for the object.
 			FilmObject* obj = (FilmObject*)landru_alloc(sizeof(FilmObject) + used);
 			if (!obj)
 			{
+				TFE_System::logWrite(LOG_ERROR, "CutsceneFilm",
+					"resource[%d] allocation failed bytes=%u", i, (u32)(sizeof(FilmObject) + used));
 				return JFALSE;
 			}
 
@@ -171,6 +177,7 @@ namespace TFE_DarkForces
 			
 			array[i] = (u8*)obj;
 		}
+		TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "loadResources end");
 		return JTRUE;
 	}
 
@@ -257,6 +264,7 @@ namespace TFE_DarkForces
 
 	JBool cutsceneFilm_readObject(u32 type, const char* name, u8** obj)
 	{
+		TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObject begin type=0x%08x name='%s'", type, name ? name : "");
 		LRect rect;
 		lcanvas_getBounds(&rect);
 
@@ -268,26 +276,32 @@ namespace TFE_DarkForces
 		{
 			if (type == CF_TYPE_DELTA_ACTOR)
 			{
+				TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObject delta actor clone/load begin '%s'", name);
 				actor = cutsceneFilm_cloneActor(type, name);
 				if (!actor)
 				{
 					actor = lactorDelt_load(name, &rect, 0, 0, 0);
 				}
 				if (!actor) { retValue = JFALSE; }
+				TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObject delta actor end actor=%p ret=%d", actor, retValue);
 			}
 			else if (type == CF_TYPE_ANIM_ACTOR)
 			{
+				TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObject anim actor clone/load begin '%s'", name);
 				actor = cutsceneFilm_cloneActor(type, name);
 				if (!actor)
 				{
 					actor = lactorAnim_load(name, &rect, 0, 0, 0);
 				}
 				if (!actor) { retValue = JFALSE; }
+				TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObject anim actor end actor=%p ret=%d", actor, retValue);
 			}
 			else if (type == CF_TYPE_PALETTE)
 			{
+				TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObject palette begin '%s'", name);
 				pal = lpalette_load(name);
 				if (!pal) { retValue = JFALSE; }
+				TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObject palette end pal=%p ret=%d", pal, retValue);
 			}
 			else if (type == CF_TYPE_GMIDI)
 			{
@@ -297,22 +311,26 @@ namespace TFE_DarkForces
 			}
 			else if (type == CF_TYPE_VOC_SOUND)
 			{
+				TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObject sound clone/load begin '%s'", name);
 				sound = cutsceneFilm_cloneSound(digitalSound, name);
 				if (!sound)
 				{
 					sound = lSoundLoad(name, digitalSound);
 				}
 				if (!sound) { retValue = JFALSE; }
+				TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObject sound end sound=%p ret=%d", sound, retValue);
 			}
 		}
 		else if (type == CF_TYPE_CUSTOM_ACTOR)
 		{
+			TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObject custom actor begin '%s'", name);
 			actor = lactorCust_alloc(nullptr, &rect, 0, 0, 0);
 			if (actor)
 			{
 				lactor_setDrawFunc(actor, nullptr);
 			}
 			if (!actor) { retValue = JFALSE; }
+			TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObject custom actor end actor=%p ret=%d", actor, retValue);
 		}
 
 		if (actor)
@@ -328,14 +346,19 @@ namespace TFE_DarkForces
 		{
 			*obj = (u8*)sound;
 		}
+		TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObject end type=0x%08x name='%s' ret=%d data=%p",
+			type, name ? name : "", retValue, *obj);
 		return retValue;
 	}
 
 	JBool cutsceneFilm_readObjects(Film* film, FilmLoadCallback filmCallback)
 	{
+		TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObjects begin film=%p count=%d", film, film ? film->arraySize : 0);
 		for (s32 i = 0; i < film->arraySize; i++)
 		{
 			FilmObject* obj = (FilmObject*)film->array[i];
+			TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObjects[%d] resType=0x%08x name='%s' id=%d",
+				i, obj ? obj->resType : 0, obj ? obj->name : "", obj ? obj->id : -1);
 
 			// Read the object.
 			if (cutsceneFilm_readObject(obj->resType, obj->name, &obj->data))
@@ -349,17 +372,25 @@ namespace TFE_DarkForces
 			}
 			else
 			{
+				TFE_System::logWrite(LOG_ERROR, "CutsceneFilm", "readObjects[%d] failed resType=0x%08x name='%s'",
+					i, obj ? obj->resType : 0, obj ? obj->name : "");
 				return JFALSE;
 			}
 		}
 
+		TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "readObjects end");
 		return JTRUE;
 	}
 
 	Film* cutsceneFilm_load(const char* name, LRect* frameRect, s16 x, s16 y, s16 z, FilmLoadCallback callback)
 	{
+		TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "load begin name='%s'", name ? name : "");
 		Film* film = cutsceneFilm_allocate();
-		if (!film) { return nullptr; }
+		if (!film)
+		{
+			TFE_System::logWrite(LOG_ERROR, "CutsceneFilm", "load allocate film failed name='%s'", name ? name : "");
+			return nullptr;
+		}
 
 		u8** array = nullptr;
 		FilePath resPath;
@@ -368,6 +399,7 @@ namespace TFE_DarkForces
 
 		if (TFE_Paths::getFilePath(filmName, &resPath))
 		{
+			TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "load path '%s'", resPath.path);
 			FileStream file;
 			file.open(&resPath, Stream::MODE_READ);
 
@@ -377,18 +409,21 @@ namespace TFE_DarkForces
 			file.read(&version);
 			file.read(&cellCount);
 			file.read(&arraySize);
+			TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "load header version=%d cellCount=%d arraySize=%d",
+				version, cellCount, arraySize);
 
 			if (version != CF_VERSION)
 			{
 				file.close();
 				landru_free(film);
+				TFE_System::logWrite(LOG_ERROR, "CutsceneFilm", "load bad version=%d expected=%d", version, CF_VERSION);
 				return nullptr;
 			}
 
 			array = (u8**)landru_alloc(sizeof(u8*) * arraySize);
-			memset(array, 0, sizeof(u8*) * arraySize);
 			if (array)
 			{
+				memset(array, 0, sizeof(u8*) * arraySize);
 				film->array = array;
 				film->arraySize = arraySize;
 				film->curCell = 0;
@@ -401,9 +436,13 @@ namespace TFE_DarkForces
 					film = nullptr;
 				}
 			}
+			else
+			{
+				TFE_System::logWrite(LOG_ERROR, "CutsceneFilm", "load array allocation failed bytes=%u", (u32)(sizeof(u8*) * arraySize));
+			}
 			file.close();
 
-			if (!cutsceneFilm_readObjects(film, callback))
+			if (film && !cutsceneFilm_readObjects(film, callback))
 			{
 				landru_free(film);
 				landru_free(array);
@@ -411,11 +450,17 @@ namespace TFE_DarkForces
 				array = nullptr;
 			}
 		}
+		else
+		{
+			TFE_System::logWrite(LOG_ERROR, "CutsceneFilm", "load file not found '%s'", filmName);
+		}
 
 		if (array)
 		{
+			TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "load init begin film=%p", film);
 			cutsceneFilm_initFilm(film, array, frameRect, x, y, z);
 			cutsceneFilm_setName(film, CF_TYPE_FILM, name);
+			TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "load init end film=%p", film);
 		}
 		else
 		{
@@ -423,6 +468,7 @@ namespace TFE_DarkForces
 			film = nullptr;
 		}
 
+		TFE_System::logWrite(LOG_MSG, "CutsceneFilm", "load end name='%s' film=%p", name ? name : "", film);
 		return film;
 	}
 

@@ -11,8 +11,8 @@ namespace TFE_SaveSystem
 	enum SaveSystemConst
 	{
 		SAVE_MAX_NAME_LEN = 64,
-		SAVE_IMAGE_WIDTH  = 426,
-		SAVE_IMAGE_HEIGHT = 240,
+		SAVE_IMAGE_WIDTH  = 128,
+		SAVE_IMAGE_HEIGHT = 80,
 	};
 	struct SaveHeader
 	{
@@ -36,11 +36,15 @@ namespace TFE_SaveSystem
 	IGame * getCurrentGame();
 	void update();
 	bool saveGame(const char* filename, const char* saveName);
+	bool saveGameQuiet(const char* filename, const char* saveName);
 	bool loadGame(const char* filename);
 	void getQuickSaveFilename(char* filename, u32 size);
 	void getQuickSaveFilenameForMod(const char* modName, char* filename, u32 size);
 	// Load only the header for UI.
 	bool loadGameHeader(const char* filename, SaveHeader* header);
+#ifdef _XBOX
+	bool loadGameHeaderLite(const char* filename, SaveHeader* header);
+#endif
 
 	bool versionValid(s32 version);
 	void saveHeader(Stream* stream, const char* saveName);

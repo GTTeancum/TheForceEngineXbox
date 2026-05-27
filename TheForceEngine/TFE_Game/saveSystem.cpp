@@ -16,6 +16,7 @@ using namespace TFE_Input;
 
 namespace TFE_SaveSystem
 {
+	static const bool s_verboseXboxSaveLog = false;
 	enum SaveRequest
 	{
 		SF_REQ_NONE = 0,
@@ -38,6 +39,7 @@ namespace TFE_SaveSystem
 	static char s_gameSavePath[TFE_MAX_PATH];
 	static IGame* s_game = nullptr;
 	static s32 s_saveDelay = 0;
+	static SaveHeader s_loadScratchHeader;
 
 	static u32* s_imageBuffer[2] = { nullptr, nullptr };
 	static size_t s_imageBufferSize[2] = { 0 };
@@ -87,26 +89,89 @@ namespace TFE_SaveSystem
 		return version == SVER_CUR;
 	}
 
+	static void readHeaderString(Stream* stream, char* dst, size_t dstSize)
+	{
+		u8 len;
+		stream->read(&len);
+		const u32 rawLen = len;
+		u32 readLen = dstSize > 0 ? (rawLen < (u32)dstSize - 1 ? rawLen : (u32)dstSize - 1) : 0;
+		if (readLen)
+		{
+			stream->readBuffer(dst, readLen);
+		}
+		if (dstSize)
+		{
+			dst[readLen] = 0;
+		}
+		if (rawLen > readLen)
+		{
+			char scratch[64];
+			u32 remaining = rawLen - readLen;
+			while (remaining)
+			{
+				const u32 chunk = remaining < (u32)sizeof(scratch) ? remaining : (u32)sizeof(scratch);
+				stream->readBuffer(scratch, chunk);
+				remaining -= chunk;
+			}
+		}
+	}
+
+	static void consumeStreamBytes(Stream* stream, u32 byteCount)
+	{
+		char scratch[256];
+		while (byteCount)
+		{
+			const u32 chunk = byteCount < (u32)sizeof(scratch) ? byteCount : (u32)sizeof(scratch);
+			stream->readBuffer(scratch, chunk);
+			byteCount -= chunk;
+		}
+	}
+
 	void saveHeader(Stream* stream, const char* saveName)
 	{
 		// Generate a screenshot.
 		DisplayInfo displayInfo;
 		TFE_RenderBackend::getDisplayInfo(&displayInfo);
 		size_t size = displayInfo.width * displayInfo.height * 4;
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader begin saveName='%s' display=%ux%u captureBytes=%u",
+			saveName ? saveName : "", (u32)displayInfo.width, (u32)displayInfo.height, (u32)size);
+#endif
 		if (size > s_imageBufferSize[0])
 		{
-			s_imageBuffer[0] = (u32*)realloc(s_imageBuffer[0], size);
-			s_imageBufferSize[0] = size;
+			u32* newBuffer = (u32*)realloc(s_imageBuffer[0], size);
+			if (newBuffer)
+			{
+				s_imageBuffer[0] = newBuffer;
+				s_imageBufferSize[0] = size;
+			}
+			else
+			{
+				TFE_System::logWrite(LOG_ERROR, "SaveSystem", "failed to allocate capture buffer (%u bytes)", (u32)size);
+				s_imageBufferSize[0] = 0;
+			}
 		}
-		TFE_RenderBackend::captureScreenToMemory(s_imageBuffer[0]);
+		if (s_imageBuffer[0])
+		{
+			TFE_RenderBackend::captureScreenToMemory(s_imageBuffer[0]);
+		}
 #ifdef _XBOX
 		const u32 rawImageSize = SAVE_IMAGE_WIDTH * SAVE_IMAGE_HEIGHT * sizeof(u32);
 		if (rawImageSize > s_imageBufferSize[1])
 		{
-			s_imageBuffer[1] = (u32*)realloc(s_imageBuffer[1], rawImageSize);
-			s_imageBufferSize[1] = rawImageSize;
+			u32* newBuffer = (u32*)realloc(s_imageBuffer[1], rawImageSize);
+			if (newBuffer)
+			{
+				s_imageBuffer[1] = newBuffer;
+				s_imageBufferSize[1] = rawImageSize;
+			}
+			else
+			{
+				TFE_System::logWrite(LOG_ERROR, "SaveSystem", "failed to allocate thumbnail buffer (%u bytes)", rawImageSize);
+				s_imageBufferSize[1] = 0;
+			}
 		}
-		if (s_imageBuffer[1])
+		if (s_imageBuffer[0] && s_imageBuffer[1])
 		{
 			for (u32 y = 0; y < SAVE_IMAGE_HEIGHT; y++)
 			{
@@ -184,11 +249,26 @@ namespace TFE_SaveSystem
 		// Image.
 #ifdef _XBOX
 		u32 pngSize = s_imageBuffer[1] ? rawImageSize : 0;
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "SaveSystem",
+			"saveHeader fields save='%s' datetime='%s' levelName='%s' levelId='%s' modList='%s' thumbBytes=%u firstPixel=0x%08x",
+			saveName ? saveName : "", timeDate, levelName, levelId, modList, pngSize,
+			(s_imageBuffer[1] && pngSize) ? s_imageBuffer[1][0] : 0);
+#endif
 		stream->write(&pngSize);
 		if (pngSize)
 		{
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader thumbnail write begin bytes=%u", pngSize);
+#endif
 			stream->writeBuffer(s_imageBuffer[1], pngSize);
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader thumbnail write end loc=%u", (u32)stream->getLoc());
+#endif
 		}
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader end loc=%u", (u32)stream->getLoc());
+#endif
 #else
 		stream->write(&pngSize);
 		stream->writeBuffer(png, pngSize);
@@ -196,18 +276,29 @@ namespace TFE_SaveSystem
 #endif
 	}
 
-	void loadHeader(Stream* stream, SaveHeader* header, const char* fileName)
+	void loadHeaderInternal(Stream* stream, SaveHeader* header, const char* fileName, bool readImage)
 	{
+#ifdef _XBOX
+		static const bool s_verboseSaveHeaderLog = false;
+		if (s_verboseSaveHeaderLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "loadHeader begin file='%s' image=%d", fileName ? fileName : "", readImage ? 1 : 0);
+		}
+#endif
+		memset(header, 0, sizeof(SaveHeader));
+		if (fileName)
+		{
+			strncpy(header->fileName, fileName, sizeof(header->fileName) - 1);
+			header->fileName[sizeof(header->fileName) - 1] = 0;
+		}
+
 		// Master version.
 		u32 version;
 		stream->read(&version);
 		header->saveVersion = version;
 
 		// Save Name.
-		u8 len;
-		stream->read(&len);
-		stream->readBuffer(header->saveName, len);
-		header->saveName[len] = 0;
+		readHeaderString(stream, header->saveName, sizeof(header->saveName));
 		// Fix existing invalid save names.
 		header->saveName[SAVE_MAX_NAME_LEN - 1] = 0;
 
@@ -218,50 +309,74 @@ namespace TFE_SaveSystem
 		}
 
 		// Time and Date of Save.
-		stream->read(&len);
-		stream->readBuffer(header->dateTime, len);
-		header->dateTime[len] = 0;
+		readHeaderString(stream, header->dateTime, sizeof(header->dateTime));
 
 		// Level Name
-		stream->read(&len);
-		stream->readBuffer(header->levelName, len);
-		header->levelName[len] = 0;
+		readHeaderString(stream, header->levelName, sizeof(header->levelName));
 
 		if (version >= SVER_REPLAY)
 		{
 			// Level ID
-			stream->read(&len);
-			stream->readBuffer(header->levelId, len);
-			header->levelId[len] = 0;
+			readHeaderString(stream, header->levelId, sizeof(header->levelId));
 
 			// Counter
+			u8 len;
 			stream->read(&len);
 			stream->readBuffer(&header->replayCounter, len);
 		}
 
 		// Mod List
-		stream->read(&len);
-		stream->readBuffer(header->modNames, len);
-		header->modNames[len] = 0;
+		readHeaderString(stream, header->modNames, sizeof(header->modNames));
 
 		// Image, re-use buffer 0 for the PNG.
 		u32 pngSize;
 		stream->read(&pngSize);
 #ifdef _XBOX
+		if (s_verboseSaveHeaderLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem",
+				"loadHeader fields file='%s' version=%u save='%s' datetime='%s' levelName='%s' levelId='%s' modList='%s' pngSize=%u",
+				fileName ? fileName : "", version, header->saveName, header->dateTime,
+				header->levelName, header->levelId, header->modNames, pngSize);
+		}
 		const u32 rawImageSize = SAVE_IMAGE_WIDTH * SAVE_IMAGE_HEIGHT * sizeof(u32);
+		if (!readImage)
+		{
+			memset(header->imageData, 0, rawImageSize);
+			consumeStreamBytes(stream, pngSize);
+			return;
+		}
 		if (pngSize == rawImageSize)
 		{
 			stream->readBuffer(header->imageData, pngSize);
+			if (s_verboseSaveHeaderLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "SaveSystem", "loaded raw save thumbnail '%s' bytes=%u firstPixel=0x%08x midPixel=0x%08x",
+					fileName ? fileName : "", pngSize, header->imageData[0],
+					header->imageData[(SAVE_IMAGE_WIDTH * SAVE_IMAGE_HEIGHT) / 2]);
+			}
 		}
 		else
 		{
 			memset(header->imageData, 0, rawImageSize);
 			if (pngSize)
 			{
+				TFE_System::logWrite(LOG_WARNING, "SaveSystem", "save thumbnail '%s' is compressed/legacy bytes=%u; no Xbox decoder yet", fileName ? fileName : "", pngSize);
 				if (pngSize > s_imageBufferSize[0])
 				{
-					s_imageBuffer[0] = (u32*)realloc(s_imageBuffer[0], pngSize);
-					s_imageBufferSize[0] = pngSize;
+					u32* newBuffer = (u32*)realloc(s_imageBuffer[0], pngSize);
+					if (newBuffer)
+					{
+						s_imageBuffer[0] = newBuffer;
+						s_imageBufferSize[0] = pngSize;
+					}
+					else
+					{
+						TFE_System::logWrite(LOG_ERROR, "SaveSystem", "failed to allocate legacy thumbnail buffer '%s' bytes=%u",
+							fileName ? fileName : "", pngSize);
+						consumeStreamBytes(stream, pngSize);
+						return;
+					}
 				}
 				stream->readBuffer(s_imageBuffer[0], pngSize);
 			}
@@ -283,6 +398,11 @@ namespace TFE_SaveSystem
 			TFE_Image::free(image);
 		}
 #endif
+	}
+
+	void loadHeader(Stream* stream, SaveHeader* header, const char* fileName)
+	{
+		loadHeaderInternal(stream, header, fileName, true);
 	}
 
 	void populateSaveDirectory(std::vector<SaveHeader>& dir)
@@ -315,20 +435,52 @@ namespace TFE_SaveSystem
 		}
 	}
 
-	bool saveGame(const char* filename, const char* saveName)
+	static bool saveGameInternal(const char* filename, const char* saveName, bool showMessage)
 	{
 		char filePath[TFE_MAX_PATH];
 		sprintf(filePath, "%s%s", s_gameSavePath, filename);
 
 		bool ret = false;
 		FileStream stream;
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame begin file='%s' path='%s' saveName='%s' showMessage=%d game=%p",
+			filename ? filename : "", filePath, saveName ? saveName : "", showMessage ? 1 : 0, s_game);
+#endif
 		if (stream.open(filePath, Stream::MODE_WRITE))
 		{
 			saveHeader(&stream, saveName);
-			ret = s_game->serializeGameState(&stream, filename, true);
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame header complete loc=%u", (u32)stream.getLoc());
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame serialize begin");
+#endif
+			ret = s_game->serializeGameState(&stream, showMessage ? filename : NULL, true);
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame serialize end result=%d loc=%u", ret ? 1 : 0, (u32)stream.getLoc());
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame close begin");
+#endif
 			stream.close();
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame close end");
+#endif
 		}
+#ifdef _XBOX
+		else
+		{
+			TFE_System::logWrite(LOG_ERROR, "SaveSystem", "saveGame open failed path='%s'", filePath);
+		}
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame end file='%s' result=%d", filename ? filename : "", ret ? 1 : 0);
+#endif
 		return ret;
+	}
+
+	bool saveGame(const char* filename, const char* saveName)
+	{
+		return saveGameInternal(filename, saveName, true);
+	}
+
+	bool saveGameQuiet(const char* filename, const char* saveName)
+	{
+		return saveGameInternal(filename, saveName, false);
 	}
 
 	bool loadGame(const char* filename)
@@ -338,23 +490,31 @@ namespace TFE_SaveSystem
 
 		bool ret = false;
 		FileStream stream;
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "loadGame begin file='%s' path='%s' game=%p",
+			filename ? filename : "", filePath, s_game);
+#endif
 		if (stream.open(filePath, Stream::MODE_READ))
 		{
-			SaveHeader header;
-			loadHeader(&stream, &header, filename);
+			loadHeader(&stream, &s_loadScratchHeader, filename);
 			
 			// Clear out custom logics and external data before loading
-#ifndef _XBOX
 			TFE_ExternalData::getExternalLogics()->actorLogics.clear();
 			TFE_ExternalData::clearExternalWeapons();
 			TFE_ExternalData::clearExternalProjectiles();
 			TFE_ExternalData::clearExternalEffects();
 			TFE_ExternalData::clearExternalPickups();
-#endif
 
 			ret = s_game->serializeGameState(&stream, filename, false);
 			stream.close();
 		}
+#ifdef _XBOX
+		else
+		{
+			TFE_System::logWrite(LOG_ERROR, "SaveSystem", "loadGame open failed path='%s'", filePath);
+		}
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "loadGame end file='%s' result=%d", filename ? filename : "", ret ? 1 : 0);
+#endif
 		return ret;
 	}
 
@@ -365,6 +525,12 @@ namespace TFE_SaveSystem
 
 		bool ret = false;
 		FileStream stream;
+#ifdef _XBOX
+		if (s_verboseXboxSaveLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "loadGameHeader begin file='%s' path='%s'", filename ? filename : "", filePath);
+		}
+#endif
 		if (stream.open(filePath, Stream::MODE_READ))
 		{
 			loadHeader(&stream, header, filename);
@@ -372,8 +538,39 @@ namespace TFE_SaveSystem
 			stream.close();
 			ret = true;
 		}
+#ifdef _XBOX
+		else
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "loadGameHeader missing file='%s'", filename ? filename : "");
+		}
+		if (s_verboseXboxSaveLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "loadGameHeader end file='%s' result=%d save='%s' level='%s' image=%p firstPixel=0x%08x",
+				filename ? filename : "", ret ? 1 : 0, ret ? header->saveName : "", ret ? header->levelName : "",
+				ret ? header->imageData : NULL, (ret && header->imageData) ? header->imageData[0] : 0);
+		}
+#endif
 		return ret;
 	}
+
+#ifdef _XBOX
+	bool loadGameHeaderLite(const char* filename, SaveHeader* header)
+	{
+		char filePath[TFE_MAX_PATH];
+		sprintf(filePath, "%s%s", s_gameSavePath, filename);
+
+		bool ret = false;
+		FileStream stream;
+		if (stream.open(filePath, Stream::MODE_READ))
+		{
+			loadHeaderInternal(&stream, header, filename, false);
+			strcpy(header->fileName, filename);
+			stream.close();
+			ret = true;
+		}
+		return ret;
+	}
+#endif
 		
 	void postLoadRequest(const char* filename)
 	{

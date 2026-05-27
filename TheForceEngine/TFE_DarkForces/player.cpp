@@ -238,6 +238,8 @@ namespace TFE_DarkForces
 	static JBool s_xboxWeaponWheelOpen = JFALSE;
 	static JBool s_xboxWeaponWheelHadAim = JFALSE;
 	static s32 s_xboxWeaponWheelSelection = -1;
+	static f64 s_xboxWeaponWheelHoldStartTime = 0.0;
+	static JBool s_xboxWeaponWheelHeldLeft = JFALSE;
 	static JBool s_xboxWeaponWheelIconsTried = JFALSE;
 	static JBool s_xboxWeaponWheelIconsLoaded = JFALSE;
 	static JBool s_xboxWeaponWheelIconValid[WPN_COUNT];
@@ -497,7 +499,10 @@ namespace TFE_DarkForces
 
 	static JBool xboxUpdateWeaponWheel()
 	{
-		const bool held = TFE_Input::buttonDown(CONTROLLER_BUTTON_RIGHTSHOULDER);
+		const f64 holdSeconds = 0.5;
+		const bool leftHeld = TFE_Input::buttonDown(CONTROLLER_BUTTON_LEFTSHOULDER);
+		const bool rightHeld = TFE_Input::buttonDown(CONTROLLER_BUTTON_RIGHTSHOULDER);
+		const bool held = leftHeld || rightHeld;
 		if (!held)
 		{
 			if (s_xboxWeaponWheelOpen)
@@ -511,13 +516,30 @@ namespace TFE_DarkForces
 				}
 				TFE_RenderBackend::xboxSetWeaponWheel(false, NULL);
 			}
+			else if (s_xboxWeaponWheelHoldStartTime > 0.0)
+			{
+				player_cycleWeapons(s_xboxWeaponWheelHeldLeft ? -1 : 1);
+			}
 			s_xboxWeaponWheelOpen = JFALSE;
 			s_xboxWeaponWheelHadAim = JFALSE;
 			s_xboxWeaponWheelSelection = -1;
+			s_xboxWeaponWheelHoldStartTime = 0.0;
+			s_xboxWeaponWheelHeldLeft = JFALSE;
 			return JFALSE;
 		}
 
+		if (s_xboxWeaponWheelHoldStartTime <= 0.0)
+		{
+			s_xboxWeaponWheelHoldStartTime = TFE_System::getTime();
+			s_xboxWeaponWheelHeldLeft = leftHeld ? JTRUE : JFALSE;
+		}
+		inputMapping_removeState(IADF_CYCLEWPN_PREV);
 		inputMapping_removeState(IADF_CYCLEWPN_NEXT);
+		if (TFE_System::getTime() - s_xboxWeaponWheelHoldStartTime < holdSeconds)
+		{
+			return JFALSE;
+		}
+
 		s_xboxWeaponWheelOpen = JTRUE;
 		xboxLoadWeaponWheelIcons();
 

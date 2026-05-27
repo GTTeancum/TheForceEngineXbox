@@ -81,6 +81,8 @@ namespace TFE_DarkForces
 	static u32 s_xboxMissionCompleteFrame = 0;
 	static bool s_xboxMissionCompleteLeftHeld = false;
 	static bool s_xboxMissionCompleteRightHeld = false;
+	static bool s_xboxPendingMissionCompleteAutosave = false;
+	static s32 s_xboxPendingMissionCompleteAutosaveFrames = 0;
 	static TFE_RenderBackend::XboxMissionCompleteInfo s_xboxMissionCompleteInfo = { 0, 0, 0, 0 };
 
 	void xboxMissionCompleteOpen()
@@ -131,6 +133,32 @@ namespace TFE_DarkForces
 			return true;
 		}
 		return false;
+	}
+
+	void xboxMaybeRunPendingMissionCompleteAutosave()
+	{
+		if (!s_xboxPendingMissionCompleteAutosave) { return; }
+		if (s_xboxPendingMissionCompleteAutosaveFrames++ < 2) { return; }
+
+		char autosaveName[TFE_MAX_PATH];
+		char saveLabel[TFE_SaveSystem::SAVE_MAX_NAME_LEN];
+		const char* levelName = agent_getLevelDisplayName();
+		sprintf(autosaveName, "save000.tfe");
+		if (levelName && levelName[0])
+		{
+			strncpy(saveLabel, levelName, sizeof(saveLabel) - 1);
+			saveLabel[sizeof(saveLabel) - 1] = 0;
+		}
+		else
+		{
+			strcpy(saveLabel, "Autosave");
+		}
+
+		const bool saved = TFE_SaveSystem::saveGameQuiet(autosaveName, saveLabel);
+		TFE_System::logWrite(saved ? LOG_MSG : LOG_ERROR, "MissionComplete",
+			"next-level autosave %s filename='%s' label='%s'", saved ? "complete" : "failed", autosaveName, saveLabel);
+		s_xboxPendingMissionCompleteAutosave = false;
+		s_xboxPendingMissionCompleteAutosaveFrames = 0;
 	}
 #endif
 
@@ -426,23 +454,57 @@ namespace TFE_DarkForces
 
 	void DarkForces::exitGame()
 	{
-		if (s_sharedState.gameStarted)
+	#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame begin state=%d introOnly=%d gameStarted=%d",
+			s_runGameState.state, s_xboxIntroOnly ? 1 : 0, s_sharedState.gameStarted ? 1 : 0);
+	#endif
+		if (s_sharedState.gameStarted && !s_xboxIntroOnly && s_runGameState.state == GSTATE_MISSION)
 		{
 			saveLevelStatus();
 		}
+	#ifdef _XBOX
+		else if (s_sharedState.gameStarted)
+		{
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame skipping save status state=%d introOnly=%d",
+				s_runGameState.state, s_xboxIntroOnly ? 1 : 0);
+		}
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame cutscene shutdown");
+	#endif
+		cutscene_shutdown();
+	#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame free midi/messages");
+	#endif
 		freeAllMidi();
 
 		gameMessage_freeBuffer();
 		briefingList_freeBuffer();
 		cutsceneList_freeBuffer();
 		cutsceneFilm_reset();
+	#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame destroy landru");
+	#endif
 		lsystem_destroy();
 		bitmap_clearAll();
 
-		// Clear paths and archives.
-		TFE_Paths::clearSearchPaths();
-		TFE_Paths::clearLocalArchives();
+		// Clear task/path search state. Archive objects are cache-owned; the path
+		// stack is non-owning because Landru also mounts static archives there.
+	#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame task shutdown begin");
+	#endif
 		task_shutdown();
+	#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame task shutdown end");
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame clear search paths begin");
+	#endif
+		TFE_Paths::clearSearchPaths();
+	#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame clear search paths end");
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame clear local archives begin");
+	#endif
+		TFE_Paths::clearLocalArchives();
+	#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame clear local archives end");
+	#endif
 
 		// Sound is destroyed after the task system.
 		sound_close();
@@ -472,13 +534,22 @@ namespace TFE_DarkForces
 		TFE_Audio::resume();
 
 		TFE_Jedi::renderer_destroy();
+	#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame renderer destroyed");
+	#endif
 
 		// Reset state.
 		memset(&s_sharedState, 0, sizeof(s_sharedState));
 		memset(&(s_runGameState), 0, sizeof(s_runGameState));
+	#ifdef _XBOX
+		s_xboxIntroOnly = false;
+	#endif
 
 		// TFE - Script system.
 		TFE_ScriptInterface::reset();
+	#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "exitGame complete");
+	#endif
 	}
 
 	void DarkForces::pauseGame(bool pause)
@@ -853,9 +924,9 @@ namespace TFE_DarkForces
 
 					if (saveSelected)
 					{
-						char quickSaveName[TFE_MAX_PATH];
-						TFE_SaveSystem::getQuickSaveFilename(quickSaveName, TFE_MAX_PATH);
-						TFE_SaveSystem::saveGame(quickSaveName, "Autosave");
+						s_xboxPendingMissionCompleteAutosave = true;
+						s_xboxPendingMissionCompleteAutosaveFrames = 0;
+						TFE_System::logWrite(LOG_MSG, "MissionComplete", "queued next-level autosave");
 					}
 					TFE_RenderBackend::xboxSetMissionCompleteScreen(false, 0, 0, NULL);
 					s_xboxMissionCompleteOpen = false;
@@ -947,13 +1018,37 @@ namespace TFE_DarkForces
 
 	void startNextMode()
 	{
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode begin invalid=%d abort=%d cutsceneIndex=%d levelIndex=%d state=%d",
+			s_invalidLevelIndex ? 1 : 0, s_runGameState.abortLevel ? 1 : 0,
+			s_runGameState.cutsceneIndex, s_runGameState.levelIndex, s_runGameState.state);
+#endif
 		if (s_invalidLevelIndex || s_runGameState.abortLevel)
 		{
 			s_runGameState.state = GSTATE_AGENT_MENU;
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode -> agent menu");
+#endif
+			return;
+		}
+
+		if (s_runGameState.cutsceneIndex < 0)
+		{
+			s_runGameState.cutsceneIndex = 0;
+		}
+		else if (s_runGameState.cutsceneIndex >= TFE_ARRAYSIZE(s_cutsceneData))
+		{
+			s_runGameState.cutsceneIndex = 0;
+			s_invalidLevelIndex = JTRUE;
+			startNextMode();
 			return;
 		}
 
 		GameMode mode = s_cutsceneData[s_runGameState.cutsceneIndex].nextGameMode;
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode mode=%d cutscene=%d",
+			(s32)mode, s_cutsceneData[s_runGameState.cutsceneIndex].cutscene);
+#endif
 		switch (mode)
 		{
 		case GMODE_END:
@@ -1007,10 +1102,19 @@ namespace TFE_DarkForces
 		}  break;
 		case GMODE_MISSION:
 		{
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode mission begin");
+#endif
 			sound_levelStart();
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode sound_levelStart done");
+#endif
 
 			bitmap_setAllocator(s_levelRegion);
 			actor_clearState();
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode actor/task clear begin");
+#endif
 
 			task_reset();
 			inf_clearState();
@@ -1031,17 +1135,35 @@ namespace TFE_DarkForces
 
 			s_sharedState.loadMissionTask = createTask("start mission", mission_startTaskFunc, JTRUE);
 			mission_setLoadMissionTask(s_sharedState.loadMissionTask);
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode loadMissionTask=%p", s_sharedState.loadMissionTask);
+#endif
 
 			s32 levelIndex = agent_getLevelIndex();
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode gameMusic_start begin levelIndex=%d", levelIndex);
+#endif
 			gameMusic_start(levelIndex);
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode gameMusic_start done");
+#endif
 
 			agent_setLevelComplete(JFALSE);
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode agent_readSavedDataForLevel begin agent=%d level=%d", s_agentId, levelIndex);
+#endif
 			agent_readSavedDataForLevel(s_agentId, levelIndex);
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode agent_readSavedDataForLevel done");
+#endif
 
 			// The load mission task should begin immediately once the Task System updates,
 			// so launchCurrentTask() is not required here.
 			// In the original, the task system would simply loop here.
 			s_runGameState.state = GSTATE_MISSION;
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode mission end state=%d", s_runGameState.state);
+#endif
 		}
 		}
 	}
@@ -1058,6 +1180,13 @@ namespace TFE_DarkForces
 	// Many no longer make sense and in some cases will always be available (such as screenshots).
 	void processCommandLineArgs(s32 argCount, const char* argv[], char* startLevel)
 	{
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "processCommandLineArgs begin argc=%d", argCount);
+		for (s32 ai = 0; ai < argCount; ai++)
+		{
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "argv[%d]='%s'", ai, argv && argv[ai] ? argv[ai] : "");
+		}
+#endif
 		s_sharedState.customGobName[0] = 0;
 #ifdef _XBOX
 		s_xboxIntroOnly = false;
@@ -1132,6 +1261,14 @@ namespace TFE_DarkForces
 				}
 			}
 		}
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces",
+			"processCommandLineArgs end startLevel='%s' customGob='%s' introOnly=%d startAtBriefing=%d cutscenes=%d",
+			startLevel ? startLevel : "", s_sharedState.customGobName,
+			s_xboxIntroOnly ? 1 : 0, s_xboxStartAtBriefing ? 1 : 0,
+			s_runGameState.cutscenesEnabled ? 1 : 0);
+		TFE_Paths::debugLogState("df-after-args");
+#endif
 	}
 
 	void enableCutscenes(JBool enable)
@@ -1163,16 +1300,22 @@ namespace TFE_DarkForces
 	char* extractTextFileFromZip(ZipArchive& zip, u32 fileIndex)
 	{
 		u32 bufferLen = (u32)zip.getFileLength(fileIndex);
-		char* buffer = (char*)malloc(bufferLen);
+		char* buffer = (char*)malloc(bufferLen + 1);
+		if (!buffer) { return nullptr; }
 		zip.openFile(fileIndex);
 		zip.readFile(buffer, bufferLen);
 		zip.closeFile();
+		buffer[bufferLen] = 0;
 
 		return buffer;
 	}
 
 	void loadCustomGob(const char* gobName)
 	{
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "Mod", "loadCustomGob begin name='%s'", gobName ? gobName : "");
+		TFE_Paths::debugLogState("mod-loadCustomGob-before");
+#endif
 		FilePath archivePath;
 		s32 lfdIndex[MAX_MOD_LFD];
 		char lfdName[MAX_MOD_LFD][TFE_MAX_PATH];
@@ -1184,12 +1327,33 @@ namespace TFE_DarkForces
 
 		if (TFE_Paths::getFilePath(gobName, &archivePath))
 		{
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "Mod", "custom archive resolved name='%s' path='%s' archive=%p index=%u",
+				gobName, archivePath.path, archivePath.archive, archivePath.index);
+#endif
 			// Is this really a gob?
 			const size_t len = strlen(gobName);
+			if (len < 3)
+			{
+				TFE_System::logWrite(LOG_ERROR, "Mod", "custom archive name too short '%s'", gobName);
+				return;
+			}
 			const char* ext = &gobName[len - 3];
-			const char* ext4 = &gobName[len - 4];
+			const char* ext4 = len >= 4 ? &gobName[len - 4] : "";
 			if (strcasecmp(ext, "zip") == 0 || strcasecmp(ext, "pk3") == 0 || strcasecmp(ext4, "gobx") == 0)
 			{
+#ifdef _XBOX
+				// Hardware rule: mods must be extracted to Mods\<modname>\ and
+				// mounted by their loose GOB. The ZIP path keeps the compressed
+				// container resident, may inflate a nested GOB into heap memory,
+				// and extracts LFDs through Temp\. That was acceptable on desktop
+				// and CXBX-R, but it fragments the 64 MB retail Xbox heap across
+				// repeated mod swaps.
+				TFE_System::logWrite(LOG_ERROR, "Mod",
+					"zip/pk3/gobx mods are not mounted on Xbox; extract to Mods\\<modname>\\ name='%s'",
+					gobName);
+				return;
+#else
 				// In the case of a zip file, we want to extract the GOB into an in-memory format and use that directly.
 				// Note that the archive will be deleted on exit, so we can safely allocate here and pass it along.
 				ZipArchive* zipArchive = new ZipArchive();
@@ -1197,12 +1361,17 @@ namespace TFE_DarkForces
 				{
 					s32 gobIndex = -1;
 					const u32 count = zipArchive->getFileCount();
+#ifdef _XBOX
+					TFE_System::logWrite(LOG_MSG, "Mod", "opened custom zip '%s' fileCount=%u", archivePath.path, count);
+#endif
 					for (u32 i = 0; i < count; i++)
 					{
 						const char* name = zipArchive->getFileName(i);
+						if (!name) { continue; }
 						const size_t nameLen = strlen(name);
+						if (nameLen < 3) { continue; }
 						const char* zext = &name[nameLen - 3];
-						const char* zext4 = &name[nameLen - 4];
+						const char* zext4 = nameLen >= 4 ? &name[nameLen - 4] : "";
 						if (strcasecmp(zext, "gob") == 0)
 						{
 							// Avoid MacOS references, they aren't real files.
@@ -1233,25 +1402,25 @@ namespace TFE_DarkForces
 							if (strcasecmp(fname, "projectiles.json") == 0)
 							{
 								char* buffer = extractTextFileFromZip(*zipArchive, i);
-								TFE_ExternalData::parseExternalProjectiles(buffer, true);
+								if (buffer) { TFE_ExternalData::parseExternalProjectiles(buffer, true); }
 								free(buffer);
 							}
 							else if (strcasecmp(fname, "effects.json") == 0)
 							{
 								char* buffer = extractTextFileFromZip(*zipArchive, i);
-								TFE_ExternalData::parseExternalEffects(buffer, true);
+								if (buffer) { TFE_ExternalData::parseExternalEffects(buffer, true); }
 								free(buffer);
 							}
 							else if (strcasecmp(fname, "pickups.json") == 0)
 							{
 								char* buffer = extractTextFileFromZip(*zipArchive, i);
-								TFE_ExternalData::parseExternalPickups(buffer, true);
+								if (buffer) { TFE_ExternalData::parseExternalPickups(buffer, true); }
 								free(buffer);
 							}
 							else if (strcasecmp(fname, "weapons.json") == 0)
 							{
 								char* buffer = extractTextFileFromZip(*zipArchive, i);
-								TFE_ExternalData::parseExternalWeapons(buffer, true);
+								if (buffer) { TFE_ExternalData::parseExternalWeapons(buffer, true); }
 								free(buffer);
 							}
 							else
@@ -1284,7 +1453,7 @@ namespace TFE_DarkForces
 								int bufferLen = zipArchive->getFileLength(i);
 
 								// Load Mod TFE Messages
-								if (!TFE_System::loadMessagesBuffer(buffer, bufferLen, true))
+								if (!buffer || !TFE_System::loadMessagesBuffer(buffer, bufferLen, true))
 								{
 									TFE_System::logWrite(LOG_ERROR, "Main", "Cannot load mod TFE messages.");
 								}
@@ -1305,70 +1474,105 @@ namespace TFE_DarkForces
 					{
 						u32 bufferLen = (u32)zipArchive->getFileLength(gobIndex);
 						u8* buffer = (u8*)malloc(bufferLen);
-						zipArchive->openFile(gobIndex);
-						zipArchive->readFile(buffer, bufferLen);
-						zipArchive->closeFile();
+						if (buffer)
+						{
+							zipArchive->openFile(gobIndex);
+							zipArchive->readFile(buffer, bufferLen);
+							zipArchive->closeFile();
 
-						GobMemoryArchive* gobArchive = new GobMemoryArchive();
-						gobArchive->setName(zipArchive->getFileName(gobIndex));
-						gobArchive->open(buffer, bufferLen);
-						TFE_Paths::addLocalArchiveToFront(gobArchive);
-						TFE_System::logWrite(LOG_MSG, "Mod", "mounted GOB from ZIP at archive front '%s'", zipArchive->getFileName(gobIndex));
+							GobMemoryArchive* gobArchive = new GobMemoryArchive();
+							gobArchive->setName(zipArchive->getFileName(gobIndex));
+							gobArchive->open(buffer, bufferLen);
+							TFE_Paths::addLocalArchiveToFront(gobArchive);
+							TFE_System::logWrite(LOG_MSG, "Mod", "mounted GOB from ZIP at archive front '%s'", zipArchive->getFileName(gobIndex));
+						}
+						else
+						{
+							TFE_System::logWrite(LOG_ERROR, "Mod", "failed to allocate ZIP GOB buffer bytes=%u", bufferLen);
+						}
 					}
 
 					char tempPath[TFE_MAX_PATH];
 					sprintf(tempPath, "%sTemp/", TFE_Paths::getPath(PATH_PROGRAM_DATA));
+					FileUtil::makeDirectory(tempPath);
 					// Extract and copy the briefing.
 					if (briefingIndex >= 0)
 					{
 						u32 bufferLen = (u32)zipArchive->getFileLength(briefingIndex);
 						u8* buffer = (u8*)malloc(bufferLen);
-						zipArchive->openFile(briefingIndex);
-						zipArchive->readFile(buffer, bufferLen);
-						zipArchive->closeFile();
-
-						char lfdPath[TFE_MAX_PATH];
-						sprintf(lfdPath, "%sdfbrief.lfd", tempPath);
-						FileStream file;
-						if (file.open(lfdPath, Stream::MODE_WRITE))
+						if (buffer)
 						{
-							file.writeBuffer(buffer, bufferLen);
-							file.close();
-						}
-						free(buffer);
+							zipArchive->openFile(briefingIndex);
+							zipArchive->readFile(buffer, bufferLen);
+							zipArchive->closeFile();
 
-						TFE_Paths::addSingleFilePath("dfbrief.lfd", lfdPath);
+							char lfdPath[TFE_MAX_PATH];
+							sprintf(lfdPath, "%sdfbrief.lfd", tempPath);
+							FileStream file;
+							if (file.open(lfdPath, Stream::MODE_WRITE))
+							{
+								file.writeBuffer(buffer, bufferLen);
+								file.close();
+							}
+							free(buffer);
+
+							TFE_Paths::addSingleFilePath("dfbrief.lfd", lfdPath);
+						}
 					}
 					// Extract and copy the LFD.
 					for (s32 i = 0; i < lfdCount; i++)
 					{
 						u32 bufferLen = (u32)zipArchive->getFileLength(lfdIndex[i]);
 						u8* buffer = (u8*)malloc(bufferLen);
-						zipArchive->openFile(lfdIndex[i]);
-						zipArchive->readFile(buffer, bufferLen);
-						zipArchive->closeFile();
-
-						char lfdPath[TFE_MAX_PATH];
-						sprintf(lfdPath, "%scutscenes%d.lfd", tempPath, i);
-						FileStream file;
-						if (file.open(lfdPath, Stream::MODE_WRITE))
+						if (buffer)
 						{
-							file.writeBuffer(buffer, bufferLen);
-							file.close();
-						}
-						free(buffer);
+							zipArchive->openFile(lfdIndex[i]);
+							zipArchive->readFile(buffer, bufferLen);
+							zipArchive->closeFile();
 
-						TFE_Paths::addSingleFilePath(zipArchive->getFileName(lfdIndex[i]), lfdPath);
+							char lfdPath[TFE_MAX_PATH];
+							sprintf(lfdPath, "%scutscenes%d.lfd", tempPath, i);
+							FileStream file;
+							if (file.open(lfdPath, Stream::MODE_WRITE))
+							{
+								file.writeBuffer(buffer, bufferLen);
+								file.close();
+							}
+							free(buffer);
+
+							TFE_Paths::addSingleFilePath(zipArchive->getFileName(lfdIndex[i]), lfdPath);
+						}
 					}
 
-					// Add the ZIP archive itself.
-					TFE_Paths::addLocalArchive(zipArchive);
+					// Add the ZIP archive itself only when it is the primary payload.
+					// On Xbox ZipArchive keeps the compressed file resident; for the
+					// common DF mod shape (ZIP containing a GOB plus optional LFDs),
+					// keeping both the ZIP and extracted GOB mounted wastes several MB
+					// and fragments memory across repeated mod swaps.
+					if (gobIndex < 0)
+					{
+						TFE_Paths::addLocalArchive(zipArchive);
+#ifdef _XBOX
+						TFE_System::logWrite(LOG_MSG, "Mod", "mounted ZIP archive itself '%s'", archivePath.path);
+#endif
+					}
+					else
+					{
+#ifdef _XBOX
+						TFE_System::logWrite(LOG_MSG, "Mod", "released ZIP container after extracting GOB '%s'", archivePath.path);
+#endif
+						delete zipArchive;
+					}
 				}
 				else
 				{
 					// Delete on read failure since the allocation is not added to TFE_Paths in this case.
+#ifdef _XBOX
+					TFE_System::logWrite(LOG_ERROR, "Mod", "failed to open custom zip '%s'", archivePath.path);
+#endif
 					delete zipArchive;
 				}
+#endif
 			}
 			else
 			{
@@ -1392,7 +1596,7 @@ namespace TFE_DarkForces
 					FileList fileList;
 					FileUtil::readDirectory(modPath, "lfd", fileList);
 					const size_t count = fileList.size();
-						const std::string* file = &fileList[0];
+					const std::string* file = count ? &fileList[0] : NULL;
 
 					for (size_t i = 0; i < count; i++, file++)
 					{
@@ -1514,8 +1718,18 @@ namespace TFE_DarkForces
 				}
 			}
 		}
+#ifdef _XBOX
+		else
+		{
+			TFE_System::logWrite(LOG_ERROR, "Mod", "custom archive not found name='%s'", gobName ? gobName : "");
+		}
+#endif
 
 		TFE_Settings::loadCustomModSettings();
+#ifdef _XBOX
+		TFE_Paths::debugLogState("mod-loadCustomGob-after");
+		TFE_System::logWrite(LOG_MSG, "Mod", "loadCustomGob end name='%s'", gobName ? gobName : "");
+#endif
 	}
 
 	s32 loadLocalMessages()
@@ -1532,6 +1746,10 @@ namespace TFE_DarkForces
 
 	void buildSearchPaths()
 	{
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "buildSearchPaths begin");
+		TFE_Paths::debugLogState("df-buildSearchPaths-before");
+#endif
 		TFE_Paths::addLocalSearchPath("");
 		TFE_Paths::addLocalSearchPath("LFD/");
 		// Dark Forces also adds C:/ and C:/LFD but TFE won't be doing that for obvious reasons...
@@ -1559,15 +1777,26 @@ namespace TFE_DarkForces
 		if (!TFE_Paths::mapSystemPath(path))
 			sprintf(path, "%sMods/TFE/AdjustableHud", programDir);
 		TFE_Paths::addAbsoluteSearchPath(path);
+#ifdef _XBOX
+		TFE_Paths::debugLogState("df-buildSearchPaths-after");
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "buildSearchPaths end");
+#endif
 	}
 
 	bool openGobFiles()
 	{
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "openGobFiles begin");
+		TFE_Paths::debugLogState("df-openGobFiles-before");
+#endif
 		for (s32 i = 0; i < TFE_ARRAYSIZE(c_gobFileNames); i++)
 		{
 			FilePath archivePath;
 			if (TFE_Paths::getFilePath(c_gobFileNames[i], &archivePath))
 			{
+#ifdef _XBOX
+				TFE_System::logWrite(LOG_MSG, "DarkForces", "required gob resolved '%s' path='%s'", c_gobFileNames[i], archivePath.path);
+#endif
 				assert(archivePath.path[0] != 0);
 				Archive* archive = Archive::getArchive(ARCHIVE_GOB, c_gobFileNames[i], archivePath.path);
 				if (archive)
@@ -1587,6 +1816,9 @@ namespace TFE_DarkForces
 			FilePath archivePath;
 			if (TFE_Paths::getFilePath(c_optionalGobFileNames[i], &archivePath))
 			{
+#ifdef _XBOX
+				TFE_System::logWrite(LOG_MSG, "DarkForces", "optional gob resolved '%s' path='%s'", c_optionalGobFileNames[i], archivePath.path);
+#endif
 				assert(archivePath.path[0] != 0);
 				Archive* archive = Archive::getArchive(ARCHIVE_GOB, c_optionalGobFileNames[i], archivePath.path);
 				if (archive)
@@ -1595,6 +1827,10 @@ namespace TFE_DarkForces
 				}
 			}
 		}
+#ifdef _XBOX
+		TFE_Paths::debugLogState("df-openGobFiles-after");
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "openGobFiles end");
+#endif
 		return true;
 	}
 
@@ -1650,6 +1886,9 @@ namespace TFE_DarkForces
 
 	void gameStartup()
 	{
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup begin");
+#endif
 		hud_loadGraphics();
 		hud_loadGameMessages();
 		loadMapNumFont();
@@ -1658,6 +1897,9 @@ namespace TFE_DarkForces
 		actor_allocatePhysicsActorList();
 		loadCutsceneList();
 		loadLangHotkeys();
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup core assets loaded");
+#endif
 
 		TFE_ExternalData::loadCustomLogics();
 
@@ -1684,12 +1926,40 @@ namespace TFE_DarkForces
 		{
 			TFE_System::logWrite(LOG_ERROR, "EXTERNAL_DATA", "Warning: Weapon data is incomplete. WEAPONS.JSON may have been altered. Weapons may not behave as expected.");
 		}
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup external data loaded");
+#endif
 
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup projectile_startup begin");
+#endif
 		projectile_startup();
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup projectile_startup end");
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup hitEffect_startup begin");
+#endif
 		hitEffect_startup();
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup hitEffect_startup end");
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup weapon_startup begin");
+#endif
 		weapon_startup();
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup weapon_startup end");
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup item_loadData begin");
+#endif
 		item_loadData();
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup item_loadData end");
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup player_init begin");
+#endif
 		player_init();
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup player_init end");
+#endif
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup gameplay systems loaded");
+#endif
 
 		FilePath filePath;
 		TFE_Paths::getFilePath("swfont1.fnt", &filePath);
@@ -1708,6 +1978,9 @@ namespace TFE_DarkForces
 		weapon_enableAutomount(s_config.wpnAutoMount);
 		s_sharedState.screenShotSndSrc = sound_load("scrshot.voc", SOUND_PRIORITY_HIGH0);
 		sound_setBaseVolume(s_sharedState.screenShotSndSrc, 127);
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "DarkForces", "gameStartup end");
+#endif
 	}
 
 	void loadAgentAndLevelData()
@@ -1817,8 +2090,15 @@ namespace TFE_DarkForces
 	bool DarkForces::serializeGameState(Stream* stream, const char* filename, bool writeState)
 	{
 		if (!stream) { return false; }
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState begin write=%d file='%s' loc=%u state=%d",
+			writeState ? 1 : 0, filename ? filename : "", (u32)stream->getLoc(), s_runGameState.state);
+#endif
 		if (writeState && filename)
 		{
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState hud message begin");
+#endif
 			// Write the save message.
 			const char* msg = TFE_System::getMessage(TFE_MSG_SAVE);
 			if (msg)
@@ -1827,9 +2107,18 @@ namespace TFE_DarkForces
 				sprintf(fullMsg, "%s [%s]", msg, filename);
 				hud_sendTextMessage(fullMsg, 0);
 			}
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState hud message end");
+#endif
 		}
 
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState time_pause begin");
+#endif
 		time_pause(JTRUE);
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState time_pause end");
+#endif
 		if (writeState)
 		{
 			serialization_setMode(SMODE_WRITE);
@@ -1839,30 +2128,71 @@ namespace TFE_DarkForces
 			serialization_setMode(SMODE_READ);
 		}
 
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState version begin loc=%u", (u32)stream->getLoc());
+#endif
 		serializeVersion(stream);
 		const u32 curVersion = serialization_getVersion();
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState version end loc=%u version=%u", (u32)stream->getLoc(), curVersion);
+#define XBOX_SAVE_STEP_BEGIN(name) TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState " name " begin loc=%u", (u32)stream->getLoc())
+#define XBOX_SAVE_STEP_END(name) TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState " name " end loc=%u", (u32)stream->getLoc())
+#else
+#define XBOX_SAVE_STEP_BEGIN(name)
+#define XBOX_SAVE_STEP_END(name)
+#endif
 
+		XBOX_SAVE_STEP_BEGIN("loop");
 		serializeLoopState(stream, this);
+		XBOX_SAVE_STEP_END("loop");
+		XBOX_SAVE_STEP_BEGIN("agent");
 		agent_serialize(stream);
+		XBOX_SAVE_STEP_END("agent");
+		XBOX_SAVE_STEP_BEGIN("time");
 		time_serialize(stream);
+		XBOX_SAVE_STEP_END("time");
 		if (!writeState)
 		{
+			XBOX_SAVE_STEP_BEGIN("startMissionFromSave");
 			startMissionFromSave(agent_getLevelIndex());
+			XBOX_SAVE_STEP_END("startMissionFromSave");
 		}
+		XBOX_SAVE_STEP_BEGIN("sound");
 		sound_serializeLevelSounds(stream);
+		XBOX_SAVE_STEP_END("sound");
+		XBOX_SAVE_STEP_BEGIN("random");
 		random_serialize(stream);
+		XBOX_SAVE_STEP_END("random");
+		XBOX_SAVE_STEP_BEGIN("automap");
 		automap_serialize(stream);
+		XBOX_SAVE_STEP_END("automap");
+		XBOX_SAVE_STEP_BEGIN("hitEffect");
 		hitEffect_serializeTasks(stream);
+		XBOX_SAVE_STEP_END("hitEffect");
+		XBOX_SAVE_STEP_BEGIN("weapon");
 		weapon_serialize(stream);
+		XBOX_SAVE_STEP_END("weapon");
+		XBOX_SAVE_STEP_BEGIN("colorMap");
 		mission_serializeColorMap(stream);
+		XBOX_SAVE_STEP_END("colorMap");
+		XBOX_SAVE_STEP_BEGIN("level");
 		level_serialize(stream);
+		XBOX_SAVE_STEP_END("level");
+		XBOX_SAVE_STEP_BEGIN("inf");
 		inf_serialize(stream);
+		XBOX_SAVE_STEP_END("inf");
+		XBOX_SAVE_STEP_BEGIN("pickup");
 		pickupLogic_serializeTasks(stream);
+		XBOX_SAVE_STEP_END("pickup");
+		XBOX_SAVE_STEP_BEGIN("mission");
 		mission_serialize(stream);
+		XBOX_SAVE_STEP_END("mission");
 
 		// TFE - Scripting.
 		serialization_setVersion(curVersion);
+		XBOX_SAVE_STEP_BEGIN("forceScript");
 		TFE_ForceScript::serialize(stream);
+		XBOX_SAVE_STEP_END("forceScript");
 		if (!writeState)
 		{
 			// Setup the level script after script serialization and fixup ScriptCall function pointers.
@@ -1871,7 +2201,9 @@ namespace TFE_DarkForces
 			logic_fixupScriptCalls();
 		}
 
+		XBOX_SAVE_STEP_BEGIN("messages");
 		TFE_System::messages_serialize(stream);
+		XBOX_SAVE_STEP_END("messages");
 
 		if (!writeState)
 		{
@@ -1879,6 +2211,11 @@ namespace TFE_DarkForces
 		}
 
 		time_pause(JFALSE);
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState end loc=%u", (u32)stream->getLoc());
+#undef XBOX_SAVE_STEP_BEGIN
+#undef XBOX_SAVE_STEP_END
+#endif
 		if (!writeState)
 		{
 			task_updateTime();

@@ -1113,26 +1113,56 @@ namespace TFE_Jedi
 	ImSoundId loadMidiFile(char* midiFile)
 	{
 		FilePath filePath;
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "IMuse", "loadMidiFile begin '%s' count=%u", midiFile ? midiFile : "", s_midiFileCount);
+#endif
 		if (!TFE_Paths::getFilePath(midiFile, &filePath))
 		{
 			IM_LOG_ERR("Cannot find midi file '%s'.", midiFile);
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_ERROR, "IMuse", "Cannot find midi file '%s'", midiFile ? midiFile : "");
+#endif
 			return IM_NULL_SOUNDID;
 		}
 		FileStream file;
 		if (!file.open(&filePath, Stream::MODE_READ))
 		{
 			IM_LOG_ERR("Cannot open midi file '%s'.", midiFile);
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_ERROR, "IMuse", "Cannot open midi file '%s'", midiFile ? midiFile : "");
+#endif
 			return IM_NULL_SOUNDID;
 		}
-		assert(s_midiFileCount < IM_MIDI_FILE_COUNT);
+		if (s_midiFileCount >= IM_MIDI_FILE_COUNT)
+		{
+			IM_LOG_ERR("MIDI file table full for '%s'.", midiFile);
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_ERROR, "IMuse", "MIDI file table full for '%s'", midiFile ? midiFile : "");
+#endif
+			file.close();
+			return IM_NULL_SOUNDID;
+		}
 
 		size_t len = file.getSize();
 		s_midiFiles[s_midiFileCount] = (u8*)imuse_alloc(len);
+		if (!s_midiFiles[s_midiFileCount])
+		{
+			IM_LOG_ERR("Cannot allocate midi file '%s'.", midiFile);
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_ERROR, "IMuse", "Cannot allocate midi file '%s' bytes=%u", midiFile ? midiFile : "", (u32)len);
+#endif
+			file.close();
+			return IM_NULL_SOUNDID;
+		}
 		file.readBuffer(s_midiFiles[s_midiFileCount], u32(len));
 		file.close();
 
 		ImSoundId id = ImSoundId(s_midiFileCount | imMidiFlag);
 		s_midiFileCount++;
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "IMuse", "loadMidiFile end '%s' id=%I64d bytes=%u count=%u",
+			midiFile ? midiFile : "", (__int64)id, (u32)len, s_midiFileCount);
+#endif
 		return id;
 	}
 

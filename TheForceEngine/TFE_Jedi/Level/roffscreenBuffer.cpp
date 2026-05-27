@@ -14,6 +14,11 @@ namespace TFE_Jedi
 	{
 		OffScreenBuffer* buffer = (OffScreenBuffer*)game_alloc(sizeof(OffScreenBuffer));
 		s32 size = width * height;
+		if (!buffer || width <= 0 || height <= 0)
+		{
+			TFE_System::logWrite(LOG_ERROR, "OffScreenBuffer", "failed to allocate buffer header %dx%d flags=0x%x", width, height, flags);
+			return nullptr;
+		}
 
 		buffer->width  = width;
 		buffer->height = height;
@@ -21,6 +26,12 @@ namespace TFE_Jedi
 		buffer->size   = size;
 		// This needs to go through the system allocator since it can be very large.
 		buffer->image  = (u8*)system_alloc(size);
+		if (!buffer->image)
+		{
+			TFE_System::logWrite(LOG_ERROR, "OffScreenBuffer", "failed to allocate image %dx%d (%u bytes)", width, height, (u32)size);
+			game_free(buffer);
+			return nullptr;
+		}
 
 		return buffer;
 	}
@@ -34,6 +45,7 @@ namespace TFE_Jedi
 
 	void offscreenBuffer_clearImage(OffScreenBuffer* buffer, u8 clear_color)
 	{
+		if (!buffer || !buffer->image) { return; }
 		memset(buffer->image, clear_color, buffer->size);
 	}
 

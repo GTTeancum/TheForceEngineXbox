@@ -145,7 +145,7 @@ namespace TFE_ExternalData
 
 						if (index >= 0)
 						{
-							ExternalProjectile extProjectile = {};
+							ExternalProjectile extProjectile;
 							extProjectile.type = projectileType->valuestring;
 
 							cJSON* projectileData = projectileType->next;
@@ -249,7 +249,7 @@ namespace TFE_ExternalData
 
 						if (index >= 0)
 						{
-							ExternalEffect extEffect = {};
+							ExternalEffect extEffect;
 							extEffect.type = effectType->valuestring;
 
 							cJSON* effectData = effectType->next;
@@ -365,7 +365,7 @@ namespace TFE_ExternalData
 
 							if (index >= 0)
 							{
-								ExternalWeapon extWeapon = {};
+								ExternalWeapon extWeapon;
 								extWeapon.name = weaponName->valuestring;
 
 								cJSON* weaponData = weaponName->next;

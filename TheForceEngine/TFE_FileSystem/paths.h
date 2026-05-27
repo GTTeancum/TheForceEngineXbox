@@ -61,4 +61,9 @@ namespace TFE_Paths
 
 	// Add a single file that can be referenced by 'fileName' even though the real name may be different.
 	void addSingleFilePath(const char* fileName, const char* filePath);
+
+#ifdef _XBOX
+	void getResourceCounts(u32* searchPathCount, u32* localArchiveCount, u32* fileMappingCount);
+	void debugLogState(const char* tag);
+#endif
 }

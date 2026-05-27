@@ -1,5 +1,5 @@
 // audioDevice_xbox.cpp
-// Xbox DirectSound8 audio device - polled streaming model.
+// Xbox DirectSound8 audio device - threaded streaming pump.
 //
 // Replaces the previous notification-thread implementation, which crashed in
 // CXBX-R's HLE (NULL deref in CDirectSoundBuffer_Lock during the dedicated
@@ -7,10 +7,10 @@
 // retail Xbox audio path uses (xquake, OpenJKDF2, Mercs):
 //
 //   * One stereo 16-bit 44.1kHz secondary buffer, looping.
-//   * No notification events, no audio thread.
-//   * Each main-loop tick calls pump() which polls GetCurrentPosition,
-//     computes how much of the ring buffer has been consumed since last
-//     pump, and refills that space by calling the TFE audio callback.
+//   * No notification events.
+//   * A lightweight pump thread polls GetCurrentPosition, computes how much
+//     of the ring buffer has been consumed, and refills that space by calling
+//     the TFE audio callback. Main-loop pump() calls remain as catch-up.
 //   * Playback only starts (DSBPLAY_LOOPING) once enough data is queued
 //     to avoid an immediate underrun.
 //
@@ -35,7 +35,8 @@
 // callback's upsample step (this caused the previous null-deref crash).
 #define AUDIO_CHUNK_FLT_BYTES   (AUDIO_FRAME_SAMPLES * AUDIO_CHANNELS * (s32)sizeof(f32))   // 8192
 #define AUDIO_CHUNK_PCM_BYTES   (AUDIO_FRAME_SAMPLES * AUDIO_BLOCK_ALIGN)                   // 4096
-#define AUDIO_BUFFER_BYTES      (AUDIO_CHUNK_PCM_BYTES * 8)                                 // 32 KB ring (~186 ms)
+#define AUDIO_BUFFER_BYTES      (AUDIO_CHUNK_PCM_BYTES * 12)                                // 48 KB ring (~279 ms)
+#define AUDIO_NORMAL_TARGET     (AUDIO_CHUNK_PCM_BYTES * 8)                                 // ~186 ms steady queue
 
 namespace TFE_AudioDevice
 {
@@ -54,6 +55,10 @@ namespace TFE_AudioDevice
     static DWORD                 s_lastPlayPos   = 0;
     static int                   s_playPosValid  = 0;
     static int                   s_started       = 0;
+    static HANDLE                s_pumpThread    = NULL;
+    static volatile LONG         s_pumpRun       = 0;
+    static CRITICAL_SECTION      s_pumpCS;
+    static bool                  s_pumpCSInit    = false;
 
     static OutputDeviceInfo      s_deviceList[2];
     static s32                   s_deviceCount   = 0;
@@ -137,6 +142,8 @@ namespace TFE_AudioDevice
         return (int)bytes;
     }
 
+    static DWORD WINAPI pumpThreadMain(LPVOID);
+
     // ---------------------------------------------------------------------------
     bool init(u32 audioFrameSize, s32 /*deviceId*/, bool useNullDevice)
     {
@@ -163,7 +170,7 @@ namespace TFE_AudioDevice
             return false;
         }
 
-        TFE_System::logWrite(LOG_MSG, "AudioDevice", "DirectSound init OK (polled stream)");
+        TFE_System::logWrite(LOG_MSG, "AudioDevice", "DirectSound init OK (threaded pump)");
         return true;
     }
 
@@ -223,27 +230,43 @@ namespace TFE_AudioDevice
         // short stall in the main loop doesn't underrun. 2 PCM chunks.
         s_prefillBytes = AUDIO_CHUNK_PCM_BYTES * 2;
 
+        if (!s_pumpCSInit)
+        {
+            InitializeCriticalSection(&s_pumpCS);
+            s_pumpCSInit = true;
+        }
+        InterlockedExchange((LPLONG)&s_pumpRun, 1);
+        s_pumpThread = CreateThread(NULL, 0, pumpThreadMain, NULL, 0, NULL);
+        if (!s_pumpThread)
+        {
+            InterlockedExchange((LPLONG)&s_pumpRun, 0);
+            TFE_System::logWrite(LOG_WARNING, "AudioDevice", "Audio pump thread creation failed; falling back to main-loop pump");
+        }
+
         TFE_System::logWrite(LOG_MSG, "AudioDevice",
-            "DirectSound output started (polled, %lu byte ring, %lu prefill)",
-            (unsigned long)AUDIO_BUFFER_BYTES, (unsigned long)s_prefillBytes);
+            "DirectSound output started (%s, %lu byte ring, %lu prefill)",
+            s_pumpThread ? "threaded pump" : "main-loop pump",
+            (unsigned long)AUDIO_BUFFER_BYTES,
+            (unsigned long)s_prefillBytes);
         return true;
     }
 
-    // ---------------------------------------------------------------------------
-    // Called from the main loop each frame. Refills the ring buffer with
-    // freshly-mixed audio from the TFE callback.
-    // ---------------------------------------------------------------------------
-    void pump()
+    static void pumpInternalUnlocked(DWORD targetQueuedBytes, int maxChunks)
     {
         if (!s_dsBuf || !s_callback) return;
 
         streamUpdateQueued();
 
-        // Fill until the ring is mostly full (one block of headroom). We may
-        // call the callback multiple times per pump if we're catching up.
-        int safety = 8;   // cap iterations so a runaway callback can't hang
+        if (targetQueuedBytes > AUDIO_BUFFER_BYTES - AUDIO_BLOCK_ALIGN)
+            targetQueuedBytes = AUDIO_BUFFER_BYTES - AUDIO_BLOCK_ALIGN;
+
+        // Fill up to the requested target. Keep latency close to the old
+        // 32 KB ring while the background thread prevents transition gaps.
+        int safety = maxChunks;
         while (safety-- > 0)
         {
+            if (s_queuedBytes >= targetQueuedBytes) break;
+
             DWORD writable;
             if (s_queuedBytes >= AUDIO_BUFFER_BYTES - AUDIO_BLOCK_ALIGN)
                 writable = 0;
@@ -274,10 +297,48 @@ namespace TFE_AudioDevice
         }
     }
 
+    static void pumpInternal(DWORD targetQueuedBytes, int maxChunks)
+    {
+        if (!s_pumpCSInit)
+        {
+            pumpInternalUnlocked(targetQueuedBytes, maxChunks);
+            return;
+        }
+
+        EnterCriticalSection(&s_pumpCS);
+        pumpInternalUnlocked(targetQueuedBytes, maxChunks);
+        LeaveCriticalSection(&s_pumpCS);
+    }
+
+    static DWORD WINAPI pumpThreadMain(LPVOID)
+    {
+        TFE_XboxLogf("AudioDevice", "pump thread entered");
+        while (InterlockedCompareExchange((LPLONG)&s_pumpRun, 0, 0) != 0)
+        {
+            pumpInternal(AUDIO_NORMAL_TARGET, 4);
+            Sleep(4);
+        }
+        TFE_XboxLogf("AudioDevice", "pump thread exit");
+        return 0;
+    }
+
+    void pump()
+    {
+        pumpInternal(AUDIO_NORMAL_TARGET, 8);
+    }
+
     // ---------------------------------------------------------------------------
     void stopOutput()
     {
         TFE_XboxLogf("AudioDevice", "stopOutput started=%d", s_started);
+        if (s_pumpThread)
+        {
+            InterlockedExchange((LPLONG)&s_pumpRun, 0);
+            WaitForSingleObject(s_pumpThread, INFINITE);
+            CloseHandle(s_pumpThread);
+            s_pumpThread = NULL;
+        }
+
         if (s_dsBuf)
         {
             s_dsBuf->Stop();
@@ -290,6 +351,12 @@ namespace TFE_AudioDevice
         s_queuedBytes  = 0;
         s_started      = 0;
         s_playPosValid = 0;
+        InterlockedExchange((LPLONG)&s_pumpRun, 0);
+        if (s_pumpCSInit)
+        {
+            DeleteCriticalSection(&s_pumpCS);
+            s_pumpCSInit = false;
+        }
     }
 
     // ---------------------------------------------------------------------------

@@ -24,8 +24,16 @@ bool GobMemoryArchive::open(const char *archivePath)
 
 bool GobMemoryArchive::open(const u8* buffer, size_t size)
 {
+	const bool opened = openView(buffer, size);
+	if (opened) { m_ownsBuffer = true; }
+	return opened;
+}
+
+bool GobMemoryArchive::openView(const u8* buffer, size_t size)
+{
 	if (!buffer || !size) { return false; }
 
+	m_ownsBuffer = false;
 	m_buffer = buffer;
 	if (!m_buffer) { return false; }
 
@@ -56,8 +64,12 @@ bool GobMemoryArchive::open(const u8* buffer, size_t size)
 void GobMemoryArchive::close()
 {
 	m_archiveOpen = false;
-	free((void*)m_buffer);
+	if (m_ownsBuffer)
+	{
+		free((void*)m_buffer);
+	}
 	m_buffer = nullptr;
+	m_ownsBuffer = true;
 }
 
 // File Access

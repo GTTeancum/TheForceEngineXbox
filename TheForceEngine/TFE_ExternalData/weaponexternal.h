@@ -14,8 +14,8 @@ namespace TFE_ExternalData
 		WEAPON_NUM_ANIMFRAMES = 16,
 	};
 
-	struct ExternalProjectile
-	{
+struct ExternalProjectile
+{
 #ifndef _XBOX
 		const char* type = nullptr;
 
@@ -30,9 +30,40 @@ namespace TFE_ExternalData
 		// Projectile logic
 		const char* updateFunc = "";
 #else
-		const char* type;
+	ExternalProjectile()
+		: type(NULL)
+		, assetType("spirit")
+		, asset("")
+		, fullBright(false)
+		, zeroWidth(false)
+		, autoAim(false)
+		, movable(false)
+		, updateFunc("")
+		, damage(0)
+		, falloffAmount(0)
+		, nextFalloffTick(0)
+		, damageFalloffDelta(0)
+		, minDamage(0)
+		, force(0)
+		, speed(0)
+		, horzBounciness(0)
+		, vertBounciness(0)
+		, bounceCount(0)
+		, reflectVariation(0)
+		, duration(0)
+		, homingAngularSpeed(0)
+		, flightSound("")
+		, reflectSound("")
+		, cameraPassSound("")
+		, reflectEffectId(-1)
+		, hitEffectId(-1)
+		, explodeOnTimeout(false)
+	{
+	}
 
-		// Projectile object
+	const char* type;
+
+	// Projectile object
 		const char* assetType;
 		const char* asset;
 		bool fullBright;
@@ -73,14 +104,26 @@ namespace TFE_ExternalData
 #endif
 	};
 
-	struct ExternalEffect
-	{
+struct ExternalEffect
+{
 #ifndef _XBOX
 		const char* type = nullptr;
 		const char* wax = "";
 #else
-		const char* type;
-		const char* wax;
+	ExternalEffect()
+		: type(NULL)
+		, wax("")
+		, force(0)
+		, damage(0)
+		, explosiveRange(0)
+		, wakeupRange(0)
+		, soundEffect("")
+		, soundPriority(0)
+	{
+	}
+
+	const char* type;
+	const char* wax;
 #endif
 		s32 force;
 		s32 damage;
@@ -95,23 +138,31 @@ namespace TFE_ExternalData
 	};
 
 	// Maps to TFE_DarkForces::WeaponAnimFrame
-	struct WeaponAnimFrame
-	{
+struct WeaponAnimFrame
+{
 #ifndef _XBOX
 		s32 texture = 0;
 		s32 light = 0;
 		u32 durationSupercharge = 0;
 		u32 durationNormal = 0;
 #else
-		s32 texture;
-		s32 light;
-		u32 durationSupercharge;
+	WeaponAnimFrame()
+		: texture(0)
+		, light(0)
+		, durationSupercharge(0)
+		, durationNormal(0)
+	{
+	}
+
+	s32 texture;
+	s32 light;
+	u32 durationSupercharge;
 		u32 durationNormal;
 #endif
 	};
 	
-	struct ExternalWeapon
-	{
+struct ExternalWeapon
+{
 #ifndef _XBOX
 		const char* name = nullptr;
 		s32 frameCount = 1;
@@ -128,9 +179,29 @@ namespace TFE_ExternalData
 
 		s32 numAnimFrames = 1;
 #else
-		const char* name;
-		s32 frameCount;
-		const char* textures[WEAPON_NUM_TEXTURES];
+	ExternalWeapon()
+		: name(NULL)
+		, frameCount(1)
+		, ammo(&TFE_DarkForces::s_playerInfo.ammoEnergy)
+		, secondaryAmmo(NULL)
+		, wakeupRange(0)
+		, variation(0)
+		, primaryFireConsumption(1)
+		, secondaryFireConsumption(1)
+		, numAnimFrames(1)
+		, numSecondaryAnimFrames(1)
+	{
+		for (s32 i = 0; i < WEAPON_NUM_TEXTURES; i++)
+		{
+			textures[i] = (i == 0) ? "default.bm" : "";
+			xPos[i] = 0;
+			yPos[i] = 0;
+		}
+	}
+
+	const char* name;
+	s32 frameCount;
+	const char* textures[WEAPON_NUM_TEXTURES];
 		s32 xPos[WEAPON_NUM_TEXTURES];
 		s32 yPos[WEAPON_NUM_TEXTURES];
 		s32* ammo;
@@ -152,16 +223,23 @@ namespace TFE_ExternalData
 		WeaponAnimFrame animFramesSecondary[WEAPON_NUM_ANIMFRAMES];
 	};
 
-	struct ExternalGasmask
-	{
+struct ExternalGasmask
+{
 #ifndef _XBOX
 		const char* texture = "gmask.bm";
 		s32 xPos = 105;
 		s32 yPos = 141;
 #else
-		const char* texture;
-		s32 xPos;
-		s32 yPos;
+	ExternalGasmask()
+		: texture("gmask.bm")
+		, xPos(105)
+		, yPos(141)
+	{
+	}
+
+	const char* texture;
+	s32 xPos;
+	s32 yPos;
 #endif
 	};
 
