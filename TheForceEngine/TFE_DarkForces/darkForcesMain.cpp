@@ -1987,7 +1987,7 @@ namespace TFE_DarkForces
 	{
 		s32 agentCount = agent_loadData();
 #ifdef _XBOX
-		// Virtual agent. Don't touch DARKPILO.CFG. Note that agent_loadData
+		// Virtual agent defaults. Note that agent_loadData
 		// returns the number of successful *reads*, not the number of valid
 		// agents - a freshly-created DARKPILO.CFG (14 zeroed records) makes
 		// it return 14 even though every slot is blank. Detect the blank-

@@ -32,6 +32,39 @@ namespace TFE_DarkForces
 	char** s_levelSrcPaths;
 #ifdef _XBOX
 	static char s_xboxCustomLevelName[32] = "";
+
+	static void xboxAsciiToWide(const char* src, WCHAR* dst, size_t dstCount)
+	{
+		if (!dst || dstCount == 0) return;
+		if (!src) src = "";
+		size_t i = 0;
+		for (; src[i] && i < dstCount - 1; i++)
+		{
+			dst[i] = (WCHAR)(u8)src[i];
+		}
+		dst[i] = 0;
+	}
+
+	static void xboxEnsureTrailingSlash(char* path)
+	{
+		if (!path || !path[0]) return;
+		size_t len = strlen(path);
+		if (len > 0 && path[len - 1] != '\\' && path[len - 1] != '/' && len < TFE_MAX_PATH - 1)
+		{
+			path[len] = '\\';
+			path[len + 1] = 0;
+		}
+	}
+
+	static void xboxFatalAgentSaveFailure(DWORD code)
+	{
+		assert(0 && "Xbox DARKPILO UDATA failure");
+		DebugBreak();
+
+		volatile DWORD* crash = (volatile DWORD*)0;
+		*crash = code ? code : 1;
+		for (;;) {}
+	}
 #endif
 
 	static Task* s_levelEndTask = nullptr;
@@ -577,14 +610,62 @@ namespace TFE_DarkForces
 		return JTRUE;
 	}
 		
-	// This function differs slightly from Dark Forces in the following ways:
-	// 1. First it tries to open the CFG file from PATH_PROGRAM_DATA/DarkPilot.cfg
-	// 2. If (1) fails, it will then attempt to copy the file from PATH_SOURCE/DarkPilot.cfg to PATH_PROGRAM_DATA/DarkPilot.cfg
-	// 3. Instead of returning a handle, the caller passes in a FileStream pointer to be filled in.
-	// This is done so that the original data cannot be corrupted by a potentially buggy Alpha build.
-	// Also, later, the TFE based save format will likely change - so importing will be necessary anyway.
+	// Xbox stores DARKPILO.CFG in the title's UDATA save container and fails
+	// hard if that container cannot be created or opened.
+	// Other platforms keep the original TFE migration path below.
 	JBool openDarkPilotConfig(FileStream* file)
 	{
+#ifdef _XBOX
+		assert(file);
+
+		WCHAR saveName[MAX_GAMENAME];
+		xboxAsciiToWide("Dark Forces Saves", saveName, MAX_GAMENAME);
+
+		char saveRoot[MAX_PATH];
+		memset(saveRoot, 0, sizeof(saveRoot));
+		DWORD result = XCreateSaveGame("U:\\", saveName, OPEN_ALWAYS, 0, saveRoot, MAX_PATH);
+		if (result != ERROR_SUCCESS || !saveRoot[0])
+		{
+			TFE_System::logWrite(LOG_ERROR, "DarkForcesMain",
+				"UDATA DARKPILO root unavailable result=%lu path='%s'",
+				result, saveRoot);
+			xboxFatalAgentSaveFailure(result);
+			return JFALSE;
+		}
+		xboxEnsureTrailingSlash(saveRoot);
+
+		char documentsPath[TFE_MAX_PATH];
+		snprintf(documentsPath, TFE_MAX_PATH, "%sDARKPILO.CFG", saveRoot);
+		if (!FileUtil::exists(documentsPath))
+		{
+			TFE_System::logWrite(LOG_MSG, "DarkForcesMain", "Creating UDATA DARKPILO.CFG at '%s'.", documentsPath);
+			if (!createDarkPilotConfig(documentsPath))
+			{
+				TFE_System::logWrite(LOG_ERROR, "DarkForcesMain", "Cannot create UDATA DARKPILO.CFG at '%s'.", documentsPath);
+				xboxFatalAgentSaveFailure(1);
+				return JFALSE;
+			}
+		}
+
+		if (!file->open(documentsPath, Stream::MODE_READWRITE))
+		{
+			TFE_System::logWrite(LOG_ERROR, "DarkForcesMain", "cannot open UDATA DARKPILO.CFG at '%s'", documentsPath);
+			xboxFatalAgentSaveFailure(1);
+			return JFALSE;
+		}
+
+		PilotConfigHeader header;
+		file->readBuffer(&header, sizeof(PilotConfigHeader));
+		if (header.version == 0x12 && header.count == 14 && strncasecmp(header.signature, "PCF", 3) == 0)
+		{
+			return JTRUE;
+		}
+
+		file->close();
+		TFE_System::logWrite(LOG_ERROR, "DarkForcesMain", "UDATA DARKPILO.CFG corrupted at '%s'.", documentsPath);
+		xboxFatalAgentSaveFailure(1);
+		return JFALSE;
+#else
 		bool triedonce = false;
 		assert(file);
 
@@ -654,5 +735,6 @@ namespace TFE_DarkForces
 			goto newpilo;
 		}
 		return JFALSE;
+#endif
 	}
 }  // namespace TFE_DarkForces

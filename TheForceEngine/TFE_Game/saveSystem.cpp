@@ -44,6 +44,85 @@ namespace TFE_SaveSystem
 	static u32* s_imageBuffer[2] = { nullptr, nullptr };
 	static size_t s_imageBufferSize[2] = { 0 };
 
+#ifdef _XBOX
+	static bool s_xboxSaveRootAttempted = false;
+	static bool s_xboxSaveRootValid = false;
+	static char s_xboxSaveRoot[TFE_MAX_PATH];
+
+	static void xboxAsciiToWide(const char* src, WCHAR* dst, size_t dstCount)
+	{
+		if (!dst || dstCount == 0) return;
+		if (!src) src = "";
+		size_t i = 0;
+		for (; src[i] && i < dstCount - 1; i++)
+		{
+			dst[i] = (WCHAR)(u8)src[i];
+		}
+		dst[i] = 0;
+	}
+
+	static void xboxEnsureTrailingSlash(char* path)
+	{
+		if (!path || !path[0]) return;
+		size_t len = strlen(path);
+		if (len > 0 && path[len - 1] != '\\' && path[len - 1] != '/' && len < TFE_MAX_PATH - 1)
+		{
+			path[len] = '\\';
+			path[len + 1] = 0;
+		}
+	}
+
+	static void xboxFatalSaveFailure(DWORD code)
+	{
+		assert(0 && "Xbox UDATA save failure");
+		DebugBreak();
+
+		volatile DWORD* crash = (volatile DWORD*)0;
+		*crash = code ? code : 1;
+		for (;;) {}
+	}
+
+	static bool xboxEnsureSaveRoot()
+	{
+		if (s_xboxSaveRootAttempted) return s_xboxSaveRootValid;
+		s_xboxSaveRootAttempted = true;
+		s_xboxSaveRootValid = false;
+		s_xboxSaveRoot[0] = 0;
+
+		WCHAR saveName[MAX_GAMENAME];
+		xboxAsciiToWide("Dark Forces Saves", saveName, MAX_GAMENAME);
+
+		char savePath[MAX_PATH];
+		memset(savePath, 0, sizeof(savePath));
+		DWORD result = XCreateSaveGame("U:\\", saveName, OPEN_ALWAYS, 0, savePath, MAX_PATH);
+		if (result != ERROR_SUCCESS || !savePath[0])
+		{
+			TFE_System::logWrite(LOG_ERROR, "SaveSystem",
+				"UDATA save root unavailable result=%lu path='%s'",
+				result, savePath);
+			xboxFatalSaveFailure(result);
+			return false;
+		}
+
+		strncpy(s_xboxSaveRoot, savePath, TFE_MAX_PATH - 1);
+		s_xboxSaveRoot[TFE_MAX_PATH - 1] = 0;
+		xboxEnsureTrailingSlash(s_xboxSaveRoot);
+
+		char srcImage[TFE_MAX_PATH];
+		char dstImage[TFE_MAX_PATH];
+		TFE_Paths::appendPath(PATH_PROGRAM, "SaveImage.xbx", srcImage);
+		snprintf(dstImage, TFE_MAX_PATH, "%sSaveImage.xbx", s_xboxSaveRoot);
+		if (FileUtil::exists(srcImage))
+		{
+			FileUtil::copyFile(srcImage, dstImage);
+		}
+
+		s_xboxSaveRootValid = true;
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "UDATA save root ready '%s'", s_xboxSaveRoot);
+		return true;
+	}
+#endif
+
 	static u32 quickSaveHash(const char* text)
 	{
 		u32 hash = 2166136261u;
@@ -621,6 +700,29 @@ namespace TFE_SaveSystem
 
 	void setCurrentGame(GameID id)
 	{
+#ifdef _XBOX
+		if (!xboxEnsureSaveRoot())
+		{
+			s_gameSavePath[0] = 0;
+			TFE_System::logWrite(LOG_ERROR, "SaveSystem", "setCurrentGame failed: UDATA unavailable id=%d", (s32)id);
+			xboxFatalSaveFailure(1);
+			return;
+		}
+
+		char relativeBasePath[TFE_MAX_PATH];
+		snprintf(relativeBasePath, TFE_MAX_PATH, "%sSaves\\", s_xboxSaveRoot);
+		if (!FileUtil::directoryExists(relativeBasePath))
+		{
+			FileUtil::makeDirectory(relativeBasePath);
+		}
+
+		snprintf(s_gameSavePath, TFE_MAX_PATH, "%sSaves\\%s\\", s_xboxSaveRoot, TFE_Settings::c_gameName[id]);
+		if (!FileUtil::directoryExists(s_gameSavePath))
+		{
+			FileUtil::makeDirectory(s_gameSavePath);
+		}
+		TFE_System::logWrite(LOG_MSG, "SaveSystem", "setCurrentGame UDATA id=%d path='%s'", (s32)id, s_gameSavePath);
+#else
 		char relativeBasePath[TFE_MAX_PATH];
 		TFE_Paths::appendPath(PATH_USER_DOCUMENTS, "Saves/", relativeBasePath);
 		if (!FileUtil::directoryExists(relativeBasePath))
@@ -636,6 +738,7 @@ namespace TFE_SaveSystem
 		{
 			FileUtil::makeDirectory(s_gameSavePath);
 		}
+#endif
 	}
 		
 	void setCurrentGame(IGame* game)
