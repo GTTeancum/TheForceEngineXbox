@@ -108,14 +108,6 @@ void game_resetLevelRegion(const char* context)
 
 	MemoryRegion* oldRegion = s_levelRegion;
 	MemoryRegion* newRegion = region_create("level", LEVEL_MEMORY_BASE);
-	if (!newRegion && oldRegion)
-	{
-		TFE_System::logWrite(LOG_WARNING, "Game", "resetLevelRegion pre-alloc failed; releasing old region and retrying");
-		region_destroy(oldRegion);
-		oldRegion = nullptr;
-		newRegion = region_create("level", LEVEL_MEMORY_BASE);
-	}
-
 	if (newRegion)
 	{
 		if (oldRegion)
@@ -126,11 +118,15 @@ void game_resetLevelRegion(const char* context)
 	}
 	else
 	{
-		TFE_System::logWrite(LOG_ERROR, "Game", "resetLevelRegion failed to recreate level region");
 		s_levelRegion = oldRegion;
 		if (s_levelRegion)
 		{
+			TFE_System::logWrite(LOG_WARNING, "Game", "resetLevelRegion could not preallocate replacement; keeping old region");
 			region_clear(s_levelRegion);
+		}
+		else
+		{
+			TFE_System::logWrite(LOG_ERROR, "Game", "resetLevelRegion failed with no existing level region");
 		}
 	}
 
