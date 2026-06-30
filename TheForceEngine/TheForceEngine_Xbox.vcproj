@@ -490,6 +490,9 @@
 		<File
 			RelativePath=".\TFE_FileSystem\filestream.cpp"
 			>
+			<FileConfiguration Name="Debug|Win32" ExcludedFromBuild="true">
+				<Tool Name="VCCLCompilerTool" />
+			</FileConfiguration>
 			<FileConfiguration Name="Release|Win32" ExcludedFromBuild="true">
 				<Tool Name="VCCLCompilerTool" />
 			</FileConfiguration>
@@ -834,7 +837,7 @@
 			>
 		</File>
 		<File
-			RelativePath=".\TFE_Audio\midiPlayer_xbox.cpp"
+			RelativePath=".\TFE_Audio\midiPlayer.cpp"
 			>
 		</File>
 		<File

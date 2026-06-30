@@ -413,6 +413,17 @@ namespace TFE_DarkForces
 		TFE_RenderBackend::xboxSetBriefingFooter(true, true, s_skill);
 	}
 
+	static LRect missionBriefing_getXboxTextRect()
+	{
+		LRect rect = s_missionTextRect;
+		rect.right += 24;
+		if (rect.right > 320)
+		{
+			rect.right = 320;
+		}
+		return rect;
+	}
+
 	static void missionBriefing_xboxFillRect(u8* dst, s32 x, s32 y, s32 w, s32 h, u8 color)
 	{
 		if (!dst || w <= 0 || h <= 0) return;
@@ -536,21 +547,22 @@ namespace TFE_DarkForces
 
 		memset(s_xboxBriefingFrame, black, sizeof(s_xboxBriefingFrame));
 
-		const s32 panelX = 230;
+		const s32 panelX = 226;
 		const s32 panelY = 50;
-		const s32 panelW = 405;
+		const s32 panelW = 412;
 		const s32 panelH = 356;
-		const s32 innerX = panelX + 10;
-		const s32 innerW = panelW - 25;
+		const s32 innerX = panelX + 8;
+		const s32 innerW = panelW - 18;
 		const s32 headerY = panelY + 10;
 		const s32 headerH = 80;
 		const s32 bodyY = headerY + headerH;
 		const s32 bodyH = 230;
 		const s32 sectionY = bodyY + bodyH;
 		const s32 sectionH = 36;
-		const s32 textClipW = innerW - 20;
+		const s32 textClipW = innerW - 8;
 		const s32 textClipH = sectionY + sectionH - headerY;
 		const s32 arrowX = panelX + panelW - 15;
+		const LRect textRect = missionBriefing_getXboxTextRect();
 
 		missionBriefing_xboxFillRect(s_xboxBriefingFrame, panelX, panelY, panelW, panelH, brown);
 		missionBriefing_xboxFillRect(s_xboxBriefingFrame, innerX, headerY, innerW, headerH, green);
@@ -563,9 +575,9 @@ namespace TFE_DarkForces
 
 		missionBriefing_xboxBlitScaled(s_xboxBriefingFrame, portraitSrc, 0, 10, 108, 150, 16, 54, 2, black);
 		missionBriefing_xboxBlitBriefingScaledClipped(s_xboxBriefingFrame, briefingSrc,
-			s_missionTextRect.left, s_missionTextRect.top,
-			s_missionTextRect.right - s_missionTextRect.left,
-			s_missionTextRect.bottom - s_missionTextRect.top,
+			textRect.left, textRect.top,
+			textRect.right - textRect.left,
+			textRect.bottom - textRect.top,
 			innerX, headerY, 2, black, brown, green, green2, innerX, headerY, textClipW, textClipH);
 
 		vfb_setResolution(640, 480);
@@ -794,8 +806,14 @@ namespace TFE_DarkForces
 		s16 x = diff + rect.left - s_briefActor->x;
 		s16 y = (rect.top - s_briefActor->y) - s_briefY;
 
+#ifndef _XBOX
 		lcanvas_setClip(&s_missionTextRect);
 		lactorDelt_draw(s_briefActor, &rect, &s_missionTextRect, x, y, JTRUE);
+#else
+		LRect xboxTextRect = missionBriefing_getXboxTextRect();
+		lcanvas_setClip(&xboxTextRect);
+		lactorDelt_draw(s_briefActor, &rect, &xboxTextRect, x, y, JTRUE);
+#endif
 		lcanvas_clearClipRect();
 
 #ifndef _XBOX

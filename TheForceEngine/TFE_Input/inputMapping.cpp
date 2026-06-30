@@ -170,16 +170,23 @@ namespace TFE_Input
 	static int          s_currentKeyPressCount = 0;
 
 	void addDefaultControlBinds();
+	void inputMapping_removeBinding(u32 index);
+#ifdef _XBOX
+	void inputMapping_sanitizeXboxBindings();
+#endif
 
 	// -----------------------------------------------------------------------
 	void inputMapping_startup()
 	{
 #ifdef _XBOX
-		// Xbox has no remap UI, so always seed from the in-source defaults.
-		// Restoring from disk would re-load stale bindings written by an
-		// earlier build (e.g. the A->MBUTTON_LEFT->PRIMARY_FIRE binding
-		// that made A both jump and fire).
+		if (inputMapping_restore())
+		{
+			inputMapping_sanitizeXboxBindings();
+			inputMapping_serialize();
+			return;
+		}
 		inputMapping_resetToDefaults();
+		inputMapping_sanitizeXboxBindings();
 		inputMapping_serialize();
 		return;
 #else
@@ -332,6 +339,33 @@ namespace TFE_Input
 		s_inputConfig.binds[index] = *binding;
 	}
 
+	bool inputMapping_setControllerBinding(InputAction action, InputType type, u32 code)
+	{
+		if (action < 0 || action >= IA_COUNT) return false;
+		if (type != ITYPE_CONTROLLER && type != ITYPE_CONTROLLER_AXIS) return false;
+
+		for (s32 i = (s32)s_inputConfig.bindCount - 1; i >= 0; i--)
+		{
+			InputBinding* bind = &s_inputConfig.binds[i];
+			const bool controllerBinding = bind->type == ITYPE_CONTROLLER || bind->type == ITYPE_CONTROLLER_AXIS;
+			const bool sameAction = bind->action == action;
+			const bool sameControl = bind->type == type && bind->code == code;
+			if (controllerBinding && (sameAction || sameControl))
+			{
+				inputMapping_removeBinding((u32)i);
+			}
+		}
+
+		InputBinding binding;
+		memset(&binding, 0, sizeof(binding));
+		binding.action = action;
+		binding.type = type;
+		binding.code = code;
+		binding.keyMod = KEYMOD_NONE;
+		inputMapping_addBinding(&binding);
+		return true;
+	}
+
 	void addDefaultControlBinds()
 	{
 		for (s32 i = 0; i < TFE_ARRAYSIZE(s_defaultKeyboardBinds); i++)
@@ -339,6 +373,21 @@ namespace TFE_Input
 		for (s32 i = 0; i < TFE_ARRAYSIZE(s_defaultControllerBinds); i++)
 			inputMapping_addBinding(&s_defaultControllerBinds[i]);
 	}
+
+#ifdef _XBOX
+	void inputMapping_sanitizeXboxBindings()
+	{
+		for (s32 i = (s32)s_inputConfig.bindCount - 1; i >= 0; i--)
+		{
+			InputBinding* bind = &s_inputConfig.binds[i];
+			if (bind->type == ITYPE_MOUSE &&
+				(bind->action == IADF_PRIMARY_FIRE || bind->action == IADF_SECONDARY_FIRE))
+			{
+				inputMapping_removeBinding((u32)i);
+			}
+		}
+	}
+#endif
 
 	void inputMapping_endFrame()
 	{
@@ -546,7 +595,8 @@ namespace TFE_Input
 
 	void inputMapping_removeBinding(u32 index)
 	{
-		for (u32 i = index; i < s_inputConfig.bindCount; i++)
+		if (index >= s_inputConfig.bindCount) return;
+		for (u32 i = index; i + 1 < s_inputConfig.bindCount; i++)
 			s_inputConfig.binds[i] = s_inputConfig.binds[i + 1];
 		s_inputConfig.bindCount--;
 	}

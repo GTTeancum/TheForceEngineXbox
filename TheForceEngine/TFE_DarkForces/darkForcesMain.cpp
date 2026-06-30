@@ -968,6 +968,12 @@ namespace TFE_DarkForces
 				}
 
 #ifdef _XBOX
+				bitmap_clearLevelData();
+				level_freeAllAssets();
+				bitmap_setAllocator(s_gameRegion);
+				region_clear(s_levelRegion);
+				TFE_A11Y::clearActiveCaptions();
+
 				if (xboxAbortToStart)
 				{
 					TFE_XboxReturnToStartMenu();
@@ -977,12 +983,13 @@ namespace TFE_DarkForces
 				{
 					startNextMode();
 				}
-
-				region_clear(s_levelRegion);
+#ifndef _XBOX
 				bitmap_clearLevelData();
-				bitmap_setAllocator(s_gameRegion);
 				level_freeAllAssets();
+				bitmap_setAllocator(s_gameRegion);
+				region_clear(s_levelRegion);
 				TFE_A11Y::clearActiveCaptions();
+#endif
 			}
 		} break;
 		}
@@ -1209,7 +1216,8 @@ namespace TFE_DarkForces
 				}
 				else if ((c == 'l' || c == 'L') && arg[2])
 				{
-					strcpy(startLevel, arg + 2);
+					strncpy(startLevel, arg + 2, TFE_MAX_PATH - 1);
+					startLevel[TFE_MAX_PATH - 1] = 0;
 				}
 				else if (c == 'u' || c == 'U')
 				{
@@ -1310,6 +1318,49 @@ namespace TFE_DarkForces
 		return buffer;
 	}
 
+	typedef void (*ExternalJsonParser)(char* data, bool fromMod);
+
+	static void loadLooseExternalJson(const char* jsonPath, const char* label, ExternalJsonParser parser)
+	{
+		if (!jsonPath || !jsonPath[0] || !parser) return;
+		if (!FileUtil::exists(jsonPath)) return;
+
+		FileStream file;
+		if (!file.open(jsonPath, FileStream::MODE_READ))
+		{
+			TFE_System::logWrite(LOG_WARNING, "Mod",
+				"skipping optional external data '%s': open failed path='%s'",
+				label ? label : "", jsonPath);
+			return;
+		}
+
+		const size_t size = file.getSize();
+		if (size == 0)
+		{
+			file.close();
+			TFE_System::logWrite(LOG_WARNING, "Mod",
+				"skipping optional external data '%s': empty file path='%s'",
+				label ? label : "", jsonPath);
+			return;
+		}
+
+		char* data = (char*)malloc(size + 1);
+		if (!data)
+		{
+			file.close();
+			TFE_System::logWrite(LOG_ERROR, "Mod",
+				"skipping optional external data '%s': alloc failed size=%u path='%s'",
+				label ? label : "", (u32)size, jsonPath);
+			return;
+		}
+
+		file.readBuffer(data, (u32)size);
+		data[size] = 0;
+		file.close();
+		parser(data, true);
+		free(data);
+	}
+
 	void loadCustomGob(const char* gobName)
 	{
 #ifdef _XBOX
@@ -1323,7 +1374,20 @@ namespace TFE_DarkForces
 		s32 lfdCount = 0;
 		s32 briefingIndex = -1;
 
-		strcpy(s_sharedState.customGobName, gobName);
+		if (!gobName || !gobName[0])
+		{
+			s_sharedState.customGobName[0] = 0;
+			TFE_System::logWrite(LOG_ERROR, "Mod", "custom archive name is empty");
+			return;
+		}
+		if (strlen(gobName) >= sizeof(s_sharedState.customGobName))
+		{
+			s_sharedState.customGobName[0] = 0;
+			TFE_System::logWrite(LOG_ERROR, "Mod", "custom archive name too long '%s'", gobName);
+			return;
+		}
+		strncpy(s_sharedState.customGobName, gobName, sizeof(s_sharedState.customGobName) - 1);
+		s_sharedState.customGobName[sizeof(s_sharedState.customGobName) - 1] = 0;
 
 		if (TFE_Paths::getFilePath(gobName, &archivePath))
 		{
@@ -1608,11 +1672,13 @@ namespace TFE_DarkForces
 							if (strstr(name, "brief") || strstr(name, "BRIEF"))
 							{
 								briefingIndex = s32(i);
-								strcpy(briefingName, name);
+								strncpy(briefingName, name, TFE_MAX_PATH - 1);
+								briefingName[TFE_MAX_PATH - 1] = 0;
 							}
 							else if (lfdCount < MAX_MOD_LFD)
 							{
-								strcpy(lfdName[lfdCount], name);
+								strncpy(lfdName[lfdCount], name, TFE_MAX_PATH - 1);
+								lfdName[lfdCount][TFE_MAX_PATH - 1] = 0;
 								lfdCount++;
 							}
 						}
@@ -1621,7 +1687,8 @@ namespace TFE_DarkForces
 					// If there is only 1 LFD, assume it is mission briefings.
 					if (lfdCount == 1 && briefingIndex < 0)
 					{
-						strcpy(briefingName, lfdName[0]);
+						strncpy(briefingName, lfdName[0], TFE_MAX_PATH - 1);
+						briefingName[TFE_MAX_PATH - 1] = 0;
 						briefingIndex = 0;
 						lfdCount = 0;
 					}
@@ -1630,91 +1697,31 @@ namespace TFE_DarkForces
 					char lfdPath[TFE_MAX_PATH];
 					if (briefingIndex >= 0)
 					{
-						sprintf(lfdPath, "%s%s", modPath, briefingName);
+						snprintf(lfdPath, TFE_MAX_PATH, "%s%s", modPath, briefingName);
 						TFE_Paths::addSingleFilePath("dfbrief.lfd", lfdPath);
 					}
 
 					// Extract and copy the LFD.
 					for (s32 i = 0; i < lfdCount; i++)
 					{
-						sprintf(lfdPath, "%s%s", modPath, lfdName[i]);
+						snprintf(lfdPath, TFE_MAX_PATH, "%s%s", modPath, lfdName[i]);
 						TFE_Paths::addSingleFilePath(lfdName[i], lfdPath);
 					}
 
 					// Load external data overrides
 					char jsonPath[TFE_MAX_PATH];
 
-					sprintf(jsonPath, "%s%s", modPath, "projectiles.json");
-					if (FileUtil::exists(jsonPath))
-					{
-						FileStream file;
-						if (!file.open(jsonPath, FileStream::MODE_READ)) { return; }
-						const size_t size = file.getSize();
-						char* data = (char*)malloc(size + 1);
+					snprintf(jsonPath, TFE_MAX_PATH, "%s%s", modPath, "projectiles.json");
+					loadLooseExternalJson(jsonPath, "projectiles.json", TFE_ExternalData::parseExternalProjectiles);
 
-						if (size > 0 && data)
-						{
-							file.readBuffer(data, (u32)size);
-							data[size] = 0;
-							file.close();
-							TFE_ExternalData::parseExternalProjectiles(data, true);
-							free(data);
-						}
-					}
+					snprintf(jsonPath, TFE_MAX_PATH, "%s%s", modPath, "effects.json");
+					loadLooseExternalJson(jsonPath, "effects.json", TFE_ExternalData::parseExternalEffects);
 
-					sprintf(jsonPath, "%s%s", modPath, "effects.json");
-					if (FileUtil::exists(jsonPath))
-					{
-						FileStream file;
-						if (!file.open(jsonPath, FileStream::MODE_READ)) { return; }
-						const size_t size = file.getSize();
-						char* data = (char*)malloc(size + 1);
+					snprintf(jsonPath, TFE_MAX_PATH, "%s%s", modPath, "pickups.json");
+					loadLooseExternalJson(jsonPath, "pickups.json", TFE_ExternalData::parseExternalPickups);
 
-						if (size > 0 && data)
-						{
-							file.readBuffer(data, (u32)size);
-							data[size] = 0;
-							file.close();
-							TFE_ExternalData::parseExternalEffects(data, true);
-							free(data);
-						}
-					}
-
-					sprintf(jsonPath, "%s%s", modPath, "pickups.json");
-					if (FileUtil::exists(jsonPath))
-					{
-						FileStream file;
-						if (!file.open(jsonPath, FileStream::MODE_READ)) { return; }
-						const size_t size = file.getSize();
-						char* data = (char*)malloc(size + 1);
-
-						if (size > 0 && data)
-						{
-							file.readBuffer(data, (u32)size);
-							data[size] = 0;
-							file.close();
-							TFE_ExternalData::parseExternalPickups(data, true);
-							free(data);
-						}
-					}
-
-					sprintf(jsonPath, "%s%s", modPath, "weapons.json");
-					if (FileUtil::exists(jsonPath))
-					{
-						FileStream file;
-						if (!file.open(jsonPath, FileStream::MODE_READ)) { return; }
-						const size_t size = file.getSize();
-						char* data = (char*)malloc(size + 1);
-
-						if (size > 0 && data)
-						{
-							file.readBuffer(data, (u32)size);
-							data[size] = 0;
-							file.close();
-							TFE_ExternalData::parseExternalWeapons(data, true);
-							free(data);
-						}
-					}
+					snprintf(jsonPath, TFE_MAX_PATH, "%s%s", modPath, "weapons.json");
+					loadLooseExternalJson(jsonPath, "weapons.json", TFE_ExternalData::parseExternalWeapons);
 				}
 			}
 		}
@@ -2038,9 +2045,9 @@ namespace TFE_DarkForces
 		pda_cleanup();
 		reticle_enable(true);
 
-		region_clear(s_levelRegion);
 		bitmap_clearLevelData();
 		level_freeAllAssets();
+		region_clear(s_levelRegion);
 
 		// Next
 		sound_levelStart();
@@ -2058,7 +2065,7 @@ namespace TFE_DarkForces
 		mission_setupTasks();
 	}
 
-	void serializeLoopState(Stream* stream, DarkForces* game)
+	bool serializeLoopState(Stream* stream, DarkForces* game)
 	{
 		if (s_sharedState.gameStarted)
 		{
@@ -2078,8 +2085,15 @@ namespace TFE_DarkForces
 		}
 		else if (serialization_getMode() == SMODE_READ)  // We need to start the game.
 		{
-			game->runGame(0, nullptr, stream);
+			if (!game || !game->runGame(0, nullptr, stream))
+			{
+#ifdef _XBOX
+				TFE_System::logWrite(LOG_ERROR, "SaveSystem", "serializeLoopState failed to start game while loading save");
+#endif
+				return false;
+			}
 		}
+		return true;
 	}
 
 	void serializeVersion(Stream* stream)
@@ -2143,7 +2157,15 @@ namespace TFE_DarkForces
 #endif
 
 		XBOX_SAVE_STEP_BEGIN("loop");
-		serializeLoopState(stream, this);
+		if (!serializeLoopState(stream, this))
+		{
+			XBOX_SAVE_STEP_END("loop");
+			time_pause(JFALSE);
+#ifdef _XBOX
+			TFE_System::logWrite(LOG_ERROR, "SaveSystem", "serializeGameState aborting after loop startup failure");
+#endif
+			return false;
+		}
 		XBOX_SAVE_STEP_END("loop");
 		XBOX_SAVE_STEP_BEGIN("agent");
 		agent_serialize(stream);

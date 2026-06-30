@@ -174,7 +174,7 @@ namespace TFE_RenderBackend
     static s32  s_optionsSelection = 0;
     static s32  s_optionsScroll = 0;
     static u32  s_optionsFrame = 0;
-    static XboxOptionsItem s_optionsItems[12];
+    static XboxOptionsItem s_optionsItems[32];
     static s32  s_optionsItemCount = 0;
     static bool s_cheatScreenEnabled = false;
     static s32  s_cheatSelection = 0;
@@ -1529,13 +1529,39 @@ namespace TFE_RenderBackend
         pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, x + pos - 3, y + 2, 6, 14, knob);
     }
 
+    static void optionsDrawTextLabel(const char* text, s32 x, s32 y, u32 color, bool pauseStyle)
+    {
+        if (!text || !text[0]) return;
+        if (pauseStyle)
+        {
+            wheelDrawTextScaled(text, x, y + 14, color, 2, 3);
+        }
+        else
+        {
+            loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, text, x, y, 1, color);
+        }
+    }
+
+    static void optionsDrawTextRight(const char* text, s32 rightX, s32 y, u32 color, bool pauseStyle)
+    {
+        if (!text || !text[0]) return;
+        if (pauseStyle)
+        {
+            wheelDrawTextRightScaled(text, rightX, y + 14, color, 2, 3);
+        }
+        else
+        {
+            loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, text, rightX, y, 1, color);
+        }
+    }
+
     static void optionsDrawRows(s32 panelX, s32 panelY, s32 panelW, s32 firstY, bool pauseStyle)
     {
         const s32 visibleRows = 7;
-        const s32 rowH = 36;
-        const s32 labelX = panelX + 34;
-        const s32 sliderX = panelX + panelW - 218;
-        const s32 sliderW = 136;
+        const s32 rowH = pauseStyle ? 31 : 36;
+        const s32 labelX = panelX + (pauseStyle ? 28 : 34);
+        const s32 sliderX = panelX + panelW - (pauseStyle ? 182 : 218);
+        const s32 sliderW = pauseStyle ? 104 : 136;
         const u32 normalText = pauseStyle ? 0xFFC8C8C8u : 0xFF8E8B72u;
         const u32 selectedText = pauseStyle ? XPAUSE_WHITE : 0xFFFF3030u;
 
@@ -1549,17 +1575,23 @@ namespace TFE_RenderBackend
             if (selected)
             {
                 const u32 bar = pauseStyle ? XPAUSE_GREEN_MID : 0xFF24180Eu;
-                pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 18, y - 8, panelW - 36, 30, bar);
+                pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 12, y - 6, panelW - 24, pauseStyle ? 25 : 30, bar);
             }
 
-            loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_optionsItems[index].label,
-                labelX, y, 1, selected ? selectedText : normalText);
-            optionsDrawSlider(sliderX, y, sliderW, &s_optionsItems[index], selected, pauseStyle);
+            optionsDrawTextLabel(s_optionsItems[index].label, labelX, y, selected ? selectedText : normalText, pauseStyle);
+            if (s_optionsItems[index].valueText)
+            {
+                const u32 valueColor = s_optionsItems[index].capture ? 0xFF33D033u : (selected ? selectedText : normalText);
+                optionsDrawTextRight(s_optionsItems[index].valueText, panelX + panelW - 24, y, valueColor, pauseStyle);
+            }
+            else
+            {
+                optionsDrawSlider(sliderX, y, sliderW, &s_optionsItems[index], selected, pauseStyle);
 
-            char valueText[16];
-            sprintf(valueText, "%d", s_optionsItems[index].value);
-            loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, valueText,
-                panelX + panelW - 28, y, 1, selected ? selectedText : normalText);
+                char valueText[16];
+                sprintf(valueText, "%d", s_optionsItems[index].value);
+                optionsDrawTextRight(valueText, panelX + panelW - 24, y, selected ? selectedText : normalText, pauseStyle);
+            }
         }
     }
 
@@ -1567,7 +1599,7 @@ namespace TFE_RenderBackend
     {
         if (s_optionsPauseStyle)
         {
-            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 0, 0, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, XPAUSE_BLACK);
+            memset(s_expandBuf, 0, XBOX_OUTPUT_WIDTH * XBOX_OUTPUT_HEIGHT * sizeof(u32));
         }
         else
         {
@@ -1575,17 +1607,18 @@ namespace TFE_RenderBackend
         }
 
         const bool pauseStyle = s_optionsPauseStyle;
-        const s32 panelX = pauseStyle ? 82 : 86;
-        const s32 panelY = pauseStyle ? 58 : 76;
-        const s32 panelW = pauseStyle ? 476 : 468;
-        const s32 panelH = pauseStyle ? 340 : 324;
+        const s32 panelX = pauseStyle ? 106 : 86;
+        const s32 panelY = pauseStyle ? 54 : 76;
+        const s32 panelW = pauseStyle ? 428 : 468;
+        const s32 panelH = pauseStyle ? 342 : 324;
 
         if (pauseStyle)
         {
-            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 5, panelY + 5, panelW, panelH, XPAUSE_GREY_DARK);
-            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, XPAUSE_GREEN_DARK);
-            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, XPAUSE_GREY);
-            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 6, panelY + 6, panelW - 12, panelH - 12, XPAUSE_GREEN_EDGE);
+            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 7, panelY + 7, panelW, panelH, 0xD0000000u);
+            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xFF2A2D2Au);
+            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xFF8B8F86u);
+            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 13, panelY + 17, panelW - 26, panelH - 34, XPAUSE_GREEN_DARK);
+            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 13, panelY + 17, panelW - 26, panelH - 34, XPAUSE_GREEN_EDGE);
         }
         else
         {
@@ -1593,26 +1626,46 @@ namespace TFE_RenderBackend
             loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xFF4F4A34u);
         }
 
-        startDrawTextSprite(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, XST_OPTIONS,
-            (XBOX_OUTPUT_WIDTH - c_xboxStartText[XST_OPTIONS].width) / 2, pauseStyle ? 24 : 34,
-            pauseStyle ? XPAUSE_WHITE : 0xFFFF3030u, !pauseStyle);
+        if (pauseStyle)
+        {
+            wheelDrawTextCenter("OPTIONS", panelX + panelW / 2, panelY + 42, XPAUSE_WHITE);
+        }
+        else
+        {
+            startDrawTextSprite(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, XST_OPTIONS,
+                (XBOX_OUTPUT_WIDTH - c_xboxStartText[XST_OPTIONS].width) / 2, 34,
+                0xFFFF3030u, true);
+        }
 
-        optionsDrawRows(panelX, panelY, panelW, panelY + 52, pauseStyle);
+        optionsDrawRows(panelX + (pauseStyle ? 13 : 0), panelY, panelW - (pauseStyle ? 26 : 0), panelY + (pauseStyle ? 78 : 52), pauseStyle);
 
         const u32 arrowColor = pauseStyle ? XPAUSE_GREEN_EDGE : 0xFFFF3030u;
         if (s_optionsScroll > 0)
         {
-            optionsDrawTriangle(panelX + panelW - 18, panelY + 52, 7, 10, true, arrowColor);
+            optionsDrawTriangle(panelX + panelW - (pauseStyle ? 28 : 18), panelY + (pauseStyle ? 74 : 52), 7, 10, true, arrowColor);
         }
         if (s_optionsScroll + 7 < s_optionsItemCount)
         {
-            optionsDrawTriangle(panelX + panelW - 18, panelY + panelH - 32, 7, 10, false, arrowColor);
+            optionsDrawTriangle(panelX + panelW - (pauseStyle ? 28 : 18), panelY + panelH - (pauseStyle ? 52 : 32), 7, 10, false, arrowColor);
         }
 
-        footerDrawBar(pauseStyle ? 0xFF1B6A1Bu : 0xFF3C2E10u);
-        footerDrawItem(XFT_A_APPLY, 28, 0xFF33D033u);
-        footerDrawItem(XFT_B_BACK, 138, 0xFFFF3030u);
-        footerDrawItem(XFT_DPAD_ADJUST, 255, 0xFF8E8B72u);
+        if (pauseStyle)
+        {
+            const s32 hintY = panelY + panelH - 31;
+            dukeDrawIcon(XDB_A, panelX + 28, hintY - 5, 16);
+            wheelDrawTextScaled("APPLY", panelX + 50, hintY + 8, 0xFF33D033u, 2, 3);
+            dukeDrawIcon(XDB_B, panelX + 128, hintY - 5, 16);
+            wheelDrawTextScaled("BACK", panelX + 150, hintY + 8, 0xFFFF3030u, 2, 3);
+            dukeDrawIcon(XDB_DPAD, panelX + 214, hintY - 6, 17);
+            wheelDrawTextScaled("ADJUST", panelX + 240, hintY + 8, 0xFFC8C8C8u, 2, 3);
+        }
+        else
+        {
+            footerDrawBar(0xFF3C2E10u);
+            footerDrawItem(XFT_A_APPLY, 28, 0xFF33D033u);
+            footerDrawItem(XFT_B_BACK, 138, 0xFFFF3030u);
+            footerDrawItem(XFT_DPAD_ADJUST, 255, 0xFF8E8B72u);
+        }
     }
 
     static void missionCompleteBuildFrame()
@@ -2120,7 +2173,7 @@ namespace TFE_RenderBackend
     {
         s_optionsScreenEnabled = enabled;
         s_optionsPauseStyle = pauseStyle;
-        s_optionsItemCount = pauseClamp(itemCount, 0, 12);
+        s_optionsItemCount = pauseClamp(itemCount, 0, 32);
         s_optionsSelection = pauseClamp(selection, 0, s_optionsItemCount > 0 ? s_optionsItemCount - 1 : 0);
         s_optionsScroll = pauseClamp(scroll, 0, s_optionsItemCount > 7 ? s_optionsItemCount - 7 : 0);
         s_optionsFrame = frame;
@@ -2353,10 +2406,14 @@ namespace TFE_RenderBackend
 
         if (s_optionsScreenEnabled)
         {
+            if (s_optionsPauseStyle && blitVirtualDisplay && s_vdispTex)
+            {
+                blitVdispQuad(/*alphaTest*/false);
+            }
             optionsBuildFrame();
             if (startUploadTexture())
             {
-                blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, /*alphaTest*/false);
+                blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_optionsPauseStyle);
             }
         }
         else if (s_missionCompleteScreenEnabled)

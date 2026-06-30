@@ -2,6 +2,7 @@
 #include <TFE_Asset/imageAsset.h>
 #include <TFE_DarkForces/hud.h>
 #include <TFE_FileSystem/fileutil.h>
+#include <TFE_FileSystem/paths.h>
 #include <TFE_Input/inputMapping.h>
 #include <TFE_RenderBackend/renderBackend.h>
 #include <TFE_ExternalData/dfLogics.h>
@@ -654,14 +655,17 @@ namespace TFE_SaveSystem
 	void postLoadRequest(const char* filename)
 	{
 		s_req = SF_REQ_LOAD;
-		strcpy(s_reqFilename, filename);
+		strncpy(s_reqFilename, filename ? filename : "", TFE_MAX_PATH - 1);
+		s_reqFilename[TFE_MAX_PATH - 1] = 0;
 	}
 
 	void postSaveRequest(const char* filename, const char* saveName, s32 delay)
 	{
 		s_req = SF_REQ_SAVE;
-		strcpy(s_reqFilename, filename);
-		strcpy(s_reqSavename, saveName);
+		strncpy(s_reqFilename, filename ? filename : "", TFE_MAX_PATH - 1);
+		s_reqFilename[TFE_MAX_PATH - 1] = 0;
+		strncpy(s_reqSavename, saveName ? saveName : "", TFE_MAX_PATH - 1);
+		s_reqSavename[TFE_MAX_PATH - 1] = 0;
 		s_saveDelay = delay;
 	}
 
@@ -744,6 +748,12 @@ namespace TFE_SaveSystem
 	void setCurrentGame(IGame* game)
 	{
 		s_game = game;
+		if (!game)
+		{
+			s_gameSavePath[0] = 0;
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "current game cleared");
+			return;
+		}
 		setCurrentGame(game->id);
 	}
 

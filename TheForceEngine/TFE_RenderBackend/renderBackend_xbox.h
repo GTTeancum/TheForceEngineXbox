@@ -35,9 +35,11 @@ namespace TFE_RenderBackend
     struct XboxOptionsItem
     {
         const char* label;
+        const char* valueText;
         s32 value;
         s32 minValue;
         s32 maxValue;
+        bool capture;
     };
 
     struct XboxCheatItem

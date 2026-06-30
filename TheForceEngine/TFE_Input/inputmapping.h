@@ -190,6 +190,7 @@ namespace TFE_Input
 		
 	void inputMapping_addBinding(InputBinding* binding);
 	void inputMapping_removeBinding(u32 index);
+	bool inputMapping_setControllerBinding(InputAction action, InputType type, u32 code);
 	bool isBindingPressed(InputAction action);
 	ActionState inputMapping_getActionState(InputAction action);
 	f32  inputMapping_getAnalogAxis(AnalogAxis axis);
