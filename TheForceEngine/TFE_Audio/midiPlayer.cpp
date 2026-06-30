@@ -54,8 +54,14 @@ static inline HANDLE TFE_Midi_CreateThread(int (*fn)(void*), void* data)
         }
     };
     Trampoline* t = new Trampoline;
+    if (!t) return NULL;
     t->fn = fn; t->data = data;
-    return CreateThread(NULL, 0, &Trampoline::run, t, 0, NULL);
+    HANDLE thread = CreateThread(NULL, 0, &Trampoline::run, t, 0, NULL);
+    if (!thread)
+    {
+        delete t;
+    }
+    return thread;
 }
 #define SDL_CreateThread(fn, name, data) TFE_Midi_CreateThread((fn), (data))
 #define SDL_WaitThread(thr, statusPtr)   do { if (thr) { WaitForSingleObject((thr), INFINITE); CloseHandle((thr)); } (void)(statusPtr); } while(0)
@@ -205,6 +211,8 @@ namespace TFE_MidiPlayer
 		if (!s_deviceChangeMutex)
 		{
 			TFE_System::logWrite(LOG_ERROR, "Midi", "cannot initialize device change mutex");
+			SDL_DestroyMutex(s_midiThreadMutex);
+			s_midiThreadMutex = nullptr;
 			return false;
 		}
 
@@ -236,12 +244,30 @@ namespace TFE_MidiPlayer
 		}
 		SDL_UnlockMutex(s_deviceChangeMutex);
 
+		if (!res)
+		{
+			delete s_midiDevice;
+			s_midiDevice = nullptr;
+			SDL_DestroyMutex(s_deviceChangeMutex);
+			s_deviceChangeMutex = nullptr;
+			SDL_DestroyMutex(s_midiThreadMutex);
+			s_midiThreadMutex = nullptr;
+			return false;
+		}
+
 		s_runMusicThread.store(true);
 		s_thread = SDL_CreateThread(midiUpdateFunc, "TFE_MidiThread", nullptr);
 		if (!s_thread)
 		{
 			TFE_System::logWrite(LOG_ERROR, "Midi", "cannot create Midi Thread!");
-			res = false;
+			s_runMusicThread.store(false);
+			delete s_midiDevice;
+			s_midiDevice = nullptr;
+			SDL_DestroyMutex(s_deviceChangeMutex);
+			s_deviceChangeMutex = nullptr;
+			SDL_DestroyMutex(s_midiThreadMutex);
+			s_midiThreadMutex = nullptr;
+			return false;
 		}
 #ifdef _XBOX
 		else
@@ -259,7 +285,7 @@ namespace TFE_MidiPlayer
 		setVolume(soundSettings->musicVolume);
 		setMaximumNoteLength();
 
-		return res && s_thread;
+		return true;
 	}
 
 	void destroy()
@@ -270,11 +296,21 @@ namespace TFE_MidiPlayer
 		// Destroy the thread before shutting down the Midi Device.
 		s_runMusicThread.store(false);
 		SDL_WaitThread(s_thread, &i);
+		s_thread = nullptr;
 
 		delete s_midiDevice;
+		s_midiDevice = nullptr;
 
-		SDL_DestroyMutex(s_midiThreadMutex);
-		SDL_DestroyMutex(s_deviceChangeMutex);
+		if (s_midiThreadMutex)
+		{
+			SDL_DestroyMutex(s_midiThreadMutex);
+			s_midiThreadMutex = nullptr;
+		}
+		if (s_deviceChangeMutex)
+		{
+			SDL_DestroyMutex(s_deviceChangeMutex);
+			s_deviceChangeMutex = nullptr;
+		}
 	}
 
 	MidiDevice* getMidiDevice()

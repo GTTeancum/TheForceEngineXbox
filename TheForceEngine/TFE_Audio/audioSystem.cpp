@@ -159,6 +159,7 @@ namespace TFE_Audio
 			TFE_System::logWrite(LOG_ERROR, "Audio", "Cannot start audio stream.");
 			TFE_DestroyMutex(s_mutex);
 			s_mutex = NULL;
+			TFE_AudioDevice::destroy();
 			s_nullDevice = true;
 			return false;
 		}
