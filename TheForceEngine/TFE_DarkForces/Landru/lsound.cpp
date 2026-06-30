@@ -64,6 +64,15 @@ namespace TFE_DarkForces
 
 		// Then allocate the sound itself.
 		LSound* sound = lSoundAlloc(data);
+		if (!sound)
+		{
+			if (data)
+			{
+				game_free(data);
+			}
+			TFE_System::logWrite(LOG_ERROR, "Sound", "Failed to allocate Landru sound '%s'.", name ? name : "");
+			return nullptr;
+		}
 		setSoundName(sound, soundType, name);
 		discardSoundData(sound);
 		sound->type = soundType;

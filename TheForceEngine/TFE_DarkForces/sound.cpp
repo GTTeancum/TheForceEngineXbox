@@ -207,7 +207,18 @@ namespace TFE_DarkForces
 		{
 			sound = (GameSound*)allocator_newItem(sound_state.gameSoundList);
 			if (!sound)
+			{
+				if (heapData)
+				{
+					free(data);
+				}
+				else
+				{
+					game_free(data);
+				}
+				TFE_System::logWrite(LOG_ERROR, "Sound", "Failed to allocate sound entry for '%s'.", fileName);
 				return NULL_SOUND;
+			}
 			sound->id = (SoundSourceId)sound;
 			sound->time = s_curTick;
 			sound->data = data;
