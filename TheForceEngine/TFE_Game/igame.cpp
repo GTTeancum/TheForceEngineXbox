@@ -93,7 +93,51 @@ void game_destroy()
 
 void game_clearLevelData()
 {
+#ifdef _XBOX
+	game_resetLevelRegion("game_clearLevelData");
+#else
 	region_clear(s_levelRegion);
+#endif
+}
+
+void game_resetLevelRegion(const char* context)
+{
+#ifdef _XBOX
+	TFE_System::logWrite(LOG_MSG, "Game", "resetLevelRegion begin context='%s'", context ? context : "");
+	logRegionState("resetLevelRegion before");
+
+	MemoryRegion* oldRegion = s_levelRegion;
+	MemoryRegion* newRegion = region_create("level", LEVEL_MEMORY_BASE);
+	if (!newRegion && oldRegion)
+	{
+		TFE_System::logWrite(LOG_WARNING, "Game", "resetLevelRegion pre-alloc failed; releasing old region and retrying");
+		region_destroy(oldRegion);
+		oldRegion = nullptr;
+		newRegion = region_create("level", LEVEL_MEMORY_BASE);
+	}
+
+	if (newRegion)
+	{
+		if (oldRegion)
+		{
+			region_destroy(oldRegion);
+		}
+		s_levelRegion = newRegion;
+	}
+	else
+	{
+		TFE_System::logWrite(LOG_ERROR, "Game", "resetLevelRegion failed to recreate level region");
+		s_levelRegion = oldRegion;
+		if (s_levelRegion)
+		{
+			region_clear(s_levelRegion);
+		}
+	}
+
+	logRegionState("resetLevelRegion after");
+#else
+	region_clear(s_levelRegion);
+#endif
 }
 
 IGame* createGame(GameID id)

@@ -41,3 +41,5 @@ void   freeGame(IGame* game);
 
 void game_init();
 void game_destroy();
+void game_clearLevelData();
+void game_resetLevelRegion(const char* context);

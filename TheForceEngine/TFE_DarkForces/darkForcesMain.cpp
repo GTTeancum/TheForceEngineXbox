@@ -971,7 +971,7 @@ namespace TFE_DarkForces
 				bitmap_clearLevelData();
 				level_freeAllAssets();
 				bitmap_setAllocator(s_gameRegion);
-				region_clear(s_levelRegion);
+				game_resetLevelRegion("mission-transition");
 				TFE_A11Y::clearActiveCaptions();
 
 				if (xboxAbortToStart)
@@ -2047,7 +2047,9 @@ namespace TFE_DarkForces
 
 		bitmap_clearLevelData();
 		level_freeAllAssets();
-		region_clear(s_levelRegion);
+		bitmap_setAllocator(s_gameRegion);
+		game_resetLevelRegion("save-load-transition");
+		TFE_A11Y::clearActiveCaptions();
 
 		// Next
 		sound_levelStart();
