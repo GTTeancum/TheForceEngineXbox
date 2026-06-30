@@ -164,12 +164,17 @@ namespace TFE_VocAsset
 			return;
 		}
 
-		u8* newData = (u8*)realloc(voc->data, voc->size + size);
+		u32 newSize = voc->size + size;
+		if (newSize < voc->size)
+		{
+			return;
+		}
+		u8* newData = (u8*)realloc(voc->data, newSize);
 		if (newData)
 		{
 			voc->data = newData;
 			memcpy(voc->data + voc->size, soundData, size);
-			voc->size += size;
+			voc->size = newSize;
 		}
 	}
 	
@@ -195,10 +200,25 @@ namespace TFE_VocAsset
 		
 	void addSilence(SoundBuffer* voc, s32 sampleRate, u32 silenceLen)
 	{
+		if (!voc || !silenceLen)
+		{
+			return;
+		}
+		u32 newSize = voc->size + silenceLen;
+		if (newSize < voc->size)
+		{
+			return;
+		}
+
 		// copy silence into the sound data.
-		voc->data = (u8*)realloc(voc->data, voc->size + silenceLen);
+		u8* newData = (u8*)realloc(voc->data, newSize);
+		if (!newData)
+		{
+			return;
+		}
+		voc->data = newData;
 		memset(voc->data + voc->size, 128, silenceLen);
-		voc->size += silenceLen;
+		voc->size = newSize;
 	}
 
 	void addMarker(SoundBuffer* voc, u16 markerId)

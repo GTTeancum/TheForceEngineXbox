@@ -212,9 +212,18 @@ namespace TFE_Input
 	void inputMapping_resetToDefaults()
 	{
 		s_inputConfig.bindCount    = 0;
-		s_inputConfig.bindCapacity = IA_COUNT * 2;
-		s_inputConfig.binds = (InputBinding*)realloc(s_inputConfig.binds,
-			sizeof(InputBinding) * s_inputConfig.bindCapacity);
+		u32 defaultCapacity = IA_COUNT * 2;
+		InputBinding* newBinds = (InputBinding*)realloc(s_inputConfig.binds,
+			sizeof(InputBinding) * defaultCapacity);
+		if (newBinds)
+		{
+			s_inputConfig.binds = newBinds;
+			s_inputConfig.bindCapacity = defaultCapacity;
+		}
+		else
+		{
+			s_inputConfig.bindCapacity = 0;
+		}
 
 		s_inputConfig.controllerFlags      = CFLAG_ENABLE;
 		s_inputConfig.axis[AA_LOOK_HORZ]   = AXIS_RIGHT_X;
@@ -279,15 +288,25 @@ namespace TFE_Input
 			return false;
 		}
 
-		file.read(&s_inputConfig.bindCount);
-		file.read(&s_inputConfig.bindCapacity);
-		if (s_inputConfig.bindCount > s_inputConfig.bindCapacity)
+		u32 bindCount = 0;
+		u32 bindCapacity = 0;
+		file.read(&bindCount);
+		file.read(&bindCapacity);
+		if (bindCount > bindCapacity)
 		{
-			s_inputConfig.bindCapacity =
-				((s_inputConfig.bindCount + IA_COUNT - 1) / IA_COUNT) * IA_COUNT + IA_COUNT;
+			bindCapacity =
+				((bindCount + IA_COUNT - 1) / IA_COUNT) * IA_COUNT + IA_COUNT;
 		}
-		s_inputConfig.binds = (InputBinding*)realloc(s_inputConfig.binds,
-			sizeof(InputBinding) * s_inputConfig.bindCapacity);
+		InputBinding* newBinds = (InputBinding*)realloc(s_inputConfig.binds,
+			sizeof(InputBinding) * bindCapacity);
+		if (!newBinds && bindCapacity)
+		{
+			file.close();
+			return false;
+		}
+		s_inputConfig.binds = newBinds;
+		s_inputConfig.bindCount = bindCount;
+		s_inputConfig.bindCapacity = bindCapacity;
 		file.readBuffer(s_inputConfig.binds, sizeof(InputBinding), s_inputConfig.bindCount);
 
 		file.read(&s_inputConfig.controllerFlags);
@@ -329,13 +348,24 @@ namespace TFE_Input
 
 	void inputMapping_addBinding(InputBinding* binding)
 	{
-		u32 index = s_inputConfig.bindCount++;
-		if (s_inputConfig.bindCount > s_inputConfig.bindCapacity)
+		if (!binding) { return; }
+		if (s_inputConfig.bindCount >= s_inputConfig.bindCapacity)
 		{
-			s_inputConfig.bindCapacity += IA_COUNT;
-			s_inputConfig.binds = (InputBinding*)realloc(s_inputConfig.binds,
-				sizeof(InputBinding) * s_inputConfig.bindCapacity);
+			u32 newCapacity = s_inputConfig.bindCapacity + IA_COUNT;
+			if (newCapacity <= s_inputConfig.bindCapacity)
+			{
+				return;
+			}
+			InputBinding* newBinds = (InputBinding*)realloc(s_inputConfig.binds,
+				sizeof(InputBinding) * newCapacity);
+			if (!newBinds)
+			{
+				return;
+			}
+			s_inputConfig.binds = newBinds;
+			s_inputConfig.bindCapacity = newCapacity;
 		}
+		u32 index = s_inputConfig.bindCount++;
 		s_inputConfig.binds[index] = *binding;
 	}
 

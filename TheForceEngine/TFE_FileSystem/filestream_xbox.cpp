@@ -229,8 +229,15 @@ u32 FileStream::readContents(const char* filePath, void** output)
     if (file.open(filePath, MODE_READ))
     {
         size = (u32)file.getSize();
-        *output = realloc(*output, size + 1);
+        void* newOutput = realloc(*output, size + 1);
+        if (!newOutput)
+        {
+            file.close();
+            return 0;
+        }
+        *output = newOutput;
         file.readBuffer(*output, size);
+        ((char*)*output)[size] = 0;
         file.close();
     }
     return size;
@@ -259,8 +266,15 @@ u32 FileStream::readContents(const FilePath* filePath, void** output)
     if (file.open(filePath, MODE_READ))
     {
         size = (u32)file.getSize();
-        *output = realloc(*output, size + 1);
+        void* newOutput = realloc(*output, size + 1);
+        if (!newOutput)
+        {
+            file.close();
+            return 0;
+        }
+        *output = newOutput;
         file.readBuffer(*output, size);
+        ((char*)*output)[size] = 0;
         file.close();
     }
     return size;
