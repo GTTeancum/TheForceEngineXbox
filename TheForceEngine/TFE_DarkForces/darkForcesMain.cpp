@@ -968,6 +968,7 @@ namespace TFE_DarkForces
 				}
 
 #ifdef _XBOX
+				TFE_RenderBackend::gpuInvalidateTextureCache();
 				bitmap_clearLevelData();
 				level_freeAllAssets();
 				bitmap_setAllocator(s_gameRegion);
@@ -2045,6 +2046,9 @@ namespace TFE_DarkForces
 		pda_cleanup();
 		reticle_enable(true);
 
+	#ifdef _XBOX
+		TFE_RenderBackend::gpuInvalidateTextureCache();
+	#endif
 		bitmap_clearLevelData();
 		level_freeAllAssets();
 		bitmap_setAllocator(s_gameRegion);

@@ -120,9 +120,8 @@ namespace TFE_RenderBackend
                                                   u32 width, u32 height,
                                                   bool columnMajor);
 
-    // Drop every cached texture. Called on palette change so the next
-    // draw re-uploads against the new palette. Phase 3 brute-force
-    // invalidation - Phase 4+ may track palette versions per texture.
+    // Drop every cached texture. Called on palette/level/backend lifetime
+    // changes so stale TextureData keys never retain D3D resources.
     void gpuInvalidateTextureCache();
 
     // Draw textured triangles. Same matrix conventions as the colored

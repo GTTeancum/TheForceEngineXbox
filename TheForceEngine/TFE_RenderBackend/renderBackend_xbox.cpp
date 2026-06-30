@@ -2001,6 +2001,9 @@ namespace TFE_RenderBackend
     {
         TFE_XboxLogf("RenderBackend", "destroy begin ready=%d", s_deviceReady ? 1 : 0);
         s_deviceReady = false;
+        gpuInvalidateTextureCache();
+        if (s_p8Palette) { s_p8Palette->Release(); s_p8Palette = NULL; }
+        s_p8PaletteDirty = true;
         if (s_startTex)   { s_startTex->Release();   s_startTex   = NULL; }
         if (s_vdispSurf)  { s_vdispSurf->Release();  s_vdispSurf  = NULL; }
         if (s_vdispTex)   { s_vdispTex->Release();   s_vdispTex   = NULL; }
@@ -2833,6 +2836,7 @@ namespace TFE_RenderBackend
             s_texCache[i].key = NULL;
         }
         s_texCacheCount = 0;
+        s_texCacheRejectLogged = 0;
     }
 
     static inline u32 nextPow2_u32(u32 v)
