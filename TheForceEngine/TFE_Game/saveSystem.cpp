@@ -231,7 +231,8 @@ namespace TFE_SaveSystem
 				s_imageBufferSize[0] = 0;
 			}
 		}
-		if (s_imageBuffer[0])
+		bool haveCaptureBuffer = s_imageBuffer[0] && s_imageBufferSize[0] >= size;
+		if (haveCaptureBuffer)
 		{
 			TFE_RenderBackend::captureScreenToMemory(s_imageBuffer[0]);
 		}
@@ -251,7 +252,8 @@ namespace TFE_SaveSystem
 				s_imageBufferSize[1] = 0;
 			}
 		}
-		if (s_imageBuffer[0] && s_imageBuffer[1])
+		bool haveThumbnailBuffer = s_imageBuffer[1] && s_imageBufferSize[1] >= rawImageSize;
+		if (haveCaptureBuffer && haveThumbnailBuffer)
 		{
 			for (u32 y = 0; y < SAVE_IMAGE_HEIGHT; y++)
 			{
@@ -328,7 +330,7 @@ namespace TFE_SaveSystem
 
 		// Image.
 #ifdef _XBOX
-		u32 pngSize = s_imageBuffer[1] ? rawImageSize : 0;
+		u32 pngSize = haveThumbnailBuffer ? rawImageSize : 0;
 #ifdef _XBOX
 		TFE_System::logWrite(LOG_MSG, "SaveSystem",
 			"saveHeader fields save='%s' datetime='%s' levelName='%s' levelId='%s' modList='%s' thumbBytes=%u firstPixel=0x%08x",
