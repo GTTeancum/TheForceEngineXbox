@@ -104,6 +104,34 @@ namespace TFE_Memory
 	void removeHeaderFromFreelist(MemoryBlock* block, RegionAllocHeader* header);
 	void insertBlockIntoFreelist(MemoryBlock* block, RegionAllocHeader* header);
 
+	static inline u8* blockDataBegin(MemoryBlock* block)
+	{
+		return (u8*)block + sizeof(MemoryBlock);
+	}
+
+	static inline u8* blockDataEnd(MemoryRegion* region, MemoryBlock* block)
+	{
+		return blockDataBegin(block) + (size_t)region->blockSize;
+	}
+
+	static inline bool isPointerInBlockData(MemoryRegion* region, MemoryBlock* block, const void* ptr)
+	{
+		const u8* p = (const u8*)ptr;
+		return p >= blockDataBegin(block) && p < blockDataEnd(region, block);
+	}
+
+	static inline bool isPointerInBlockPayload(MemoryRegion* region, MemoryBlock* block, const void* ptr)
+	{
+		const u8* p = (const u8*)ptr;
+		return p >= blockDataBegin(block) + sizeof(RegionAllocHeader) && p < blockDataEnd(region, block);
+	}
+
+	static inline RegionAllocHeader* getNextHeader(MemoryRegion* region, MemoryBlock* block, RegionAllocHeader* header)
+	{
+		RegionAllocHeader* nextHeader = (RegionAllocHeader*)((u8*)header + header->size);
+		return ((u8*)nextHeader >= blockDataEnd(region, block)) ? nullptr : nextHeader;
+	}
+
 	void verifyMemory(MemoryRegion* region)
 	{
 		for (s32 i = 0; i < region->blockCount; i++)
@@ -316,28 +344,19 @@ namespace TFE_Memory
 			return nullptr;
 		}
 
-		// If the current block is already large enough, skip looping over the memory blocks.
-		RegionAllocHeader* header = (RegionAllocHeader*)((u8*)ptr - sizeof(RegionAllocHeader));
-		if (header->size >= size)
-		{
-			return ptr;
-		}
-
 		// First try to reallocate in the same region.
 		u32 prevSize = 0;
+		bool foundBlock = false;
 		for (s32 i = (s32)region->blockCount - 1; i >= 0; i--)
 		{
 			MemoryBlock* block = region->memBlocks[i];
-			if (ptr >= block)
+			if (isPointerInBlockPayload(region, block, ptr))
 			{
+				foundBlock = true;
 				RegionAllocHeader* header = (RegionAllocHeader*)((u8*)ptr - sizeof(RegionAllocHeader));
-				RegionAllocHeader* nextHeader = (RegionAllocHeader*)((u8*)header + header->size);
+				RegionAllocHeader* nextHeader = getNextHeader(region, block, header);
 				assert(header->free == 0);
 
-				if ((u8*)nextHeader >= (u8*)block + region->blockSize)
-				{
-					nextHeader = nullptr;
-				}
 				// If it is big enough, just stick to the same memory.
 				if (header->size >= size)
 				{
@@ -386,6 +405,12 @@ namespace TFE_Memory
 			}
 		}
 
+		if (!foundBlock)
+		{
+			TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Attempted to reallocate pointer %p outside region '%s'.", ptr, region->name);
+			return nullptr;
+		}
+
 		// Allocate a new block of memory.
 		void* newMem = region_alloc(region, size);
 		if (!newMem) { return nullptr; }
@@ -408,14 +433,10 @@ namespace TFE_Memory
 		for (s32 i = (s32)region->blockCount - 1; i >= 0; i--)
 		{
 			MemoryBlock* block = region->memBlocks[i];
-			if (ptr >= block)
+			if (isPointerInBlockPayload(region, block, ptr))
 			{
 				RegionAllocHeader* header = (RegionAllocHeader*)((u8*)ptr - sizeof(RegionAllocHeader));
-				RegionAllocHeader* nextHeader = (RegionAllocHeader*)((u8*)header + header->size);
-				if ((u8*)nextHeader >= (u8*)block + region->blockSize)
-				{
-					nextHeader = nullptr;
-				}
+				RegionAllocHeader* nextHeader = getNextHeader(region, block, header);
 
 				assert(!header->free);
 				if (header->free)
@@ -430,6 +451,7 @@ namespace TFE_Memory
 				return;
 			}
 		}
+		TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Attempted to free pointer %p outside region '%s'.", ptr, region->name);
 	}
 		
 	u64 region_getMemoryUsed(MemoryRegion* region)
@@ -461,7 +483,7 @@ namespace TFE_Memory
 		for (s32 i = (s32)region->blockCount - 1; i >= 0; i--)
 		{
 			MemoryBlock* block = region->memBlocks[i];
-			if (ptr >= block)
+			if (isPointerInBlockData(region, block, ptr))
 			{
 				rp = RelativePointer((u8*)ptr - (u8*)block - sizeof(MemoryBlock));
 				rp |= (i << c_relativeBlockShift);
@@ -492,8 +514,14 @@ namespace TFE_Memory
 			TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Relative pointer for region '%s' has an invalid block index: %u.", region->name, blockIndex);
 			return nullptr;
 		}
+		const u32 offset = ptr & c_relativeOffsetMask;
+		if (offset >= region->blockSize)
+		{
+			TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Relative pointer for region '%s' has an invalid offset: %u.", region->name, offset);
+			return nullptr;
+		}
 		MemoryBlock* block = region->memBlocks[blockIndex];
-		return (u8*)block + (ptr & c_relativeOffsetMask) + sizeof(MemoryBlock);
+		return blockDataBegin(block) + offset;
 	}
 
 	bool region_serializeToDisk(MemoryRegion* region, FileStream* file)
@@ -781,28 +809,38 @@ namespace TFE_Memory
 
 		if (!region->memBlocks)
 		{
-			region->blockArrCapacity = BLOCK_ARR_STEP;
-			region->memBlocks = (MemoryBlock**)malloc(sizeof(MemoryBlock*)*region->blockArrCapacity);
+			const u64 newCapacity = BLOCK_ARR_STEP;
+			MemoryBlock** newBlocks = (MemoryBlock**)malloc(sizeof(MemoryBlock*)*newCapacity);
+			if (!newBlocks)
+			{
+				TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Failed to resize memory block of array to %u in region '%s'.", (u32)newCapacity, region->name);
+				return false;
+			}
+			region->memBlocks = newBlocks;
+			region->blockArrCapacity = newCapacity;
 		}
 		else if (region->blockCount + 1 > region->blockArrCapacity)
 		{
-			region->blockArrCapacity += BLOCK_ARR_STEP;
-			region->memBlocks = (MemoryBlock**)realloc(region->memBlocks, sizeof(MemoryBlock*)*region->blockArrCapacity);
-		}
-		if (!region->memBlocks)
-		{
-			TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Failed to resize memory block of array to %u in region '%s'.", region->blockArrCapacity, region->name);
-			return false;
+			const u64 newCapacity = region->blockArrCapacity + BLOCK_ARR_STEP;
+			MemoryBlock** newBlocks = (MemoryBlock**)realloc(region->memBlocks, sizeof(MemoryBlock*)*newCapacity);
+			if (!newBlocks)
+			{
+				TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Failed to resize memory block of array to %u in region '%s'.", (u32)newCapacity, region->name);
+				return false;
+			}
+			region->memBlocks = newBlocks;
+			region->blockArrCapacity = newCapacity;
 		}
 
 		u64 blockIndex = region->blockCount;
 		assert(blockIndex < region->blockArrCapacity);
-		region->memBlocks[blockIndex] = (MemoryBlock*)malloc(sizeof(MemoryBlock) + region->blockSize);
-		if (!region->memBlocks[blockIndex])
+		MemoryBlock* newBlock = (MemoryBlock*)malloc(sizeof(MemoryBlock) + region->blockSize);
+		if (!newBlock)
 		{
 			TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Failed to allocate block of size %u in region '%s'.", region->blockSize, region->name);
 			return false;
 		}
+		region->memBlocks[blockIndex] = newBlock;
 		region->blockCount++;
 		TFE_System::logWrite(LOG_MSG, "MemoryRegion", "Allocated new memory block in region '%s' - new size is %u blocks, total size is '%u'", region->name, region->blockCount, region->blockSize * region->blockCount);
 
