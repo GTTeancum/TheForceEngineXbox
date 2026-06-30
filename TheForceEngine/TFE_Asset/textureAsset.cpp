@@ -651,6 +651,7 @@ namespace TFE_Texture
 				break;
 			}
 		}
+		delete texture;
 	}
 
 	void freeAll()
@@ -662,6 +663,7 @@ namespace TFE_Texture
 			if (texture)
 			{
 				delete[] texture->memory;
+				delete texture;
 			}
 		}
 		s_textures.clear();
