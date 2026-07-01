@@ -33,11 +33,9 @@ namespace TFE_Jedi
 #ifdef _XBOX
 		// Xbox composites the software-drawn 8-bit framebuffer (HUD,
 		// weapon, messages, automap) as an alpha-tested overlay on top
-		// of the GPU world inside renderBackend_xbox::swap. The
-		// screenGPU_* path is stubbed - if we honoured the enable=true
-		// from jediRenderer on the GPU path, every software blit here
-		// would early-out to a no-op. Force false so the if(s_gpuEnabled)
-		// branches throughout this file take the software path.
+		// of the GPU world inside renderBackend_xbox::swap. Keep these
+		// legacy blits on the CPU path so HUD pixels remain in that
+		// overlay buffer while the 3D world is rendered by D3D8.
 		(void)enable;
 		s_gpuEnabled = false;
 		return;

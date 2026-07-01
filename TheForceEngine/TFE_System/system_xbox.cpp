@@ -9,9 +9,11 @@
 //  - TFE_FrontEndUI::logToConsole calls removed (no ImGui console)
 //  - osShellExecute / postErrorMessageBox stubbed (no shell on Xbox)
 //  - TFE_XboxLog() exported for early boot logging before log file is open
-//  - Log writes to D:\<filename> only. Debug-output mirroring and write-through
-//    are disabled in normal runtime because they stall real Xbox hardware
-//    during menu/level transitions. Single log overwritten per boot.
+//  - Log writes to D:\<filename> by default. Absolute log paths are allowed
+//    for XEMU soak runs that need the writable emulated HDD. Debug-output
+//    mirroring and write-through are disabled in normal runtime because they
+//    stall real Xbox hardware during menu/level transitions. Single log
+//    overwritten per boot.
 //  - vsync state read from settings; no RenderBackend query in update()
 //    (RenderBackend handles its own present interval on Xbox)
 
@@ -33,11 +35,20 @@
 // ---------------------------------------------------------------------------
 #define LOG_WORK_BUF  4096
 #define LOG_MSG_BUF   4096
+#define XBOX_LOG_MIRROR_BYTES     524288
+#define XBOX_LOG_LASTLINE_BYTES     512
 
 // OutputDebugStringA and FILE_FLAG_WRITE_THROUGH are both expensive on real
 // Xbox hardware. Keep this at 0 for playable builds; the file log remains.
 #define XBOX_LOG_MIRROR_DEBUG_OUTPUT 0
 #define XBOX_LOG_WRITE_THROUGH       0
+
+extern "C"
+{
+    volatile unsigned long g_TFEXBLogWriteOffset = 0;
+    char g_TFEXBLogMirror[XBOX_LOG_MIRROR_BYTES] = {0};
+    char g_TFEXBLogLastLine[XBOX_LOG_LASTLINE_BYTES] = {0};
+}
 
 namespace TFE_System
 {
@@ -98,8 +109,49 @@ namespace TFE_System
     // -----------------------------------------------------------------------
     // s_logWriteRaw
     // -----------------------------------------------------------------------
+    static void s_logMirrorRaw(const char* msg, DWORD len)
+    {
+        if (!msg || len == 0) return;
+
+        const DWORD mirrorCapacity = XBOX_LOG_MIRROR_BYTES - 1;
+        DWORD offset = (DWORD)g_TFEXBLogWriteOffset;
+        for (DWORD i = 0; i < len; i++)
+        {
+            g_TFEXBLogMirror[offset % mirrorCapacity] = msg[i];
+            offset++;
+        }
+        g_TFEXBLogWriteOffset = offset;
+        g_TFEXBLogMirror[offset % mirrorCapacity] = 0;
+
+        DWORD end = len;
+        while (end > 0 && (msg[end - 1] == '\r' || msg[end - 1] == '\n'))
+        {
+            end--;
+        }
+
+        DWORD start = end;
+        while (start > 0 && msg[start - 1] != '\n')
+        {
+            start--;
+        }
+
+        DWORD copyLen = end - start;
+        if (copyLen >= XBOX_LOG_LASTLINE_BYTES)
+        {
+            start += copyLen - (XBOX_LOG_LASTLINE_BYTES - 1);
+            copyLen = XBOX_LOG_LASTLINE_BYTES - 1;
+        }
+
+        if (copyLen > 0)
+        {
+            memcpy(g_TFEXBLogLastLine, msg + start, copyLen);
+        }
+        g_TFEXBLogLastLine[copyLen] = 0;
+    }
+
     static void s_logWriteRaw(const char* msg, DWORD len)
     {
+        s_logMirrorRaw(msg, len);
         if (s_logFile == INVALID_HANDLE_VALUE || !msg || len == 0) return;
         DWORD written = 0;
         WriteFile(s_logFile, msg, len, &written, NULL);
@@ -348,14 +400,13 @@ namespace TFE_System
     // -----------------------------------------------------------------------
     void logTimeToggle() { s_logTimeEnabled = !s_logTimeEnabled; }
 
-    // Xbox log path is deliberately fixed to D:\ only; other roots made
-    // hardware behavior unpredictable and can stop some boxes from launching.
-    bool logOpen(const char* filename, bool /*append*/)
+    static bool xboxPathIsAbsolute(const char* path)
     {
-        if (!filename || !filename[0]) return false;
+        return path && path[0] && path[1] == ':' && (path[2] == '\\' || path[2] == '/');
+    }
 
-        char logPath[TFE_MAX_PATH];
-        sprintf(logPath, "D:\\%s", filename);
+    static bool tryOpenLogPath(const char* logPath)
+    {
         s_logFile = CreateFileA(logPath, GENERIC_WRITE, FILE_SHARE_READ, NULL,
                                 CREATE_ALWAYS,
                                 FILE_ATTRIBUTE_NORMAL
@@ -369,8 +420,38 @@ namespace TFE_System
             TFE_XboxLogf("Log", "open success path=%s (Win32)", logPath);
             return true;
         }
-
         s_logFile = INVALID_HANDLE_VALUE;
+        return false;
+    }
+
+    // Normal Xbox logs stay on D:\. XEMU soak runs can pass an absolute E:\
+    // path so the log lands on the writable emulated HDD instead of the ISO.
+    bool logOpen(const char* filename, bool /*append*/)
+    {
+        if (!filename || !filename[0]) return false;
+
+        char logPath[TFE_MAX_PATH];
+        if (xboxPathIsAbsolute(filename))
+        {
+            if (tryOpenLogPath(filename))
+            {
+                return true;
+            }
+#if XBOX_LOG_MIRROR_DEBUG_OUTPUT
+            OutputDebugStringA("[Log] absolute log open failed\r\n");
+#endif
+            const char* slash = strrchr(filename, '\\');
+            const char* fslash = strrchr(filename, '/');
+            if (fslash && (!slash || fslash > slash)) slash = fslash;
+            if (slash && slash[1]) filename = slash + 1;
+        }
+
+        sprintf(logPath, "D:\\%s", filename);
+        if (tryOpenLogPath(logPath))
+        {
+            return true;
+        }
+
 #if XBOX_LOG_MIRROR_DEBUG_OUTPUT
         OutputDebugStringA("[Log] D:\\ log open failed\r\n");
 #endif

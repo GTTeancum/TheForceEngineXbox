@@ -66,6 +66,7 @@
 
 #ifdef _XBOX
 extern "C" void TFE_XboxReturnToStartMenu();
+extern "C" bool TFE_XboxSoakAutoAdvanceMissionComplete();
 #endif
 
 using namespace TFE_Memory;
@@ -84,6 +85,7 @@ namespace TFE_DarkForces
 	static bool s_xboxPendingMissionCompleteAutosave = false;
 	static s32 s_xboxPendingMissionCompleteAutosaveFrames = 0;
 	static TFE_RenderBackend::XboxMissionCompleteInfo s_xboxMissionCompleteInfo = { 0, 0, 0, 0 };
+	static const bool s_verboseXboxModeTransitionLog = false;
 
 	void xboxMissionCompleteOpen()
 	{
@@ -323,6 +325,9 @@ namespace TFE_DarkForces
 	};
 	static RunGameState   s_runGameState;
 	static SharedGameState s_sharedState;
+#ifdef _XBOX
+	static const bool s_verboseXboxSaveSerializationLog = false;
+#endif
 
 	/////////////////////////////////////////////
 	// Forward Declarations
@@ -910,26 +915,38 @@ namespace TFE_DarkForces
 				bool xboxAbortToStart = false;
 				if (s_levelComplete)
 				{
-					if (!s_xboxMissionCompleteOpen)
+					if (TFE_XboxSoakAutoAdvanceMissionComplete())
+					{
+						if (!s_xboxMissionCompleteOpen)
+						{
+							xboxMissionCompleteOpen();
+						}
+						TFE_System::logWrite(LOG_MSG, "MissionComplete", "soak auto-advance");
+						TFE_RenderBackend::xboxSetMissionCompleteScreen(false, 0, 0, NULL);
+						s_xboxMissionCompleteOpen = false;
+					}
+					else if (!s_xboxMissionCompleteOpen)
 					{
 						xboxMissionCompleteOpen();
 						return;
 					}
-
-					bool saveSelected = false;
-					if (!xboxMissionCompleteUpdate(&saveSelected))
+					else
 					{
-						return;
-					}
+						bool saveSelected = false;
+						if (!xboxMissionCompleteUpdate(&saveSelected))
+						{
+							return;
+						}
 
-					if (saveSelected)
-					{
-						s_xboxPendingMissionCompleteAutosave = true;
-						s_xboxPendingMissionCompleteAutosaveFrames = 0;
-						TFE_System::logWrite(LOG_MSG, "MissionComplete", "queued next-level autosave");
+						if (saveSelected)
+						{
+							s_xboxPendingMissionCompleteAutosave = true;
+							s_xboxPendingMissionCompleteAutosaveFrames = 0;
+							TFE_System::logWrite(LOG_MSG, "MissionComplete", "queued next-level autosave");
+						}
+						TFE_RenderBackend::xboxSetMissionCompleteScreen(false, 0, 0, NULL);
+						s_xboxMissionCompleteOpen = false;
 					}
-					TFE_RenderBackend::xboxSetMissionCompleteScreen(false, 0, 0, NULL);
-					s_xboxMissionCompleteOpen = false;
 				}
 #endif
 
@@ -1027,15 +1044,21 @@ namespace TFE_DarkForces
 	void startNextMode()
 	{
 #ifdef _XBOX
-		TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode begin invalid=%d abort=%d cutsceneIndex=%d levelIndex=%d state=%d",
-			s_invalidLevelIndex ? 1 : 0, s_runGameState.abortLevel ? 1 : 0,
-			s_runGameState.cutsceneIndex, s_runGameState.levelIndex, s_runGameState.state);
+		if (s_verboseXboxModeTransitionLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode begin invalid=%d abort=%d cutsceneIndex=%d levelIndex=%d state=%d",
+				s_invalidLevelIndex ? 1 : 0, s_runGameState.abortLevel ? 1 : 0,
+				s_runGameState.cutsceneIndex, s_runGameState.levelIndex, s_runGameState.state);
+		}
 #endif
 		if (s_invalidLevelIndex || s_runGameState.abortLevel)
 		{
 			s_runGameState.state = GSTATE_AGENT_MENU;
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode -> agent menu");
+			if (s_verboseXboxModeTransitionLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode -> agent menu");
+			}
 #endif
 			return;
 		}
@@ -1054,8 +1077,11 @@ namespace TFE_DarkForces
 
 		GameMode mode = s_cutsceneData[s_runGameState.cutsceneIndex].nextGameMode;
 #ifdef _XBOX
-		TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode mode=%d cutscene=%d",
-			(s32)mode, s_cutsceneData[s_runGameState.cutsceneIndex].cutscene);
+		if (s_verboseXboxModeTransitionLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode mode=%d cutscene=%d",
+				(s32)mode, s_cutsceneData[s_runGameState.cutsceneIndex].cutscene);
+		}
 #endif
 		switch (mode)
 		{
@@ -1111,17 +1137,26 @@ namespace TFE_DarkForces
 		case GMODE_MISSION:
 		{
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode mission begin");
+			if (s_verboseXboxModeTransitionLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode mission begin");
+			}
 #endif
 			sound_levelStart();
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode sound_levelStart done");
+			if (s_verboseXboxModeTransitionLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode sound_levelStart done");
+			}
 #endif
 
 			bitmap_setAllocator(s_levelRegion);
 			actor_clearState();
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode actor/task clear begin");
+			if (s_verboseXboxModeTransitionLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode actor/task clear begin");
+			}
 #endif
 
 			task_reset();
@@ -1144,25 +1179,40 @@ namespace TFE_DarkForces
 			s_sharedState.loadMissionTask = createTask("start mission", mission_startTaskFunc, JTRUE);
 			mission_setLoadMissionTask(s_sharedState.loadMissionTask);
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode loadMissionTask=%p", s_sharedState.loadMissionTask);
+			if (s_verboseXboxModeTransitionLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode loadMissionTask=%p", s_sharedState.loadMissionTask);
+			}
 #endif
 
 			s32 levelIndex = agent_getLevelIndex();
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode gameMusic_start begin levelIndex=%d", levelIndex);
+			if (s_verboseXboxModeTransitionLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode gameMusic_start begin levelIndex=%d", levelIndex);
+			}
 #endif
 			gameMusic_start(levelIndex);
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode gameMusic_start done");
+			if (s_verboseXboxModeTransitionLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode gameMusic_start done");
+			}
 #endif
 
 			agent_setLevelComplete(JFALSE);
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode agent_readSavedDataForLevel begin agent=%d level=%d", s_agentId, levelIndex);
+			if (s_verboseXboxModeTransitionLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode agent_readSavedDataForLevel begin agent=%d level=%d", s_agentId, levelIndex);
+			}
 #endif
 			agent_readSavedDataForLevel(s_agentId, levelIndex);
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode agent_readSavedDataForLevel done");
+			if (s_verboseXboxModeTransitionLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode agent_readSavedDataForLevel done");
+			}
 #endif
 
 			// The load mission task should begin immediately once the Task System updates,
@@ -1170,7 +1220,10 @@ namespace TFE_DarkForces
 			// In the original, the task system would simply loop here.
 			s_runGameState.state = GSTATE_MISSION;
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode mission end state=%d", s_runGameState.state);
+			if (s_verboseXboxModeTransitionLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode mission end state=%d", s_runGameState.state);
+			}
 #endif
 		}
 		}
@@ -2111,13 +2164,19 @@ namespace TFE_DarkForces
 	{
 		if (!stream) { return false; }
 #ifdef _XBOX
-		TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState begin write=%d file='%s' loc=%u state=%d",
-			writeState ? 1 : 0, filename ? filename : "", (u32)stream->getLoc(), s_runGameState.state);
+		if (s_verboseXboxSaveSerializationLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState begin write=%d file='%s' loc=%u state=%d",
+				writeState ? 1 : 0, filename ? filename : "", (u32)stream->getLoc(), s_runGameState.state);
+		}
 #endif
 		if (writeState && filename)
 		{
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState hud message begin");
+			if (s_verboseXboxSaveSerializationLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState hud message begin");
+			}
 #endif
 			// Write the save message.
 			const char* msg = TFE_System::getMessage(TFE_MSG_SAVE);
@@ -2128,16 +2187,25 @@ namespace TFE_DarkForces
 				hud_sendTextMessage(fullMsg, 0);
 			}
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState hud message end");
+			if (s_verboseXboxSaveSerializationLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState hud message end");
+			}
 #endif
 		}
 
 #ifdef _XBOX
-		TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState time_pause begin");
+		if (s_verboseXboxSaveSerializationLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState time_pause begin");
+		}
 #endif
 		time_pause(JTRUE);
 #ifdef _XBOX
-		TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState time_pause end");
+		if (s_verboseXboxSaveSerializationLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState time_pause end");
+		}
 #endif
 		if (writeState)
 		{
@@ -2149,14 +2217,20 @@ namespace TFE_DarkForces
 		}
 
 #ifdef _XBOX
-		TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState version begin loc=%u", (u32)stream->getLoc());
+		if (s_verboseXboxSaveSerializationLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState version begin loc=%u", (u32)stream->getLoc());
+		}
 #endif
 		serializeVersion(stream);
 		const u32 curVersion = serialization_getVersion();
 #ifdef _XBOX
-		TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState version end loc=%u version=%u", (u32)stream->getLoc(), curVersion);
-#define XBOX_SAVE_STEP_BEGIN(name) TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState " name " begin loc=%u", (u32)stream->getLoc())
-#define XBOX_SAVE_STEP_END(name) TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState " name " end loc=%u", (u32)stream->getLoc())
+		if (s_verboseXboxSaveSerializationLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState version end loc=%u version=%u", (u32)stream->getLoc(), curVersion);
+		}
+#define XBOX_SAVE_STEP_BEGIN(name) do { if (s_verboseXboxSaveSerializationLog) TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState " name " begin loc=%u", (u32)stream->getLoc()); } while (0)
+#define XBOX_SAVE_STEP_END(name) do { if (s_verboseXboxSaveSerializationLog) TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState " name " end loc=%u", (u32)stream->getLoc()); } while (0)
 #else
 #define XBOX_SAVE_STEP_BEGIN(name)
 #define XBOX_SAVE_STEP_END(name)
@@ -2240,7 +2314,10 @@ namespace TFE_DarkForces
 
 		time_pause(JFALSE);
 #ifdef _XBOX
-		TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState end loc=%u", (u32)stream->getLoc());
+		if (s_verboseXboxSaveSerializationLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "serializeGameState end loc=%u", (u32)stream->getLoc());
+		}
 #undef XBOX_SAVE_STEP_BEGIN
 #undef XBOX_SAVE_STEP_END
 #endif

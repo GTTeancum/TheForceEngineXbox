@@ -1,8 +1,9 @@
 //////////////////////////////////////////////////////////////////////
 // xbox_link_stubs.cpp
-// No-op stubs for symbols referenced by included game code but whose
-// implementations live in modules excluded from the Xbox build
-// (GPU renderer, mod/external data, scripting, registry, etc.).
+// Xbox replacement implementations for symbols referenced by included game
+// code whose desktop modules are excluded from the Xbox build. Some entries
+// are true no-op stubs; the RClassic_GPU bridge below is active D3D8 world
+// rendering code.
 //
 // Compiled only when _XBOX is defined.
 //////////////////////////////////////////////////////////////////////
@@ -39,7 +40,7 @@
 // =====================================================================
 
 // =====================================================================
-// GPU renderer stubs (screenDrawGPU.cpp and related files excluded)
+// Xbox GPU renderer bridge (screenDrawGPU.cpp and related files excluded)
 // NOTE: screenDraw.cpp IS in the Xbox build and already provides:
 //   screen_clear, screen_enableGPU, screenDraw_begin/endLines,
 //   screenDraw_begin/endQuads, screenDraw_setTransColor,
@@ -167,7 +168,15 @@ namespace TFE_Jedi
 	}
 
 	void screenGPU_setIndexedColors(u32, const Vec4f*) {}
-	void screenGPU_drawColoredQuad(fixed16_16, fixed16_16, fixed16_16, fixed16_16, u8) {}
+	void screenGPU_drawColoredQuad(fixed16_16 x0, fixed16_16 y0, fixed16_16 x1, fixed16_16 y1, u8 color)
+	{
+		const u32 rgba = TFE_RenderBackend::gpuPaletteEntryRGBA(color);
+		TFE_RenderBackend::gpuDrawScreenQuad(fixed16ToFloat(x0), fixed16ToFloat(y0),
+		                                     fixed16ToFloat(x1), fixed16ToFloat(y1),
+		                                     0.0f, 0.0f, 1.0f, 1.0f,
+		                                     s_scrGpuW, s_scrGpuH, NULL, false,
+		                                     rgba, rgba);
+	}
 
 	void screenGPU_setHudTextureCallbacks(s32, TextureListCallback*, bool) {}
 
@@ -263,7 +272,11 @@ namespace TFE_Jedi
 	void screenGPU_blitTexture(ScreenImage*, DrawRect*, s32, s32) {}
 	void screenGPU_blitTextureScaled(ScreenImage*, DrawRect*, s32, s32, fixed16_16, fixed16_16) {}
 	void screenGPU_blitTextureLitScaled(ScreenImage*, DrawRect*, s32, s32, fixed16_16, fixed16_16, u8) {}
-	void screenGPU_blitTextureIScale(TextureData*, DrawRect*, s32, s32, s32) {}
+	void screenGPU_blitTextureIScale(TextureData* texture, DrawRect* rect, s32 x0, s32 y0, s32 scale)
+	{
+		screenGPU_blitTextureScaled(texture, rect, intToFixed16(x0), intToFixed16(y0),
+		                            intToFixed16(scale), intToFixed16(scale), 31, JFALSE);
+	}
 
 	// =====================================================================
 	// Phase 2 of the RClassic_GPU/D3D8 port.
@@ -1296,6 +1309,10 @@ namespace TFE_Jedi
 
 	static void xboxPerfTick(u32 portals, u32 uniqueSec, u32 secDraws)
 	{
+		if (s_xboxPerfWindowStartT <= 0.0)
+		{
+			s_xboxPerfWindowStartT = TFE_System::getTime();
+		}
 		s_xboxPerfFrames++;
 		s_xboxPerfPortalsSum  += portals;
 		s_xboxPerfUniqueSum   += uniqueSec;
@@ -1859,8 +1876,22 @@ namespace TFE_Jedi
 		}
 	}
 
-	void TFE_Sectors_GPU::destroy()             {}
-	void TFE_Sectors_GPU::reset()               {}
+	static void xboxGpuRendererClearTransient()
+	{
+		xboxFrustum_clearStack();
+		xboxPortalPlanes_clear();
+		xboxObjectLists_clear();
+		xboxWallList_clear();
+	}
+
+	static void xboxGpuRendererInvalidateLevelResources()
+	{
+		TFE_RenderBackend::gpuInvalidateTextureCache();
+		xboxGpuRendererClearTransient();
+	}
+
+	void TFE_Sectors_GPU::destroy()             { xboxGpuRendererInvalidateLevelResources(); }
+	void TFE_Sectors_GPU::reset()               { xboxGpuRendererInvalidateLevelResources(); }
 	void TFE_Sectors_GPU::prepare()             {}
 	// Phase 12.B/C - upstream-grounded recursive traversal.
 	// Mirrors traverseSector / traverseScene in
@@ -2041,9 +2072,9 @@ namespace TFE_Jedi
 		// Accumulate per-frame perf counters for the dump window.
 		xboxPerfTick(s_xboxPortalsTraversed, s_xboxVisitedThisFrame, s_xboxSectorDrawsThisFrame);
 
-		// Per-frame object/cache stats. Dump every 120th draw frame
-		// (~2s at 60Hz mission tick) so we have steady signal.
-		if ((s_objStatsFrame % 120) == 1) xboxObjStatsDump();
+		// Per-frame object/cache stats. Dump roughly once a minute so
+		// hours-long soak logs stay useful instead of turning into noise.
+		if ((s_objStatsFrame % 3600) == 1) xboxObjStatsDump();
 
 		// One log line each time the player walks into a new starting
 		// sector, plus how many sectors the traversal reached.
@@ -2058,9 +2089,9 @@ namespace TFE_Jedi
 				(s32)s_xboxLastYaw);
 		}
 	}
-	void TFE_Sectors_GPU::subrendererChanged()  {}
-	void TFE_Sectors_GPU::flushCache()          {}
-	void TFE_Sectors_GPU::flushTextureCache()   {}
+	void TFE_Sectors_GPU::subrendererChanged()  { xboxGpuRendererInvalidateLevelResources(); }
+	void TFE_Sectors_GPU::flushCache()          { xboxGpuRendererInvalidateLevelResources(); }
+	void TFE_Sectors_GPU::flushTextureCache()   { TFE_RenderBackend::gpuInvalidateTextureCache(); }
 	TextureGpu* TFE_Sectors_GPU::getColormap()  { return NULL; }
 
 	// =====================================================================

@@ -2,14 +2,10 @@
 // Xbox render backend using Direct3D 8.
 //
 // Architecture:
-//   The software renderer writes an 8-bit paletted framebuffer.
-//   vfb_swap() calls updateVirtualDisplay(buf, size) once per frame.
-//   We CPU-expand the 8-bit data to XRGB8888 using the stored palette,
-//   lock a D3D8 texture, copy in, then StretchRect to the 1280x720
-//   back buffer with correct aspect-ratio letterboxing, then Present.
-//
-// GPU renderer path (RClassic_GPU) is NOT used on Xbox.
-// All render-target / shader / indexed-draw functions are safe stubs.
+//   The Xbox hardware renderer draws the JEDI world through D3D8 fixed-
+//   function helpers exposed by this backend. The legacy 8-bit virtual
+//   framebuffer is still updated each frame for HUD, weapon, messages, and
+//   menu overlays; swap() alpha-tests that overlay on top of the D3D8 scene.
 //
 // 720p is the fixed output resolution. The Xbox dashboard is expected
 // to have widescreen enabled in system settings; we do not force AV pack
@@ -2275,7 +2271,7 @@ namespace TFE_RenderBackend
     }
 
     const u32* getPalette()             { return s_paletteCpu; }
-    const TextureGpu* getPaletteTexture(){ return NULL; } // Not used on Xbox software path.
+    const TextureGpu* getPaletteTexture(){ return NULL; } // Desktop GPU API is unused by the Xbox D3D8 bridge.
 
     // -----------------------------------------------------------------------
     // Swap - blit virtual display to back buffer and present.
@@ -2516,8 +2512,8 @@ namespace TFE_RenderBackend
     void* getVirtualDisplayGpuPtr() { return NULL; }
 
     // -----------------------------------------------------------------------
-    // Stubs - bindVirtualDisplay / clearVirtualDisplay / copyTo*
-    // These are only used by the GPU renderer path which is not active.
+    // Hardware world path. bindVirtualDisplay opens a D3D8 scene for
+    // RClassic_GPU's Xbox fixed-function bridge; swap() closes and presents it.
     // -----------------------------------------------------------------------
     void bindVirtualDisplay()
     {
@@ -3269,7 +3265,8 @@ namespace TFE_RenderBackend
     }
 
     // -----------------------------------------------------------------------
-    // Texture stubs - software path never uses GPU textures.
+    // Desktop TextureGpu stubs. The Xbox hardware path uses the explicit
+    // GpuTextureHandle helpers above instead of the OpenGL-style TextureGpu API.
     // -----------------------------------------------------------------------
     TextureGpu* createTexture(u32 /*w*/, u32 /*h*/, const u32* /*data*/, MagFilter /*f*/)
     {

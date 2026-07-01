@@ -66,6 +66,9 @@
 #include <TFE_System/cJSON.h>
 #include <TFE_DarkForces/hud.h>
 #include <TFE_DarkForces/mission.h>
+#include <TFE_DarkForces/cheats.h>
+#include <TFE_DarkForces/agent.h>
+#include <TFE_DarkForces/player.h>
 
 #include "xbox_avenger_thumb.inc"
 #include "xbox_dashboard_assets.inc"
@@ -194,6 +197,20 @@ static const bool s_menuMusicVerbose = false;
 static const bool s_frontendVerbose = false;
 static u32 s_frontendPresentPhase = 0;
 static AppState s_lastPresentedFrontendState = APP_STATE_UNINIT;
+static bool s_soakMode = false;
+static bool s_soakMissionReady = false;
+static bool s_soakLastSaveOk = false;
+static bool s_soakAwaitingLevelChange = false;
+static u32  s_soakStartMs = 0;
+static u32  s_soakFrame = 0;
+static u32  s_soakNextSummaryMs = 0;
+static u32  s_soakNextTransitionMs = 0;
+static u32  s_soakLevelReadyMs = 0;
+static s32  s_soakCycle = 0;
+static s32  s_soakStep = 0;
+static s32  s_soakTargetIndex = 0;
+static s32  s_soakPendingTargetIndex = -1;
+static char s_soakLevelName[32] = "";
 
 enum XboxOptionIndex
 {
@@ -246,6 +263,20 @@ static const XboxBindingOption c_xboxBindingOptions[] =
 static bool s_optionsCapture = false;
 
 #ifdef _XBOX
+static bool xboxAbsoluteFileExists(const char* path)
+{
+    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    CloseHandle(h);
+    return true;
+}
+
+static bool xboxDetectSoakMode()
+{
+    return xboxAbsoluteFileExists("D:\\tfe_soak.txt") ||
+           xboxAbsoluteFileExists("tfe_soak.txt");
+}
+
 static bool xboxReadFileEquals(const char* path, const unsigned char* data, u32 size)
 {
     HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
@@ -352,6 +383,257 @@ static void logXboxResourceSnapshot(const char* tag)
 static void logXboxResourceSnapshot(const char*) {}
 #endif
 
+#ifdef _XBOX
+static bool xboxTimeReached(u32 now, u32 deadline)
+{
+    return ((s32)(now - deadline)) >= 0;
+}
+
+static const TFE_DarkForces::CheatID c_soakTransitionCheats[] =
+{
+    TFE_DarkForces::CHEAT_LATALAY,
+    TFE_DarkForces::CHEAT_LASEWERS,
+    TFE_DarkForces::CHEAT_LATESTBASE,
+    TFE_DarkForces::CHEAT_LAGROMAS,
+    TFE_DarkForces::CHEAT_LADTENTION,
+    TFE_DarkForces::CHEAT_LARAMSHED,
+    TFE_DarkForces::CHEAT_LAROBOTICS,
+    TFE_DarkForces::CHEAT_LANARSHADA,
+    TFE_DarkForces::CHEAT_LAJABSHIP,
+    TFE_DarkForces::CHEAT_LAIMPCITY,
+    TFE_DarkForces::CHEAT_LAFUELSTAT,
+    TFE_DarkForces::CHEAT_LAEXECUTOR,
+    TFE_DarkForces::CHEAT_LAARC,
+    TFE_DarkForces::CHEAT_LASECBASE
+};
+
+static const char* c_soakTransitionNames[] =
+{
+    "TALAY",
+    "SEWERS",
+    "TESTBASE",
+    "GROMAS",
+    "DTENTION",
+    "RAMSHED",
+    "ROBOTICS",
+    "NARSHADA",
+    "JABSHIP",
+    "IMPCITY",
+    "FUELSTAT",
+    "EXECUTOR",
+    "ARC",
+    "SECBASE"
+};
+
+static void xboxSoakCopyLevelName(char* out, u32 outSize)
+{
+    if (!out || outSize == 0) return;
+    const char* levelName = TFE_DarkForces::agent_getLevelName();
+    if (!levelName) levelName = "";
+    strncpy(out, levelName, outSize - 1);
+    out[outSize - 1] = 0;
+}
+
+static const char* xboxSoakCurrentLevelName()
+{
+    const char* levelName = TFE_DarkForces::agent_getLevelName();
+    return levelName ? levelName : "";
+}
+
+static bool xboxSoakInActiveMission()
+{
+    return s_curState == APP_STATE_GAME &&
+           s_curGame &&
+           TFE_DarkForces::s_missionMode == TFE_DarkForces::MISSION_MODE_MAIN &&
+           TFE_Jedi::task_getCount() > 1 &&
+           xboxSoakCurrentLevelName()[0] != 0;
+}
+
+static void xboxSoakHoldSurvivalFlags()
+{
+    // This is a harness, not a gameplay input path. Avoid LAIMLAME's toggle behavior.
+    TFE_DarkForces::s_invincibility = -2;
+}
+
+static void logXboxSoakSummary(const char* phase, u32 now)
+{
+    u32 searchPaths = 0;
+    u32 localArchives = 0;
+    u32 fileMappings = 0;
+    TFE_Paths::getResourceCounts(&searchPaths, &localArchives, &fileMappings);
+
+    u64 gameUsed = s_gameRegion ? TFE_Memory::region_getMemoryUsed(s_gameRegion) : 0;
+    u64 gameCap = s_gameRegion ? TFE_Memory::region_getMemoryCapacity(s_gameRegion) : 0;
+    u64 levelUsed = s_levelRegion ? TFE_Memory::region_getMemoryUsed(s_levelRegion) : 0;
+    u64 levelCap = s_levelRegion ? TFE_Memory::region_getMemoryCapacity(s_levelRegion) : 0;
+    u64 gameBlocks = 0;
+    u64 gameBlockSize = 0;
+    u64 levelBlocks = 0;
+    u64 levelBlockSize = 0;
+    if (s_gameRegion) { TFE_Memory::region_getBlockInfo(s_gameRegion, &gameBlocks, &gameBlockSize); }
+    if (s_levelRegion) { TFE_Memory::region_getBlockInfo(s_levelRegion, &levelBlocks, &levelBlockSize); }
+
+    MEMORYSTATUS mem;
+    memset(&mem, 0, sizeof(mem));
+    mem.dwLength = sizeof(mem);
+    GlobalMemoryStatus(&mem);
+
+    const u32 elapsedSec = s_soakStartMs ? (now - s_soakStartMs) / 1000u : 0u;
+    TFE_System::logWrite(LOG_MSG, "SOAK",
+        "summary t=%us phase=%s cycle=%d step=%d frame=%u state=%d missionMode=%d level='%s' levelIndex=%d tasks=%d mem=%uKB paths=%u mounted=%u mapped=%u archives=%u game=%u/%u blocks=%u level=%u/%u blocks=%u gamePtr=%p",
+        elapsedSec,
+        phase ? phase : "",
+        s_soakCycle,
+        s_soakStep,
+        s_soakFrame,
+        (s32)s_curState,
+        (s32)TFE_DarkForces::s_missionMode,
+        xboxSoakCurrentLevelName(),
+        TFE_DarkForces::agent_getLevelIndex(),
+        TFE_Jedi::task_getCount(),
+        (u32)(mem.dwAvailPhys / 1024u),
+        searchPaths,
+        localArchives,
+        fileMappings,
+        Archive::getCachedArchiveCount(),
+        (u32)gameUsed,
+        (u32)gameCap,
+        (u32)gameBlocks,
+        (u32)levelUsed,
+        (u32)levelCap,
+        (u32)levelBlocks,
+        s_curGame);
+}
+
+static void xboxSoakBeginLevel(u32 now, const char* levelName)
+{
+    if (s_soakAwaitingLevelChange)
+    {
+        TFE_System::logWrite(LOG_MSG, "SOAK",
+            "level transition complete cycle=%d target='%s' arrived='%s' levelIndex=%d",
+            s_soakCycle,
+            (s_soakPendingTargetIndex >= 0) ? c_soakTransitionNames[s_soakPendingTargetIndex] : "",
+            levelName ? levelName : "",
+            TFE_DarkForces::agent_getLevelIndex());
+        if (s_soakPendingTargetIndex >= 0)
+        {
+            s_soakTargetIndex = (s_soakPendingTargetIndex + 1) % (s32)TFE_ARRAYSIZE(c_soakTransitionCheats);
+            s_soakPendingTargetIndex = -1;
+        }
+        s_soakCycle++;
+    }
+
+    xboxSoakCopyLevelName(s_soakLevelName, sizeof(s_soakLevelName));
+    s_soakMissionReady = true;
+    s_soakAwaitingLevelChange = false;
+    s_soakLevelReadyMs = now;
+    s_soakStep = 0;
+    s_soakLastSaveOk = false;
+    s_soakNextSummaryMs = now + 60000u;
+    s_soakNextTransitionMs = now + 15000u;
+    xboxSoakHoldSurvivalFlags();
+
+    TFE_System::logWrite(LOG_MSG, "SOAK",
+        "level ready cycle=%d level='%s' levelIndex=%d nextTarget='%s'",
+        s_soakCycle,
+        s_soakLevelName,
+        TFE_DarkForces::agent_getLevelIndex(),
+        c_soakTransitionNames[s_soakTargetIndex]);
+    logXboxSoakSummary("level-ready", now);
+}
+
+static void updateXboxSoak()
+{
+    if (!s_soakMode) return;
+
+    const u32 now = GetTickCount();
+    s_soakFrame++;
+
+    if (!s_soakStartMs)
+    {
+        s_soakStartMs = now ? now : 1u;
+        s_soakNextSummaryMs = now + 60000u;
+        s_soakNextTransitionMs = now + 15000u;
+        TFE_System::logWrite(LOG_MSG, "SOAK", "begin campaign transition soak");
+        logXboxSoakSummary("begin", now);
+    }
+
+    if (!xboxSoakInActiveMission())
+    {
+        if (xboxTimeReached(now, s_soakNextSummaryMs))
+        {
+            logXboxSoakSummary(s_soakAwaitingLevelChange ? "loading-next" : "waiting-mission", now);
+            s_soakNextSummaryMs = now + 60000u;
+        }
+        return;
+    }
+
+    xboxSoakHoldSurvivalFlags();
+
+    const char* currentLevel = xboxSoakCurrentLevelName();
+    if (!s_soakMissionReady || strcmp(currentLevel, s_soakLevelName) != 0)
+    {
+        xboxSoakBeginLevel(now, currentLevel);
+        return;
+    }
+
+    if (xboxTimeReached(now, s_soakNextSummaryMs))
+    {
+        logXboxSoakSummary("steady", now);
+        s_soakNextSummaryMs = now + 60000u;
+    }
+
+    if (!xboxTimeReached(now, s_soakNextTransitionMs))
+    {
+        return;
+    }
+
+    if (s_soakStep == 0)
+    {
+        TFE_System::logWrite(LOG_MSG, "SOAK", "transition save begin cycle=%d", s_soakCycle);
+        s_soakLastSaveOk = TFE_SaveSystem::saveGameQuiet("soak_cycle.tfe", "Soak");
+        TFE_System::logWrite(s_soakLastSaveOk ? LOG_MSG : LOG_ERROR, "SOAK",
+            "transition save end cycle=%d result=%d", s_soakCycle, s_soakLastSaveOk ? 1 : 0);
+        logXboxSoakSummary("after-save", now);
+        s_soakStep = s_soakLastSaveOk ? 1 : 0;
+        s_soakNextTransitionMs = now + (s_soakLastSaveOk ? 10000u : 30000u);
+    }
+    else if (s_soakStep == 1)
+    {
+        TFE_System::logWrite(LOG_MSG, "SOAK", "transition load begin cycle=%d", s_soakCycle);
+        const bool loaded = TFE_SaveSystem::loadGame("soak_cycle.tfe");
+        TFE_System::logWrite(loaded ? LOG_MSG : LOG_ERROR, "SOAK",
+            "transition load end cycle=%d result=%d", s_soakCycle, loaded ? 1 : 0);
+        logXboxSoakSummary("after-load", now);
+        s_soakStep = loaded ? 2 : 0;
+        s_soakNextTransitionMs = now + (loaded ? 15000u : 30000u);
+    }
+    else
+    {
+        s32 targetIndex = s_soakPendingTargetIndex;
+        if (targetIndex < 0)
+        {
+            targetIndex = s_soakTargetIndex % (s32)TFE_ARRAYSIZE(c_soakTransitionCheats);
+            s_soakPendingTargetIndex = targetIndex;
+        }
+
+        TFE_System::logWrite(LOG_MSG, "SOAK",
+            "level transition begin cycle=%d from='%s' target='%s' cheat=%d",
+            s_soakCycle,
+            s_soakLevelName,
+            c_soakTransitionNames[targetIndex],
+            (s32)c_soakTransitionCheats[targetIndex]);
+        logXboxSoakSummary("before-level-change", now);
+        TFE_DarkForces::executeCheat(c_soakTransitionCheats[targetIndex]);
+        s_soakAwaitingLevelChange = true;
+        s_soakStep = 3;
+        s_soakNextTransitionMs = now + 120000u;
+    }
+}
+#else
+static void updateXboxSoak() {}
+#endif
+
 static bool isNativeFrontendState(AppState state)
 {
     return state == APP_STATE_MENU ||
@@ -400,6 +682,11 @@ extern "C" void TFE_XboxReturnToStartMenu()
     TFE_System::logWrite(LOG_MSG, "Main", "Return to start menu requested. state=%d game=%p",
         (s32)s_curState, s_curGame);
     s_returnToStartRequested = true;
+}
+
+extern "C" bool TFE_XboxSoakAutoAdvanceMissionComplete()
+{
+    return s_soakMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -2268,9 +2555,10 @@ static void updateLoadMenu()
 void __cdecl main()
 {
     // Open the log file as the very first thing, before any other init,
-    // so early-boot failures are captured. Hardcoded to D:\tfe_xbox_log.txt;
-    // overwritten each boot (no rotation).
-    TFE_System::openRotatingLog("tfe_xbox_log.txt");
+    // so early-boot failures are captured. XEMU soak logs go to E:\ because
+    // the staged ISO's D:\ root is read-only; normal Xbox logs stay on D:\.
+    s_soakMode = xboxDetectSoakMode();
+    TFE_System::openRotatingLog(s_soakMode ? "E:\\tfe_xbox_soak_log.txt" : "tfe_xbox_log.txt");
     TFE_XboxLogf("Main", "XBE entry");
 
     // -----------------------------------------------------------------------
@@ -2347,7 +2635,8 @@ void __cdecl main()
     setupSourceDataPath();
 
     // Override settings for Xbox: always fullscreen with a native 640x480
-    // game framebuffer presented through the D3D8 backend.
+    // hardware-rendered world. The 8-bit framebuffer is retained for HUD,
+    // weapon, messages, and menu overlays that composite over the D3D8 scene.
     TFE_Settings_Window* windowSettings = TFE_Settings::getWindowSettings();
     windowSettings->fullscreen = true;
     windowSettings->width      = 1280;
@@ -2357,7 +2646,7 @@ void __cdecl main()
     graphics->gameResolution.x = 640;
     graphics->gameResolution.z = 480;
     graphics->widescreen = false;
-    graphics->rendererIndex = 0;  // RENDERER_SOFTWARE
+    graphics->rendererIndex = 1;  // RENDERER_HARDWARE
     graphics->colorMode = (ColorMode)0;  // COLORMODE_8BIT
     graphics->useMipmapping = false;
     graphics->frameRateLimit = 60;
@@ -2476,6 +2765,13 @@ void __cdecl main()
     // intro does not replay every time.
     // -----------------------------------------------------------------------
     TFE_Input::enableRelativeMode(false);
+    if (s_soakMode)
+    {
+        const char* soakArgv[] = { "tfe_xbox", "-c0", "-lSECBASE" };
+        TFE_System::logWrite(LOG_MSG, "SOAK", "marker present; starting campaign transition soak at SECBASE");
+        startGame(3, soakArgv);
+    }
+    else
     {
         const char* introArgv[] = { "tfe_xbox", "-xintro" };
         TFE_System::logWrite(LOG_MSG, "Main", "Starting Xbox startup intro.");
@@ -2589,7 +2885,9 @@ void __cdecl main()
                     }
                     else
                     {
-                        endInputFrame = TFE_Jedi::task_run() != 0;
+                        const s32 taskRan = TFE_Jedi::task_run();
+                        updateXboxSoak();
+                        endInputFrame = taskRan != 0;
                     }
                 }
             }

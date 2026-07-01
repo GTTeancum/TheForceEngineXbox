@@ -214,8 +214,11 @@ namespace TFE_SaveSystem
 		TFE_RenderBackend::getDisplayInfo(&displayInfo);
 		size_t size = displayInfo.width * displayInfo.height * 4;
 #ifdef _XBOX
-		TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader begin saveName='%s' display=%ux%u captureBytes=%u",
-			saveName ? saveName : "", (u32)displayInfo.width, (u32)displayInfo.height, (u32)size);
+		if (s_verboseXboxSaveLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader begin saveName='%s' display=%ux%u captureBytes=%u",
+				saveName ? saveName : "", (u32)displayInfo.width, (u32)displayInfo.height, (u32)size);
+		}
 #endif
 		if (size > s_imageBufferSize[0])
 		{
@@ -331,25 +334,35 @@ namespace TFE_SaveSystem
 		// Image.
 #ifdef _XBOX
 		u32 pngSize = haveThumbnailBuffer ? rawImageSize : 0;
-#ifdef _XBOX
-		TFE_System::logWrite(LOG_MSG, "SaveSystem",
-			"saveHeader fields save='%s' datetime='%s' levelName='%s' levelId='%s' modList='%s' thumbBytes=%u firstPixel=0x%08x",
-			saveName ? saveName : "", timeDate, levelName, levelId, modList, pngSize,
-			(s_imageBuffer[1] && pngSize) ? s_imageBuffer[1][0] : 0);
-#endif
+		if (s_verboseXboxSaveLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem",
+				"saveHeader fields save='%s' datetime='%s' levelName='%s' levelId='%s' modList='%s' thumbBytes=%u firstPixel=0x%08x",
+				saveName ? saveName : "", timeDate, levelName, levelId, modList, pngSize,
+				(s_imageBuffer[1] && pngSize) ? s_imageBuffer[1][0] : 0);
+		}
 		stream->write(&pngSize);
 		if (pngSize)
 		{
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader thumbnail write begin bytes=%u", pngSize);
+			if (s_verboseXboxSaveLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader thumbnail write begin bytes=%u", pngSize);
+			}
 #endif
 			stream->writeBuffer(s_imageBuffer[1], pngSize);
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader thumbnail write end loc=%u", (u32)stream->getLoc());
+			if (s_verboseXboxSaveLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader thumbnail write end loc=%u", (u32)stream->getLoc());
+			}
 #endif
 		}
 #ifdef _XBOX
-		TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader end loc=%u", (u32)stream->getLoc());
+		if (s_verboseXboxSaveLog)
+		{
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader end loc=%u", (u32)stream->getLoc());
+		}
 #endif
 #else
 		stream->write(&pngSize);
@@ -532,17 +545,26 @@ namespace TFE_SaveSystem
 		{
 			saveHeader(&stream, saveName);
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame header complete loc=%u", (u32)stream.getLoc());
-			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame serialize begin");
+			if (s_verboseXboxSaveLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame header complete loc=%u", (u32)stream.getLoc());
+				TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame serialize begin");
+			}
 #endif
 			ret = s_game->serializeGameState(&stream, showMessage ? filename : NULL, true);
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame serialize end result=%d loc=%u", ret ? 1 : 0, (u32)stream.getLoc());
-			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame close begin");
+			if (s_verboseXboxSaveLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame serialize end result=%d loc=%u", ret ? 1 : 0, (u32)stream.getLoc());
+				TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame close begin");
+			}
 #endif
 			stream.close();
 #ifdef _XBOX
-			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame close end");
+			if (s_verboseXboxSaveLog)
+			{
+				TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveGame close end");
+			}
 #endif
 		}
 #ifdef _XBOX
