@@ -2634,9 +2634,9 @@ void __cdecl main()
     // Set source data path from program directory.
     setupSourceDataPath();
 
-    // Override settings for Xbox: always fullscreen with a native 640x480
-    // hardware-rendered world. The 8-bit framebuffer is retained for HUD,
-    // weapon, messages, and menu overlays that composite over the D3D8 scene.
+    // Override settings for Xbox: always fullscreen with the known-good
+    // 640x480 software renderer. The D3D8 hardware bridge remains in the
+    // tree for future work, but it is not stable enough for hardware shipping.
     TFE_Settings_Window* windowSettings = TFE_Settings::getWindowSettings();
     windowSettings->fullscreen = true;
     windowSettings->width      = 1280;
@@ -2646,7 +2646,7 @@ void __cdecl main()
     graphics->gameResolution.x = 640;
     graphics->gameResolution.z = 480;
     graphics->widescreen = false;
-    graphics->rendererIndex = 1;  // RENDERER_HARDWARE
+    graphics->rendererIndex = 0;  // RENDERER_SOFTWARE
     graphics->colorMode = (ColorMode)0;  // COLORMODE_8BIT
     graphics->useMipmapping = false;
     graphics->frameRateLimit = 60;

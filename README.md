@@ -1,144 +1,181 @@
 # TheForceEngineXbox
 
-A fork of [The Force Engine](https://github.com/luciusDXL/TheForceEngine) (luciusDXL's JEDI engine recreation that powers Dark Forces and, eventually, Outlaws) ported to the **original Microsoft Xbox**. Builds to a real `default.xbe` that runs on retail Xbox hardware and CXBX-R.
+TheForceEngineXbox is an original Xbox port of
+[The Force Engine](https://github.com/luciusDXL/TheForceEngine), the open-source
+Dark Forces engine recreation.
 
-Upstream is owned and maintained by [@luciusDXL](https://github.com/luciusDXL); this fork exists solely to host the Xbox-specific divergences (XDK toolchain, D3D8 backend, XInput, DirectSound polling, FATX path handling, MSVC 2005 / C++03 patches). All gameplay logic, JEDI engine internals, and asset pipelines are unchanged from upstream.
+This fork builds a real `default.xbe` for retail Xbox hardware and CXBX-R. It
+does not include Star Wars: Dark Forces. You need your own PC copy of the game.
 
-A purchased copy of **Star Wars: Dark Forces** is required. The original DOS game data files (`DARK.GOB`, `SOUNDS.GOB`, `TEXTURES.GOB`, `SPRITES.GOB`, the `LFD/` folder, etc.) are not redistributed here.
+## Download
 
----
+Use the latest package from the
+[GitHub Releases](https://github.com/GTTeancum/TheForceEngineXbox/releases)
+page:
 
-## Current state
+```text
+TheForceEngine-Xbox-Install.zip
+```
 
-Boots straight into SECBASE on launch. Controller-driven gameplay loop is functional.
+The zip is an overlay package. Copy your PC Dark Forces install to the Xbox
+first, then extract this zip over it.
 
-| Working | Partial / Stubbed |
-|---|---|
-| Software renderer (RClassic_Fixed) at 320×200 → D3D8 → 640×480 | MIDI music (synth wired but iMuse not bridged — silent) |
-| 8-bit palette, palette-fx, transparency | No agent menu (boots directly to level 1) |
-| Full controller input (XInput) — sticks, D-pad, face buttons, triggers, shoulders | No briefing/cutscenes (Landru bypass on Xbox) |
-| Bryar pistol fires, projectiles render, hit effects spawn | No save persistence (virtual in-memory agent only) |
-| Enemy AI, projectiles, damage application | No font upscaling assets (`*Num2.fnt` deliberately absent) |
-| HUD (health/shields/lives/ammo) | |
-| Sound effects + voice (polled DirectSound8 streaming) | |
-| TFE_ExternalData fully wired (weapons.json / projectiles.json / effects.json / pickups.json shipped) | |
+## Install
 
-Output: 640×480 NTSC, 4:3. Pillarboxing not needed — back-buffer is already 4:3.
+1. On your Xbox hard drive, make a folder for the game.
 
----
+   Example:
 
-## Building
+   ```text
+   F:\Games\Dark Forces\
+   ```
 
-### Toolchain prerequisites
+2. Inside that folder, make a folder named `DARK`.
 
-| Tool | Version | Location expected |
-|---|---|---|
-| Visual C++ compiler | VC71 (Visual Studio .NET 2003) | `C:\XDK_5558\XDK\xbox\bin\vc71\CL.Exe` |
-| XDK | 5558 | `C:\XDK_5558\XDK\xbox\` (includes + libs + `imagebld.exe`) |
-| XDK 5849 fallback (for `stdint.h`, `winsock2.h`) | 5849 | `C:\XDK\xbox\include\` |
-| Python | 3.x (any modern) | on PATH, for `patchxbe.py` |
+   Example:
 
-The build script is [`build_xbox.bat`](build_xbox.bat) — no `.vcproj`, no MSBuild, no CMake. Direct invocation of `cl.exe` + `link.exe` + `imagebld.exe`. This mirrors OpenJKDF2's working build setup for VC71 + XDK 5558.
+   ```text
+   F:\Games\Dark Forces\DARK\
+   ```
 
-### Building from scratch
+3. Copy your PC Dark Forces game files into the `DARK` folder.
+
+   The `DARK` folder should contain the normal game data files, such as:
+
+   ```text
+   DARK.GOB
+   SOUNDS.GOB
+   TEXTURES.GOB
+   SPRITES.GOB
+   LFD\
+   ```
+
+4. Optional: if you own the Remastered version and you want the Avenger
+   prototype level playable as a mod, copy `extras.gob` into the `DARK` folder
+   too.
+
+5. Extract `TheForceEngine-Xbox-Install.zip` into the main game folder, not
+   inside `DARK`.
+
+   Example:
+
+   ```text
+   F:\Games\Dark Forces\
+   ```
+
+6. Let it overwrite files if your file manager asks.
+
+7. Launch `default.xbe`.
+
+## What The Zip Adds
+
+The release package includes the files that are needed for the Xbox port and
+are not part of the original PC game:
+
+```text
+default.xbe
+default_XSIMAGE.xbx
+default_XTIMAGE.xbx
+TitleMeta.xbx
+TitleImage.xbx
+SaveImage.xbx
+README.txt
+
+DARK\effects.json
+DARK\pickups.json
+DARK\projectiles.json
+DARK\weapons.json
+
+ExternalData\DarkForces\Mods\DF21\df21_catalog_xbox.json
+ExternalData\DarkForces\Mods\DF21\thumbs_128x80_rgb565\*.xbt
+```
+
+The four JSON files in `DARK` are The Force Engine gameplay data files. They
+are required by the Xbox build.
+
+The DF21 catalog and thumbnail cache are included so the mod browser can show
+metadata and preview images. The mod levels themselves are not included.
+
+## Mods
+
+This release does not redistribute mods. To install a mod you own or have
+downloaded separately, extract it under:
+
+```text
+Mods\<mod folder>\
+```
+
+The in-game mod browser expects extracted mod folders, not loose zip files in
+the game root.
+
+If you own the Remastered version, copying `extras.gob` into `DARK` enables the
+Avenger prototype level as a mod entry. `extras.gob` is not included in this
+project or in the release zip.
+
+## Current State
+
+This is a 1.0 release-candidate era Xbox build. The focus is hardware stability
+and a complete couch-playable Dark Forces experience.
+
+Working in this port:
+
+- Original Xbox `default.xbe` output.
+- 640x480 software-rendered gameplay presented through the Xbox D3D8 backend.
+- Native Xbox start menu, load menu, options menu, pause/datapad screens, and
+  mod browser.
+- XInput controller support with adjustable look sensitivity, stick deadzone,
+  volume settings, and remappable core actions.
+- Mission briefing flow, mission completion flow, and difficulty selection.
+- Save/load support using the Xbox title save area, including save thumbnails.
+- DirectSound audio path for game audio.
+- DF21 metadata and thumbnail support for the mod browser.
+
+Known limitations:
+
+- The hardware world renderer is not enabled for shipping. It remains in the
+  tree for future work, but the release build uses the known-good software
+  renderer.
+- Mods are not bundled. They must be installed separately.
+- Star Wars: Dark Forces game data is not bundled and will never be
+  redistributed here.
+
+## Build From Source
+
+Most users should download the release zip instead of building from source.
+
+The current command-line build path uses the checked-in `build_xbox.bat` script:
 
 ```cmd
 build_xbox.bat clean
 build_xbox.bat
 ```
 
-A clean build compiles ~201 translation units in ~30-60 seconds and produces:
+The build script currently expects:
 
-```
-build\xbox\release\default.xbe   (~1.1 MB, ready for FTP to Xbox)
-build\xbox\release\default.exe   (the PE before patchxbe.py rewrites it)
-build\xbox\release\default.xbe.map
-build_xbox.log                   (full compiler/linker output)
-```
+- XDK 5558 at `C:\XDK_5558\XDK\xbox`
+- VC71 tools from that XDK
+- XDK 5849 headers available at `C:\XDK\xbox\include`
+- Python on `PATH`
 
-### Deploying to the Xbox
+Successful builds output:
 
-FTP the following to a single directory on the Xbox (typically the `D:\` drive — whatever your dashboard maps as the launch directory for the title):
-
-```
-D:\default.xbe                         <- from build\xbox\release\
-D:\DARK\DARK.GOB                       <- from your purchased copy
-D:\DARK\SOUNDS.GOB
-D:\DARK\TEXTURES.GOB
-D:\DARK\SPRITES.GOB
-D:\DARK\LFD\AGENTMNU.LFD               <- and the rest of LFD\
-D:\DARK\LFD\MENU.LFD
-D:\DARK\LFD\<...>
-D:\DARK\weapons.json                   <- from TheForceEngine\ExternalData\DarkForces\
-D:\DARK\projectiles.json
-D:\DARK\effects.json
-D:\DARK\pickups.json
+```text
+build\xbox\release\default.xbe
 ```
 
-The four JSONs are TFE's externalised game data (weapon stats, projectile physics, hit-effect parameters, pickup definitions). They live next to the GOBs to keep all game data under one directory.
-
-Launch from the dashboard like any other XBE. The XBE's title ID is `LA-001` ("Star Wars Dark Forces") so CXBX-R recognises it correctly.
-
-### Testing on CXBX-R
-
-Same XBE works on [CXBX-R](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded). Useful for fast iteration without FTP cycles. **Real Xbox hardware is the canonical test target** — CXBX-R has HLE quirks (most notably in DSound and XInput) that occasionally diverge from real silicon.
-
----
-
-## What's different from upstream
-
-All divergence from upstream is constrained to two categories:
-
-1. **Xbox platform code** (always net-new files, lives alongside the originals):
-   - `main_xbox.cpp` — XBE entry point
-   - `TFE_System/system_xbox.cpp` — timing, logging, NT-prefix file paths
-   - `TFE_FileSystem/paths_xbox.cpp` + `fileutil_xbox.cpp` + `filewriterAsync_xbox.cpp`
-   - `TFE_Audio/audioDevice_xbox.cpp` — DirectSound8 polled streaming
-   - `TFE_Audio/midiPlayer_xbox.cpp` — iMuse stub (TODO: wire fm4Opl3)
-   - `TFE_Input/input_xbox.cpp` — XInput polling, synthesised mouse cursor
-   - `TFE_RenderBackend/renderBackend_xbox.cpp` + `renderState_xbox.cpp` — D3D8 backend
-   - `TFE_RenderShared/texturePacker_xbox.cpp` — CPU-only path
-   - `xbox_compat.h` — forced include, defines C++03 shims for `nullptr`/`override`/`final`/`static_assert`
-   - `xbox_link_stubs.cpp` — linker stubs for GPU renderer / accessibility / scripting that aren't in the Xbox build
-   - `build_xbox.bat`, `patchxbe.py` — toolchain
-
-2. **In-place `#ifdef _XBOX` patches** to game-logic files (e.g. `darkForcesMain.cpp` skips agent menu, `agent.cpp` virtual fallback, `weapon.cpp` ExternalData wire-up). These are kept minimal and clearly bracketed so they diff cleanly against upstream.
-
-Excluded from the Xbox build: `TFE_Editor/`, `TFE_ForceScript/`, `TFE_FrontEndUI/` (ImGui), `TFE_Ui/`, `TFE_PostProcess/`, `TFE_Outlaws/`, `TFE_RenderBackend/Win32OpenGL/`, `TFE_Jedi/Renderer/RClassic_GPU/`, `TFE_Settings/linux/`, `TFE_System/CrashHandler/`.
-
----
-
-## Roadmap
-
-Near term:
-- ~~Wire fm4Opl3 software synth to iMuse → MIDI music~~ — wired in master; tuning in progress
-- Save game support via writable HDD partition
-
-Medium term — **port `RClassic_GPU` from OpenGL/GLSL to D3D8 on NV2A**:
-The single biggest CPU win available, and the gating dependency for two distinct goals:
-- **Audio/synth headroom.** The Xbox CPU is currently running column rasterization, texture sampling, depth interpolation, palette expansion, AI, physics, audio mixing, *and* OPL3 software synthesis. Offloading the rasterizer to the NV2A frees ~30-50% of the CPU budget — enough to run full iMuse music + multiple sound sources without stutter.
-- **Split-screen multiplayer.** Original Xbox has 4 controller ports — split-screen is the platform's defining feature. Rendering the world from 2 (co-op) or 4 (deathmatch) viewports per frame is infeasible on the CPU software path but trivial on NV2A (multiple `SetViewport` + draw passes). TFE upstream has no multiplayer at all (Dark Forces was DOS single-player), so this is a genuinely new Xbox-only feature — but the GPU port is the prerequisite.
-
-Not primarily a visual upgrade — at 480p 4:3 the pixels look near-identical to software. It's about CPU headroom and what it unlocks.
-
-Substantial work: TFE's GPU renderer is GLSL 3.3+ with FBOs, MRT, programmable pipeline. NV2A has fixed-function + register combiners (pseudo pixel shaders) + limited vertex programs. A real port, not a mechanical translation. xquake's D3D8 backend is the closest existing reference.
-
-Longer term:
-- Front-end menu (level select, options) — non-ImGui, native Xbox UI
-- Cutscene playback (Landru cutscene system is in the source tree but disabled)
-- Split-screen co-op and vs deathmatch (depends on GPU port)
-- System Link / network multiplayer (independent of GPU port but also benefits)
-- Outlaws support — pending upstream
-
----
+Always test release builds on real Xbox hardware before treating a change as
+shipping-ready. CXBX-R is useful for iteration, but real hardware is the target.
 
 ## Credits
 
-- **JEDI engine reverse-engineering, TFE codebase**: [@luciusDXL](https://github.com/luciusDXL) and the upstream [TheForceEngine](https://github.com/luciusDXL/TheForceEngine) contributors. This fork would not exist without their work.
-- **Xbox port**: this fork. Pull requests welcome.
-- **Reference Xbox ports** consulted for XDK patterns: OpenJKDF2 (Xbox branch), xquake, Jedi Academy XDK port.
-- **Star Wars: Dark Forces** © Disney / LucasArts. The IP belongs solely to Disney. This project does not contain or redistribute any copyrighted game assets.
+- The Force Engine team and contributors, led by
+  [luciusDXL](https://github.com/luciusDXL), for The Force Engine.
+- Microsoft for Xbox and the Xbox development tools.
+- LucasArts for Star Wars: Dark Forces.
 
 ## License
 
-Same as upstream TFE — see [LICENSE](LICENSE). Xbox-specific patches are released under the same terms.
+Same as upstream The Force Engine. See [LICENSE](LICENSE).
+
+This project does not contain or redistribute copyrighted Star Wars: Dark Forces
+game assets.
