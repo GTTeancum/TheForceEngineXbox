@@ -546,6 +546,51 @@ namespace TFE_RenderBackend
         return (wheelTextWidth(text) * num) / den;
     }
 
+    static void wheelTextBoundsScaled(const char* text, s32 num, s32 den, s32* top, s32* bottom)
+    {
+        s32 minY = 0;
+        s32 maxY = 0;
+        bool found = false;
+        while (text && *text)
+        {
+            const XboxWheelGlyph* g = wheelFindGlyph(*text++);
+            if (!g) continue;
+            const s32 gy = (g->yOffset * num) / den;
+            const s32 dh = pauseClamp((g->height * num) / den, 1, 128);
+            if (!found)
+            {
+                minY = gy;
+                maxY = gy + dh;
+                found = true;
+            }
+            else
+            {
+                if (gy < minY) minY = gy;
+                if (gy + dh > maxY) maxY = gy + dh;
+            }
+        }
+        if (!found)
+        {
+            minY = 0;
+            maxY = pauseClamp((18 * num) / den, 1, 128);
+        }
+        if (top) *top = minY;
+        if (bottom) *bottom = maxY;
+    }
+
+    static s32 wheelTextBaselineForCenter(const char* text, s32 centerY, s32 num, s32 den)
+    {
+        s32 top = 0;
+        s32 bottom = 0;
+        wheelTextBoundsScaled(text, num, den, &top, &bottom);
+        return centerY - ((top + bottom) / 2);
+    }
+
+    static s32 loadTextYForCenter(s32 centerY, s32 scale)
+    {
+        return centerY - ((7 * scale) / 2);
+    }
+
     static void wheelDrawTextRawScaledTo(u32* dst, s32 width, s32 height, const char* text, s32 x, s32 baselineY, u32 primary, bool shadow, s32 num, s32 den)
     {
         if (!dst || !text || num <= 0 || den <= 0) return;
@@ -1581,64 +1626,167 @@ namespace TFE_RenderBackend
         pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, x + pos - 3, y + 2, 6, 14, knob);
     }
 
-    static void optionsDrawTextLabel(const char* text, s32 x, s32 y, u32 color, bool pauseStyle)
+    struct OptionsLayout
+    {
+        bool pauseStyle;
+        s32 panelX;
+        s32 panelY;
+        s32 panelW;
+        s32 panelH;
+        s32 screenX;
+        s32 screenY;
+        s32 screenW;
+        s32 screenH;
+        s32 titleCenterX;
+        s32 titleY;
+        s32 rowsX;
+        s32 rowsW;
+        s32 firstRowCenterY;
+        s32 rowH;
+        s32 selectedH;
+        s32 labelX;
+        s32 sliderX;
+        s32 sliderW;
+        s32 valueRightX;
+        s32 arrowX;
+        s32 arrowUpY;
+        s32 arrowDownY;
+        s32 visibleRows;
+    };
+
+    static s32 optionsEven(s32 value)
+    {
+        return value & ~1;
+    }
+
+    static void optionsBuildLayout(bool pauseStyle, OptionsLayout* layout)
+    {
+        memset(layout, 0, sizeof(*layout));
+        layout->pauseStyle = pauseStyle;
+        layout->visibleRows = 7;
+
+        if (pauseStyle)
+        {
+            layout->panelW = XPAUSE_PANEL_WIDTH;
+            layout->panelH = XPAUSE_PANEL_HEIGHT;
+            layout->panelX = (XBOX_OUTPUT_WIDTH - layout->panelW) / 2;
+            layout->panelY = (XBOX_OUTPUT_HEIGHT - layout->panelH) / 2;
+
+            layout->screenX = XPAUSE_SCREEN_SRC_X;
+            layout->screenY = (XPAUSE_SCREEN_SRC_Y * XBOX_OUTPUT_HEIGHT) / XBOX_PDA_FRAME_HEIGHT;
+            layout->screenW = XPAUSE_SCREEN_SRC_W;
+            layout->screenH = ((XPAUSE_SCREEN_SRC_Y + XPAUSE_SCREEN_SRC_H) * XBOX_OUTPUT_HEIGHT) / XBOX_PDA_FRAME_HEIGHT - layout->screenY;
+
+            const s32 sideInset = layout->screenW / 12;
+            layout->rowH = pauseClamp(layout->screenH / 10, 28, XPAUSE_ROW_STEP);
+            layout->selectedH = layout->rowH - pauseClamp(layout->rowH / 6, 4, 8);
+            layout->rowsX = layout->screenX + sideInset;
+            layout->rowsW = layout->screenW - sideInset * 2;
+            layout->labelX = layout->rowsX + layout->rowH / 2;
+            layout->valueRightX = layout->screenX + layout->screenW - sideInset;
+            layout->sliderW = layout->screenW / 4;
+            layout->sliderX = layout->valueRightX - layout->sliderW - layout->screenW / 6;
+            layout->titleCenterX = layout->screenX + layout->screenW / 2;
+            layout->titleY = wheelTextBaselineForCenter(s_optionsTitle, layout->screenY + layout->screenH / 5, 1, 1);
+            layout->firstRowCenterY = layout->screenY + layout->screenH / 4 + layout->rowH / 2;
+            layout->arrowX = layout->screenX + layout->screenW - sideInset / 2;
+            layout->arrowUpY = layout->firstRowCenterY - layout->rowH;
+            layout->arrowDownY = layout->screenY + layout->screenH - layout->rowH / 2;
+        }
+        else
+        {
+            layout->panelW = optionsEven((XBOX_OUTPUT_WIDTH * 73) / 100);
+            layout->panelH = (XBOX_OUTPUT_HEIGHT * 27) / 40;
+            layout->panelX = (XBOX_OUTPUT_WIDTH - layout->panelW) / 2;
+            layout->panelY = XBOX_OUTPUT_HEIGHT / 6 - 4;
+
+            layout->screenX = layout->panelX;
+            layout->screenY = layout->panelY;
+            layout->screenW = layout->panelW;
+            layout->screenH = layout->panelH;
+
+            const s32 bandInset = layout->panelW / 40;
+            layout->rowH = (XBOX_OUTPUT_HEIGHT * 3) / 40;
+            layout->selectedH = layout->rowH - 6;
+            layout->rowsX = layout->panelX + bandInset;
+            layout->rowsW = layout->panelW - bandInset * 2;
+            layout->labelX = layout->rowsX + layout->rowH / 2;
+            layout->valueRightX = layout->panelX + layout->panelW - layout->panelW / 20;
+            layout->sliderW = (layout->panelW * 29) / 100;
+            layout->sliderX = layout->valueRightX - layout->sliderW - layout->panelW / 8;
+            layout->titleCenterX = XBOX_OUTPUT_WIDTH / 2;
+            layout->titleY = layout->panelY / 2;
+            layout->firstRowCenterY = layout->panelY + layout->panelH / 5 - 2;
+            layout->arrowX = layout->panelX + layout->panelW - bandInset;
+            layout->arrowUpY = layout->firstRowCenterY - layout->rowH / 2;
+            layout->arrowDownY = layout->panelY + layout->panelH - layout->rowH / 2;
+        }
+    }
+
+    static s32 optionsSliderYForCenter(s32 centerY)
+    {
+        return centerY - 9;
+    }
+
+    static void optionsDrawTextLabel(const char* text, s32 x, s32 centerY, u32 color, bool pauseStyle)
     {
         if (!text || !text[0]) return;
         if (pauseStyle)
         {
+            const s32 baseline = wheelTextBaselineForCenter(text, centerY, 2, 3);
             wheelDrawTextScaledTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
-                text, x, y + 14, color, 2, 3);
+                text, x, baseline, color, 2, 3);
         }
         else
         {
-            loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, text, x, y, 1, color);
+            loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+                text, x, loadTextYForCenter(centerY, 1), 1, color);
         }
     }
 
-    static void optionsDrawTextRight(const char* text, s32 rightX, s32 y, u32 color, bool pauseStyle)
+    static void optionsDrawTextRight(const char* text, s32 rightX, s32 centerY, u32 color, bool pauseStyle)
     {
         if (!text || !text[0]) return;
         if (pauseStyle)
         {
+            const s32 baseline = wheelTextBaselineForCenter(text, centerY, 2, 3);
             wheelDrawTextRightScaledTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
-                text, rightX, y + 14, color, 2, 3);
+                text, rightX, baseline, color, 2, 3);
         }
         else
         {
-            loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, text, rightX, y, 1, color);
+            loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+                text, rightX, loadTextYForCenter(centerY, 1), 1, color);
         }
     }
 
-    static void optionsDrawRows(s32 panelX, s32 panelY, s32 panelW, s32 firstY, bool pauseStyle)
+    static void optionsDrawRows(const OptionsLayout* layout)
     {
-        const s32 visibleRows = 7;
-        const s32 rowH = pauseStyle ? 31 : 36;
-        const s32 labelX = panelX + (pauseStyle ? 16 : 34);
-        const s32 sliderX = panelX + panelW - (pauseStyle ? 224 : 218);
-        const s32 sliderW = pauseStyle ? 124 : 136;
+        const bool pauseStyle = layout->pauseStyle;
         const u32 normalText = pauseStyle ? 0xFFC8C8C8u : 0xFF8E8B72u;
         const u32 selectedText = pauseStyle ? XPAUSE_WHITE : 0xFFFF3030u;
 
-        for (s32 row = 0; row < visibleRows; row++)
+        for (s32 row = 0; row < layout->visibleRows; row++)
         {
             const s32 index = s_optionsScroll + row;
             if (index < 0 || index >= s_optionsItemCount) continue;
 
             const bool selected = index == s_optionsSelection;
-            const s32 y = firstY + row * rowH;
+            const s32 rowCenterY = layout->firstRowCenterY + row * layout->rowH;
             if (selected)
             {
                 const u32 bar = pauseStyle ? XPAUSE_GREEN_MID : 0xFF24180Eu;
                 pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
-                    panelX + (pauseStyle ? 0 : 12), y - 6,
-                    panelW - (pauseStyle ? 0 : 24), pauseStyle ? 25 : 30, bar);
+                    layout->rowsX, rowCenterY - layout->selectedH / 2,
+                    layout->rowsW, layout->selectedH, bar);
             }
 
-            optionsDrawTextLabel(s_optionsItems[index].label, labelX, y, selected ? selectedText : normalText, pauseStyle);
+            optionsDrawTextLabel(s_optionsItems[index].label, layout->labelX, rowCenterY,
+                selected ? selectedText : normalText, pauseStyle);
             if (s_optionsItems[index].valueText)
             {
                 const u32 valueColor = s_optionsItems[index].capture ? 0xFF33D033u : (selected ? selectedText : normalText);
-                optionsDrawTextRight(s_optionsItems[index].valueText, panelX + panelW - (pauseStyle ? 8 : 24), y, valueColor, pauseStyle);
+                optionsDrawTextRight(s_optionsItems[index].valueText, layout->valueRightX, rowCenterY, valueColor, pauseStyle);
             }
             else if (s_optionsItems[index].hasIcon &&
                      s_optionsItems[index].valueIcon >= 0 &&
@@ -1648,15 +1796,16 @@ namespace TFE_RenderBackend
                 const s32 iconH = pauseStyle ? 20 : 24;
                 const s32 iconW = dukeIconWidthForHeight(icon, iconH);
                 dukeDrawIconTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, icon,
-                    panelX + panelW - (pauseStyle ? 8 : 24) - iconW, y - (pauseStyle ? 6 : 8), iconH, 0xFFFFFFFFu);
+                    layout->valueRightX - iconW, rowCenterY - iconH / 2, iconH, 0xFFFFFFFFu);
             }
             else
             {
-                optionsDrawSlider(sliderX, y, sliderW, &s_optionsItems[index], selected, pauseStyle);
+                optionsDrawSlider(layout->sliderX, optionsSliderYForCenter(rowCenterY),
+                    layout->sliderW, &s_optionsItems[index], selected, pauseStyle);
 
                 char valueText[16];
                 sprintf(valueText, "%d", s_optionsItems[index].value);
-                optionsDrawTextRight(valueText, panelX + panelW - (pauseStyle ? 8 : 24), y, selected ? selectedText : normalText, pauseStyle);
+                optionsDrawTextRight(valueText, layout->valueRightX, rowCenterY, selected ? selectedText : normalText, pauseStyle);
             }
         }
     }
@@ -1672,46 +1821,44 @@ namespace TFE_RenderBackend
             startDrawStarfield(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_optionsFrame);
         }
 
-        const bool pauseStyle = s_optionsPauseStyle;
-        const s32 panelX = pauseStyle ? ((XBOX_OUTPUT_WIDTH - XPAUSE_PANEL_WIDTH) / 2) : 86;
-        const s32 panelY = pauseStyle ? ((XBOX_OUTPUT_HEIGHT - XPAUSE_PANEL_HEIGHT) / 2) : 76;
-        const s32 panelW = pauseStyle ? XPAUSE_PANEL_WIDTH : 468;
-        const s32 panelH = pauseStyle ? XPAUSE_PANEL_HEIGHT : 324;
+        OptionsLayout layout;
+        optionsBuildLayout(s_optionsPauseStyle, &layout);
+        const bool pauseStyle = layout.pauseStyle;
 
         if (pauseStyle)
         {
-            pauseDrawFrame(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH);
+            pauseDrawFrame(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+                layout.panelX, layout.panelY, layout.panelW, layout.panelH);
         }
         else
         {
-            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xCC080604u);
-            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xFF4F4A34u);
+            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+                layout.panelX, layout.panelY, layout.panelW, layout.panelH, 0xCC080604u);
+            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+                layout.panelX, layout.panelY, layout.panelW, layout.panelH, 0xFF4F4A34u);
         }
 
         if (pauseStyle)
         {
             wheelDrawTextCenterScaledTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
-                s_optionsTitle, XBOX_OUTPUT_WIDTH / 2, panelY + 34, XPAUSE_WHITE, 1, 1);
+                s_optionsTitle, layout.titleCenterX, layout.titleY, XPAUSE_WHITE, 1, 1);
         }
         else
         {
             loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
-                s_optionsTitle, XBOX_OUTPUT_WIDTH / 2, 38, 3, 0xFFFF3030u);
+                s_optionsTitle, layout.titleCenterX, layout.titleY, 3, 0xFFFF3030u);
         }
 
-        const s32 rowsX = pauseStyle ? 92 : panelX;
-        const s32 rowsW = pauseStyle ? 456 : panelW;
-        const s32 firstY = pauseStyle ? panelY + 64 : panelY + 52;
-        optionsDrawRows(rowsX, panelY, rowsW, firstY, pauseStyle);
+        optionsDrawRows(&layout);
 
         const u32 arrowColor = pauseStyle ? XPAUSE_GREEN_EDGE : 0xFFFF3030u;
         if (s_optionsScroll > 0)
         {
-            optionsDrawTriangle(rowsX + rowsW - (pauseStyle ? 10 : 18), firstY - (pauseStyle ? 18 : 0), 7, 10, true, arrowColor);
+            optionsDrawTriangle(layout.arrowX, layout.arrowUpY, 7, 10, true, arrowColor);
         }
         if (s_optionsScroll + 7 < s_optionsItemCount)
         {
-            optionsDrawTriangle(rowsX + rowsW - (pauseStyle ? 10 : 18), panelY + panelH - (pauseStyle ? 37 : 32), 7, 10, false, arrowColor);
+            optionsDrawTriangle(layout.arrowX, layout.arrowDownY, 7, 10, false, arrowColor);
         }
 
         if (!pauseStyle)
