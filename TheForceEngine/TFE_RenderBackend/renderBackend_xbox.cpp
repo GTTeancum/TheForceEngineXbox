@@ -133,7 +133,8 @@ namespace TFE_RenderBackend
 
     // Destination rect on back buffer (letterbox/pillarbox).
     static RECT s_destRect;
-    static s32  s_safeZonePercent = 100;
+    static s32  s_safeZoneWidthPercent = 100;
+    static s32  s_safeZoneHeightPercent = 100;
     static s32  s_safeZoneOffsetX = 0;
     static s32  s_safeZoneOffsetY = 0;
 
@@ -1823,11 +1824,13 @@ namespace TFE_RenderBackend
     // -----------------------------------------------------------------------
     static void computeDestRect()
     {
-        if (s_safeZonePercent < 80) s_safeZonePercent = 80;
-        if (s_safeZonePercent > 100) s_safeZonePercent = 100;
+        if (s_safeZoneWidthPercent < 80) s_safeZoneWidthPercent = 80;
+        if (s_safeZoneWidthPercent > 100) s_safeZoneWidthPercent = 100;
+        if (s_safeZoneHeightPercent < 80) s_safeZoneHeightPercent = 80;
+        if (s_safeZoneHeightPercent > 100) s_safeZoneHeightPercent = 100;
 
-        s32 w = (XBOX_OUTPUT_WIDTH * s_safeZonePercent) / 100;
-        s32 h = (XBOX_OUTPUT_HEIGHT * s_safeZonePercent) / 100;
+        s32 w = (XBOX_OUTPUT_WIDTH * s_safeZoneWidthPercent) / 100;
+        s32 h = (XBOX_OUTPUT_HEIGHT * s_safeZoneHeightPercent) / 100;
         if (w < 1) w = 1;
         if (h < 1) h = 1;
 
@@ -2280,16 +2283,19 @@ namespace TFE_RenderBackend
         }
     }
 
-    void xboxSetSafeZone(s32 percent, s32 offsetX, s32 offsetY)
+    void xboxSetSafeZone(s32 widthPercent, s32 heightPercent, s32 offsetX, s32 offsetY)
     {
-        if (percent < 80) percent = 80;
-        if (percent > 100) percent = 100;
+        if (widthPercent < 80) widthPercent = 80;
+        if (widthPercent > 100) widthPercent = 100;
+        if (heightPercent < 80) heightPercent = 80;
+        if (heightPercent > 100) heightPercent = 100;
         if (offsetX < -40) offsetX = -40;
         if (offsetX > 40) offsetX = 40;
         if (offsetY < -30) offsetY = -30;
         if (offsetY > 30) offsetY = 30;
 
-        s_safeZonePercent = percent;
+        s_safeZoneWidthPercent = widthPercent;
+        s_safeZoneHeightPercent = heightPercent;
         s_safeZoneOffsetX = offsetX;
         s_safeZoneOffsetY = offsetY;
         computeDestRect();
@@ -2297,8 +2303,9 @@ namespace TFE_RenderBackend
         {
             setFullViewport();
         }
-        TFE_XboxLogf("RenderBackend", "safe zone percent=%d offset=%d,%d dest=%ld,%ld,%ld,%ld",
-            s_safeZonePercent, s_safeZoneOffsetX, s_safeZoneOffsetY,
+        TFE_XboxLogf("RenderBackend", "safe zone width=%d height=%d offset=%d,%d dest=%ld,%ld,%ld,%ld",
+            s_safeZoneWidthPercent, s_safeZoneHeightPercent,
+            s_safeZoneOffsetX, s_safeZoneOffsetY,
             s_destRect.left, s_destRect.top, s_destRect.right, s_destRect.bottom);
     }
 

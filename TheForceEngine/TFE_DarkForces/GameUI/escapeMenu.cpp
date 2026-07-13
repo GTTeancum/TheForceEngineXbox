@@ -217,7 +217,8 @@ namespace TFE_DarkForces
 
 	enum XboxPauseVideoOptionIndex
 	{
-		XPVID_SAFE_ZONE = 0,
+		XPVID_SAFE_ZONE_WIDTH = 0,
+		XPVID_SAFE_ZONE_HEIGHT,
 		XPVID_SCREEN_X,
 		XPVID_SCREEN_Y,
 		XPVID_COUNT
@@ -1167,10 +1168,13 @@ namespace TFE_DarkForces
 	static void xboxApplyPauseVideoSettings()
 	{
 		TFE_Settings_System* system = TFE_Settings::getSystemSettings();
-		system->xboxSafeZonePercent = xboxClampS32(system->xboxSafeZonePercent, 80, 100);
+		system->xboxSafeZoneWidthPercent = xboxClampS32(system->xboxSafeZoneWidthPercent, 80, 100);
+		system->xboxSafeZoneHeightPercent = xboxClampS32(system->xboxSafeZoneHeightPercent, 80, 100);
+		system->xboxSafeZonePercent = (system->xboxSafeZoneWidthPercent + system->xboxSafeZoneHeightPercent) / 2;
 		system->xboxSafeZoneOffsetX = xboxClampS32(system->xboxSafeZoneOffsetX, -40, 40);
 		system->xboxSafeZoneOffsetY = xboxClampS32(system->xboxSafeZoneOffsetY, -30, 30);
-		TFE_RenderBackend::xboxSetSafeZone(system->xboxSafeZonePercent,
+		TFE_RenderBackend::xboxSetSafeZone(system->xboxSafeZoneWidthPercent,
+			system->xboxSafeZoneHeightPercent,
 			system->xboxSafeZoneOffsetX, system->xboxSafeZoneOffsetY);
 	}
 
@@ -1208,7 +1212,8 @@ namespace TFE_DarkForces
 		file.writeString("xboxLookSensitivityXPct=%d\r\n", (s32)(system->xboxLookSensitivityX * 100.0f + 0.5f));
 		file.writeString("xboxLookSensitivityYPct=%d\r\n", (s32)(system->xboxLookSensitivityY * 100.0f + 0.5f));
 		file.writeString("xboxRightStickDeadzonePct=%d\r\n", (s32)(system->xboxRightStickDeadzone * 100.0f + 0.5f));
-		file.writeString("xboxSafeZonePercent=%d\r\n", system->xboxSafeZonePercent);
+		file.writeString("xboxSafeZoneWidthPercent=%d\r\n", system->xboxSafeZoneWidthPercent);
+		file.writeString("xboxSafeZoneHeightPercent=%d\r\n", system->xboxSafeZoneHeightPercent);
 		file.writeString("xboxSafeZoneOffsetX=%d\r\n", system->xboxSafeZoneOffsetX);
 		file.writeString("xboxSafeZoneOffsetY=%d\r\n", system->xboxSafeZoneOffsetY);
 		file.writeString("masterVolumePct=%d\r\n", xboxOptionPercent(sound->masterVolume));
@@ -1426,7 +1431,8 @@ namespace TFE_DarkForces
 		}
 		else if (s_emState.optionsPage == XPOPAGE_VIDEO)
 		{
-			xboxSetPauseOptionSlider(XPVID_SAFE_ZONE, "SAFE AREA SIZE", system->xboxSafeZonePercent, 80, 100);
+			xboxSetPauseOptionSlider(XPVID_SAFE_ZONE_WIDTH, "SAFE AREA WIDTH", system->xboxSafeZoneWidthPercent, 80, 100);
+			xboxSetPauseOptionSlider(XPVID_SAFE_ZONE_HEIGHT, "SAFE AREA HEIGHT", system->xboxSafeZoneHeightPercent, 80, 100);
 			xboxSetPauseOptionSlider(XPVID_SCREEN_X, "HORIZONTAL SHIFT", system->xboxSafeZoneOffsetX, -40, 40);
 			xboxSetPauseOptionSlider(XPVID_SCREEN_Y, "VERTICAL SHIFT", system->xboxSafeZoneOffsetY, -30, 30);
 		}
@@ -1468,7 +1474,8 @@ namespace TFE_DarkForces
 		{
 			switch (index)
 			{
-				case XPVID_SAFE_ZONE: system->xboxSafeZonePercent = value; break;
+				case XPVID_SAFE_ZONE_WIDTH: system->xboxSafeZoneWidthPercent = value; break;
+				case XPVID_SAFE_ZONE_HEIGHT: system->xboxSafeZoneHeightPercent = value; break;
 				case XPVID_SCREEN_X: system->xboxSafeZoneOffsetX = value; break;
 				case XPVID_SCREEN_Y: system->xboxSafeZoneOffsetY = value; break;
 			}

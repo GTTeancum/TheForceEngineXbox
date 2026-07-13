@@ -253,7 +253,8 @@ enum XboxControlsOptionIndex
 
 enum XboxVideoOptionIndex
 {
-    XVID_SAFE_ZONE = 0,
+    XVID_SAFE_ZONE_WIDTH = 0,
+    XVID_SAFE_ZONE_HEIGHT,
     XVID_SCREEN_X,
     XVID_SCREEN_Y,
     XVID_COUNT
@@ -2097,10 +2098,13 @@ static void xboxRuntimeSettingsPath(char* path, size_t pathSize)
 static void applyXboxVideoSettings()
 {
     TFE_Settings_System* system = TFE_Settings::getSystemSettings();
-    system->xboxSafeZonePercent = clampS32(system->xboxSafeZonePercent, 80, 100);
+    system->xboxSafeZoneWidthPercent = clampS32(system->xboxSafeZoneWidthPercent, 80, 100);
+    system->xboxSafeZoneHeightPercent = clampS32(system->xboxSafeZoneHeightPercent, 80, 100);
+    system->xboxSafeZonePercent = (system->xboxSafeZoneWidthPercent + system->xboxSafeZoneHeightPercent) / 2;
     system->xboxSafeZoneOffsetX = clampS32(system->xboxSafeZoneOffsetX, -40, 40);
     system->xboxSafeZoneOffsetY = clampS32(system->xboxSafeZoneOffsetY, -30, 30);
-    TFE_RenderBackend::xboxSetSafeZone(system->xboxSafeZonePercent,
+    TFE_RenderBackend::xboxSetSafeZone(system->xboxSafeZoneWidthPercent,
+        system->xboxSafeZoneHeightPercent,
         system->xboxSafeZoneOffsetX, system->xboxSafeZoneOffsetY);
 }
 
@@ -2160,7 +2164,14 @@ static void xboxParseRuntimeSetting(char* line)
     else if (strcasecmp(key, "xboxStickDeadzone") == 0) system->xboxRightStickDeadzone = (float)atof(value);
     else if (strcasecmp(key, "xboxRightStickDeadzone") == 0) system->xboxRightStickDeadzone = (float)atof(value);
     else if (strcasecmp(key, "xboxRightStickDeadzonePct") == 0) system->xboxRightStickDeadzone = (float)atoi(value) / 100.0f;
-    else if (strcasecmp(key, "xboxSafeZonePercent") == 0) system->xboxSafeZonePercent = atoi(value);
+    else if (strcasecmp(key, "xboxSafeZonePercent") == 0)
+    {
+        system->xboxSafeZonePercent = atoi(value);
+        system->xboxSafeZoneWidthPercent = system->xboxSafeZonePercent;
+        system->xboxSafeZoneHeightPercent = system->xboxSafeZonePercent;
+    }
+    else if (strcasecmp(key, "xboxSafeZoneWidthPercent") == 0) system->xboxSafeZoneWidthPercent = atoi(value);
+    else if (strcasecmp(key, "xboxSafeZoneHeightPercent") == 0) system->xboxSafeZoneHeightPercent = atoi(value);
     else if (strcasecmp(key, "xboxSafeZoneOffsetX") == 0) system->xboxSafeZoneOffsetX = atoi(value);
     else if (strcasecmp(key, "xboxSafeZoneOffsetY") == 0) system->xboxSafeZoneOffsetY = atoi(value);
     else if (strcasecmp(key, "masterVolume") == 0) sound->masterVolume = (float)atof(value);
@@ -2230,7 +2241,8 @@ static bool xboxSaveRuntimeSettings()
     file.writeString("xboxLookSensitivityXPct=%d\r\n", (s32)(system->xboxLookSensitivityX * 100.0f + 0.5f));
     file.writeString("xboxLookSensitivityYPct=%d\r\n", (s32)(system->xboxLookSensitivityY * 100.0f + 0.5f));
     file.writeString("xboxRightStickDeadzonePct=%d\r\n", (s32)(system->xboxRightStickDeadzone * 100.0f + 0.5f));
-    file.writeString("xboxSafeZonePercent=%d\r\n", system->xboxSafeZonePercent);
+    file.writeString("xboxSafeZoneWidthPercent=%d\r\n", system->xboxSafeZoneWidthPercent);
+    file.writeString("xboxSafeZoneHeightPercent=%d\r\n", system->xboxSafeZoneHeightPercent);
     file.writeString("xboxSafeZoneOffsetX=%d\r\n", system->xboxSafeZoneOffsetX);
     file.writeString("xboxSafeZoneOffsetY=%d\r\n", system->xboxSafeZoneOffsetY);
     file.writeString("masterVolumePct=%d\r\n", optionPercent(sound->masterVolume));
@@ -2448,7 +2460,8 @@ static void refreshOptionsItems()
     }
     else if (s_optionsPage == XOPAGE_VIDEO)
     {
-        setOptionSlider(XVID_SAFE_ZONE, "SAFE AREA SIZE", system->xboxSafeZonePercent, 80, 100);
+        setOptionSlider(XVID_SAFE_ZONE_WIDTH, "SAFE AREA WIDTH", system->xboxSafeZoneWidthPercent, 80, 100);
+        setOptionSlider(XVID_SAFE_ZONE_HEIGHT, "SAFE AREA HEIGHT", system->xboxSafeZoneHeightPercent, 80, 100);
         setOptionSlider(XVID_SCREEN_X, "HORIZONTAL SHIFT", system->xboxSafeZoneOffsetX, -40, 40);
         setOptionSlider(XVID_SCREEN_Y, "VERTICAL SHIFT", system->xboxSafeZoneOffsetY, -30, 30);
     }
@@ -2496,7 +2509,8 @@ static void applyOptionValue(s32 index, s32 value)
     {
         switch (index)
         {
-            case XVID_SAFE_ZONE: system->xboxSafeZonePercent = value; break;
+            case XVID_SAFE_ZONE_WIDTH: system->xboxSafeZoneWidthPercent = value; break;
+            case XVID_SAFE_ZONE_HEIGHT: system->xboxSafeZoneHeightPercent = value; break;
             case XVID_SCREEN_X: system->xboxSafeZoneOffsetX = value; break;
             case XVID_SCREEN_Y: system->xboxSafeZoneOffsetY = value; break;
         }

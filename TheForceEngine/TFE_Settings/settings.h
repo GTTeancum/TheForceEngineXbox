@@ -319,6 +319,8 @@ struct TFE_Settings_System
     f32  xboxLookSensitivityY;
     f32  xboxRightStickDeadzone;
     s32  xboxSafeZonePercent;
+    s32  xboxSafeZoneWidthPercent;
+    s32  xboxSafeZoneHeightPercent;
     s32  xboxSafeZoneOffsetX;
     s32  xboxSafeZoneOffsetY;
 
@@ -328,7 +330,9 @@ struct TFE_Settings_System
         , xboxLookSensitivity(1.0f), xboxStickDeadzone(0.09f)
         , xboxLookSensitivityX(1.0f), xboxLookSensitivityY(1.0f)
         , xboxRightStickDeadzone(0.09f)
-        , xboxSafeZonePercent(100), xboxSafeZoneOffsetX(0), xboxSafeZoneOffsetY(0) {}
+        , xboxSafeZonePercent(100), xboxSafeZoneWidthPercent(100)
+        , xboxSafeZoneHeightPercent(100), xboxSafeZoneOffsetX(0)
+        , xboxSafeZoneOffsetY(0) {}
 };
 
 // ---------------------------------------------------------------------------

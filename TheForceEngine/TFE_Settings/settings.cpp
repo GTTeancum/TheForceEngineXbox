@@ -566,7 +566,8 @@ namespace TFE_Settings
 		writeKeyValue_Float(settings, "xboxLookSensitivityX", s_systemSettings.xboxLookSensitivityX);
 		writeKeyValue_Float(settings, "xboxLookSensitivityY", s_systemSettings.xboxLookSensitivityY);
 		writeKeyValue_Float(settings, "xboxRightStickDeadzone", s_systemSettings.xboxRightStickDeadzone);
-		writeKeyValue_Int(settings, "xboxSafeZonePercent", s_systemSettings.xboxSafeZonePercent);
+		writeKeyValue_Int(settings, "xboxSafeZoneWidthPercent", s_systemSettings.xboxSafeZoneWidthPercent);
+		writeKeyValue_Int(settings, "xboxSafeZoneHeightPercent", s_systemSettings.xboxSafeZoneHeightPercent);
 		writeKeyValue_Int(settings, "xboxSafeZoneOffsetX", s_systemSettings.xboxSafeZoneOffsetX);
 		writeKeyValue_Int(settings, "xboxSafeZoneOffsetY", s_systemSettings.xboxSafeZoneOffsetY);
 	}
@@ -1112,6 +1113,16 @@ namespace TFE_Settings
 		else if (strcasecmp("xboxSafeZonePercent", key) == 0)
 		{
 			s_systemSettings.xboxSafeZonePercent = parseInt(value);
+			s_systemSettings.xboxSafeZoneWidthPercent = s_systemSettings.xboxSafeZonePercent;
+			s_systemSettings.xboxSafeZoneHeightPercent = s_systemSettings.xboxSafeZonePercent;
+		}
+		else if (strcasecmp("xboxSafeZoneWidthPercent", key) == 0)
+		{
+			s_systemSettings.xboxSafeZoneWidthPercent = parseInt(value);
+		}
+		else if (strcasecmp("xboxSafeZoneHeightPercent", key) == 0)
+		{
+			s_systemSettings.xboxSafeZoneHeightPercent = parseInt(value);
 		}
 		else if (strcasecmp("xboxSafeZoneOffsetX", key) == 0)
 		{
