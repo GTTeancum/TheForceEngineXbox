@@ -131,8 +131,8 @@ namespace TFE_Input
 		{ IAS_SYSTEM_MENU, ITYPE_CONTROLLER, { CONTROLLER_BUTTON_RIGHTSTICK }, KEYMOD_NONE },
 
 		{ IADF_JUMP,   ITYPE_CONTROLLER, { CONTROLLER_BUTTON_A }, KEYMOD_NONE },
-		{ IADF_CROUCH, ITYPE_CONTROLLER, { CONTROLLER_BUTTON_B }, KEYMOD_NONE },
-		{ IADF_USE,    ITYPE_CONTROLLER, { CONTROLLER_BUTTON_X }, KEYMOD_NONE },
+		{ IADF_CROUCH, ITYPE_CONTROLLER, { CONTROLLER_BUTTON_X }, KEYMOD_NONE },
+		{ IADF_USE,    ITYPE_CONTROLLER, { CONTROLLER_BUTTON_B }, KEYMOD_NONE },
 
 #ifdef _XBOX
 		// Original Xbox controller has no GUIDE button; bind the pause/
@@ -430,6 +430,33 @@ namespace TFE_Input
 	}
 
 #ifdef _XBOX
+	static bool inputMapping_hasControllerBinding(InputAction action)
+	{
+		for (u32 i = 0; i < s_inputConfig.bindCount; i++)
+		{
+			InputBinding* bind = &s_inputConfig.binds[i];
+			if (bind->action == action &&
+				(bind->type == ITYPE_CONTROLLER || bind->type == ITYPE_CONTROLLER_AXIS))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static bool inputMapping_hasControllerButton(InputAction action, Button button)
+	{
+		for (u32 i = 0; i < s_inputConfig.bindCount; i++)
+		{
+			InputBinding* bind = &s_inputConfig.binds[i];
+			if (bind->action == action && bind->type == ITYPE_CONTROLLER && bind->ctrlBtn == button)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void inputMapping_sanitizeXboxBindings()
 	{
 		for (s32 i = (s32)s_inputConfig.bindCount - 1; i >= 0; i--)
@@ -440,6 +467,25 @@ namespace TFE_Input
 			{
 				inputMapping_removeBinding((u32)i);
 			}
+		}
+
+		const bool oldDefaultFaceButtons =
+			inputMapping_hasControllerButton(IADF_CROUCH, CONTROLLER_BUTTON_B) &&
+			inputMapping_hasControllerButton(IADF_USE, CONTROLLER_BUTTON_X);
+		if (oldDefaultFaceButtons)
+		{
+			inputMapping_setControllerBinding(IADF_CROUCH, ITYPE_CONTROLLER, CONTROLLER_BUTTON_X);
+			inputMapping_setControllerBinding(IADF_USE, ITYPE_CONTROLLER, CONTROLLER_BUTTON_B);
+			return;
+		}
+
+		if (!inputMapping_hasControllerBinding(IADF_CROUCH))
+		{
+			inputMapping_setControllerBinding(IADF_CROUCH, ITYPE_CONTROLLER, CONTROLLER_BUTTON_X);
+		}
+		if (!inputMapping_hasControllerBinding(IADF_USE))
+		{
+			inputMapping_setControllerBinding(IADF_USE, ITYPE_CONTROLLER, CONTROLLER_BUTTON_B);
 		}
 	}
 #endif

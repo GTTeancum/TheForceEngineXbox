@@ -2428,9 +2428,9 @@ static void refreshOptionsItems()
     }
     else if (s_optionsPage == XOPAGE_CONTROLS)
     {
-        setOptionSlider(XCTRL_LOOK_SENS_X, "LOOK X SENS", (s32)(TFE_InputXbox::getLookSensitivityX() * 100.0f + 0.5f), 25, 250);
-        setOptionSlider(XCTRL_LOOK_SENS_Y, "LOOK Y SENS", (s32)(TFE_InputXbox::getLookSensitivityY() * 100.0f + 0.5f), 25, 250);
-        setOptionSlider(XCTRL_RIGHT_STICK_DEADZONE, "RIGHT DEADZONE", (s32)(TFE_InputXbox::getRightStickDeadzone() * 100.0f + 0.5f), 0, 30);
+        setOptionSlider(XCTRL_LOOK_SENS_X, "AIM SPEED X", (s32)(TFE_InputXbox::getLookSensitivityX() * 100.0f + 0.5f), 25, 250);
+        setOptionSlider(XCTRL_LOOK_SENS_Y, "AIM SPEED Y", (s32)(TFE_InputXbox::getLookSensitivityY() * 100.0f + 0.5f), 25, 250);
+        setOptionSlider(XCTRL_RIGHT_STICK_DEADZONE, "AIM DEAD ZONE", (s32)(TFE_InputXbox::getRightStickDeadzone() * 100.0f + 0.5f), 0, 30);
 
         for (s32 i = 0; i < (s32)TFE_ARRAYSIZE(c_xboxBindingOptions); i++)
         {
@@ -2448,9 +2448,9 @@ static void refreshOptionsItems()
     }
     else if (s_optionsPage == XOPAGE_VIDEO)
     {
-        setOptionSlider(XVID_SAFE_ZONE, "SCREEN SIZE", system->xboxSafeZonePercent, 80, 100);
-        setOptionSlider(XVID_SCREEN_X, "H POSITION", system->xboxSafeZoneOffsetX, -40, 40);
-        setOptionSlider(XVID_SCREEN_Y, "V POSITION", system->xboxSafeZoneOffsetY, -30, 30);
+        setOptionSlider(XVID_SAFE_ZONE, "SAFE AREA SIZE", system->xboxSafeZonePercent, 80, 100);
+        setOptionSlider(XVID_SCREEN_X, "HORIZONTAL SHIFT", system->xboxSafeZoneOffsetX, -40, 40);
+        setOptionSlider(XVID_SCREEN_Y, "VERTICAL SHIFT", system->xboxSafeZoneOffsetY, -30, 30);
     }
     else if (s_optionsPage == XOPAGE_AUDIO)
     {

@@ -1406,9 +1406,9 @@ namespace TFE_DarkForces
 		}
 		else if (s_emState.optionsPage == XPOPAGE_CONTROLS)
 		{
-			xboxSetPauseOptionSlider(XPCTRL_LOOK_SENS_X, "LOOK X SENS", (s32)(TFE_InputXbox::getLookSensitivityX() * 100.0f + 0.5f), 25, 250);
-			xboxSetPauseOptionSlider(XPCTRL_LOOK_SENS_Y, "LOOK Y SENS", (s32)(TFE_InputXbox::getLookSensitivityY() * 100.0f + 0.5f), 25, 250);
-			xboxSetPauseOptionSlider(XPCTRL_RIGHT_STICK_DEADZONE, "RIGHT DEADZONE", (s32)(TFE_InputXbox::getRightStickDeadzone() * 100.0f + 0.5f), 0, 30);
+			xboxSetPauseOptionSlider(XPCTRL_LOOK_SENS_X, "AIM SPEED X", (s32)(TFE_InputXbox::getLookSensitivityX() * 100.0f + 0.5f), 25, 250);
+			xboxSetPauseOptionSlider(XPCTRL_LOOK_SENS_Y, "AIM SPEED Y", (s32)(TFE_InputXbox::getLookSensitivityY() * 100.0f + 0.5f), 25, 250);
+			xboxSetPauseOptionSlider(XPCTRL_RIGHT_STICK_DEADZONE, "AIM DEAD ZONE", (s32)(TFE_InputXbox::getRightStickDeadzone() * 100.0f + 0.5f), 0, 30);
 
 			for (s32 i = 0; i < (s32)TFE_ARRAYSIZE(c_xboxPauseBindingOptions); i++)
 			{
@@ -1426,9 +1426,9 @@ namespace TFE_DarkForces
 		}
 		else if (s_emState.optionsPage == XPOPAGE_VIDEO)
 		{
-			xboxSetPauseOptionSlider(XPVID_SAFE_ZONE, "SCREEN SIZE", system->xboxSafeZonePercent, 80, 100);
-			xboxSetPauseOptionSlider(XPVID_SCREEN_X, "H POSITION", system->xboxSafeZoneOffsetX, -40, 40);
-			xboxSetPauseOptionSlider(XPVID_SCREEN_Y, "V POSITION", system->xboxSafeZoneOffsetY, -30, 30);
+			xboxSetPauseOptionSlider(XPVID_SAFE_ZONE, "SAFE AREA SIZE", system->xboxSafeZonePercent, 80, 100);
+			xboxSetPauseOptionSlider(XPVID_SCREEN_X, "HORIZONTAL SHIFT", system->xboxSafeZoneOffsetX, -40, 40);
+			xboxSetPauseOptionSlider(XPVID_SCREEN_Y, "VERTICAL SHIFT", system->xboxSafeZoneOffsetY, -30, 30);
 		}
 		else if (s_emState.optionsPage == XPOPAGE_AUDIO)
 		{

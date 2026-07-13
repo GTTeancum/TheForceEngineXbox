@@ -1513,6 +1513,35 @@ namespace TFE_RenderBackend
         }
     }
 
+    static void optionsDrawCornerMarker(s32 x, s32 y, bool right, bool bottom, u32 edge, u32 highlight)
+    {
+        const s32 len = 44;
+        const s32 thick = 5;
+        const s32 hX = right ? x - len + 1 : x;
+        const s32 hY = bottom ? y - thick + 1 : y;
+        const s32 vX = right ? x - thick + 1 : x;
+        const s32 vY = bottom ? y - len + 1 : y;
+
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, hX, hY, len, thick, edge);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, vX, vY, thick, len, edge);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+            hX + (right ? 3 : 0), hY + (bottom ? 0 : 3), len - 3, 2, highlight);
+        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+            vX + (right ? 0 : 3), vY + (bottom ? 3 : 0), 2, len - 3, highlight);
+    }
+
+    static void optionsDrawSafeAreaMarkers(bool pauseStyle)
+    {
+        if (strcmp(s_optionsTitle, "VIDEO") != 0) return;
+
+        const u32 edge = pauseStyle ? XPAUSE_GREEN_EDGE : 0xFFFF3030u;
+        const u32 highlight = pauseStyle ? XPAUSE_WHITE : 0xFFFFFFFFu;
+        optionsDrawCornerMarker(0, 0, false, false, edge, highlight);
+        optionsDrawCornerMarker(XBOX_OUTPUT_WIDTH - 1, 0, true, false, edge, highlight);
+        optionsDrawCornerMarker(0, XBOX_OUTPUT_HEIGHT - 1, false, true, edge, highlight);
+        optionsDrawCornerMarker(XBOX_OUTPUT_WIDTH - 1, XBOX_OUTPUT_HEIGHT - 1, true, true, edge, highlight);
+    }
+
     static void optionsDrawSlider(s32 x, s32 y, s32 w, const XboxOptionsItem* item, bool selected, bool pauseStyle)
     {
         const u32 dim = pauseStyle ? 0xFF5F775Fu : 0xFF4F4A34u;
@@ -1675,6 +1704,8 @@ namespace TFE_RenderBackend
             footerDrawItem(XFT_B_BACK, 138, 0xFFFF3030u);
             footerDrawItem(XFT_DPAD_ADJUST, 255, 0xFF8E8B72u);
         }
+
+        optionsDrawSafeAreaMarkers(pauseStyle);
     }
 
     static void missionCompleteBuildFrame()
