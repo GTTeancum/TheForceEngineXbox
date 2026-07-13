@@ -6,6 +6,7 @@
 #include "inputMapping.h"
 #include <TFE_Game/igame.h>
 #include <TFE_FileSystem/paths.h>
+#include <TFE_FileSystem/fileutil.h>
 #include <TFE_Settings/settings.h>
 #include <TFE_Input/replay.h>
 #include <TFE_DarkForces/hud.h>
@@ -175,6 +176,21 @@ namespace TFE_Input
 	void inputMapping_sanitizeXboxBindings();
 #endif
 
+	static void inputMapping_getRemapPath(char* fullPath, bool legacyRoot = false)
+	{
+#ifdef _XBOX
+		if (!legacyRoot)
+		{
+			char savesDir[TFE_MAX_PATH];
+			sprintf(savesDir, "%sSaves\\", TFE_Paths::getPath(PATH_USER_DOCUMENTS));
+			FileUtil::makeDirectory(savesDir);
+			sprintf(fullPath, "%s%s", savesDir, c_inputRemappingName);
+			return;
+		}
+#endif
+		sprintf(fullPath, "%s%s", TFE_Paths::getPath(PATH_USER_DOCUMENTS), c_inputRemappingName);
+	}
+
 	// -----------------------------------------------------------------------
 	void inputMapping_startup()
 	{
@@ -247,7 +263,7 @@ namespace TFE_Input
 	bool inputMapping_serialize()
 	{
 		char fullPath[TFE_MAX_PATH];
-		sprintf(fullPath, "%s%s", TFE_Paths::getPath(PATH_USER_DOCUMENTS), c_inputRemappingName);
+		inputMapping_getRemapPath(fullPath);
 
 		FileStream file;
 		if (!file.open(fullPath, Stream::MODE_WRITE))
@@ -272,11 +288,20 @@ namespace TFE_Input
 	bool inputMapping_restore()
 	{
 		char fullPath[TFE_MAX_PATH];
-		sprintf(fullPath, "%s%s", TFE_Paths::getPath(PATH_USER_DOCUMENTS), c_inputRemappingName);
+		inputMapping_getRemapPath(fullPath);
 
 		FileStream file;
+#ifdef _XBOX
+		if (!file.open(fullPath, Stream::MODE_READ))
+		{
+			inputMapping_getRemapPath(fullPath, true);
+			if (!file.open(fullPath, Stream::MODE_READ))
+				return false;
+		}
+#else
 		if (!file.open(fullPath, Stream::MODE_READ))
 			return false;
+#endif
 
 		char hdr[4];
 		u32  version;

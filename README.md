@@ -99,14 +99,25 @@ metadata and preview images. The mod levels themselves are not included.
 ## Mods
 
 This release does not redistribute mods. To install a mod you own or have
-downloaded separately, extract it under:
+downloaded separately, create a `Mods` folder next to `default.xbe` and `DARK`,
+then extract each mod into its own subfolder:
 
 ```text
 Mods\<mod folder>\
 ```
 
-The in-game mod browser expects extracted mod folders, not loose zip files in
-the game root.
+Example:
+
+```text
+F:\Games\Dark Forces\Mods\ats2lp_modern\ats2lp.gob
+F:\Games\Dark Forces\Mods\ats2lp_modern\DFBRIEF.LFD
+F:\Games\Dark Forces\Mods\ats2lp_modern\readme.txt
+```
+
+The `.gob` file must be directly inside that mod folder. If a downloaded mod
+extracts to an extra wrapper folder, move the actual mod files up one level so
+the layout matches the example. Loose `.zip` files in `Mods` are ignored on
+Xbox.
 
 If you own the Remastered version, copying `extras.gob` into `DARK` enables the
 Avenger prototype level as a mod entry. `extras.gob` is not included in this
@@ -123,8 +134,9 @@ Working in this port:
 - 640x480 software-rendered gameplay presented through the Xbox D3D8 backend.
 - Native Xbox start menu, load menu, options menu, pause/datapad screens, and
   mod browser.
-- XInput controller support with adjustable look sensitivity, stick deadzone,
-  volume settings, and remappable core actions.
+- XInput controller support with separate X/Y look sensitivity, right-stick
+  deadzone, volume settings, adjustable screen safe zone, and remappable core
+  actions.
 - Mission briefing flow, mission completion flow, and difficulty selection.
 - Save/load support using the Xbox title save area, including save thumbnails.
 - DirectSound audio path for game audio.

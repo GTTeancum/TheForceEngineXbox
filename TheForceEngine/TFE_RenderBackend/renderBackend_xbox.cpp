@@ -133,6 +133,9 @@ namespace TFE_RenderBackend
 
     // Destination rect on back buffer (letterbox/pillarbox).
     static RECT s_destRect;
+    static s32  s_safeZonePercent = 100;
+    static s32  s_safeZoneOffsetX = 0;
+    static s32  s_safeZoneOffsetY = 0;
 
     // Scratch expand buffer (palette -> XRGB).
     // Xbox virtual displays are capped to the fixed 640x480 output. Keeping
@@ -170,6 +173,7 @@ namespace TFE_RenderBackend
     static s32  s_optionsSelection = 0;
     static s32  s_optionsScroll = 0;
     static u32  s_optionsFrame = 0;
+    static char s_optionsTitle[32] = "OPTIONS";
     static XboxOptionsItem s_optionsItems[32];
     static s32  s_optionsItemCount = 0;
     static bool s_cheatScreenEnabled = false;
@@ -1580,6 +1584,16 @@ namespace TFE_RenderBackend
                 const u32 valueColor = s_optionsItems[index].capture ? 0xFF33D033u : (selected ? selectedText : normalText);
                 optionsDrawTextRight(s_optionsItems[index].valueText, panelX + panelW - 24, y, valueColor, pauseStyle);
             }
+            else if (s_optionsItems[index].hasIcon &&
+                     s_optionsItems[index].valueIcon >= 0 &&
+                     s_optionsItems[index].valueIcon < XDB_COUNT)
+            {
+                const XboxDukeButtonIconId icon = (XboxDukeButtonIconId)s_optionsItems[index].valueIcon;
+                const s32 iconH = pauseStyle ? 20 : 24;
+                const s32 iconW = dukeIconWidthForHeight(icon, iconH);
+                dukeDrawIconTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, icon,
+                    panelX + panelW - 24 - iconW, y - (pauseStyle ? 6 : 8), iconH, 0xFFFFFFFFu);
+            }
             else
             {
                 optionsDrawSlider(sliderX, y, sliderW, &s_optionsItems[index], selected, pauseStyle);
@@ -1624,13 +1638,12 @@ namespace TFE_RenderBackend
 
         if (pauseStyle)
         {
-            wheelDrawTextCenter("OPTIONS", panelX + panelW / 2, panelY + 42, XPAUSE_WHITE);
+            wheelDrawTextCenter(s_optionsTitle, panelX + panelW / 2, panelY + 42, XPAUSE_WHITE);
         }
         else
         {
-            startDrawTextSprite(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, XST_OPTIONS,
-                (XBOX_OUTPUT_WIDTH - c_xboxStartText[XST_OPTIONS].width) / 2, 34,
-                0xFFFF3030u, true);
+            loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+                s_optionsTitle, XBOX_OUTPUT_WIDTH / 2, 38, 3, 0xFFFF3030u);
         }
 
         optionsDrawRows(panelX + (pauseStyle ? 13 : 0), panelY, panelW - (pauseStyle ? 26 : 0), panelY + (pauseStyle ? 78 : 52), pauseStyle);
@@ -1779,10 +1792,55 @@ namespace TFE_RenderBackend
     // -----------------------------------------------------------------------
     static void computeDestRect()
     {
-        s_destRect.left   = 0;
-        s_destRect.top    = 0;
-        s_destRect.right  = XBOX_OUTPUT_WIDTH;
-        s_destRect.bottom = XBOX_OUTPUT_HEIGHT;
+        if (s_safeZonePercent < 80) s_safeZonePercent = 80;
+        if (s_safeZonePercent > 100) s_safeZonePercent = 100;
+
+        s32 w = (XBOX_OUTPUT_WIDTH * s_safeZonePercent) / 100;
+        s32 h = (XBOX_OUTPUT_HEIGHT * s_safeZonePercent) / 100;
+        if (w < 1) w = 1;
+        if (h < 1) h = 1;
+
+        const s32 marginX = XBOX_OUTPUT_WIDTH - w;
+        const s32 marginY = XBOX_OUTPUT_HEIGHT - h;
+        s32 x = (marginX / 2) + s_safeZoneOffsetX;
+        s32 y = (marginY / 2) + s_safeZoneOffsetY;
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x > marginX) x = marginX;
+        if (y > marginY) y = marginY;
+
+        s_destRect.left   = x;
+        s_destRect.top    = y;
+        s_destRect.right  = x + w;
+        s_destRect.bottom = y + h;
+    }
+
+    static void setViewportRect(const RECT& rect)
+    {
+        if (!s_deviceReady || !s_device) return;
+        D3DVIEWPORT8 vp;
+        vp.X = rect.left;
+        vp.Y = rect.top;
+        vp.Width = rect.right - rect.left;
+        vp.Height = rect.bottom - rect.top;
+        vp.MinZ = 0.0f;
+        vp.MaxZ = 1.0f;
+        s_device->SetViewport(&vp);
+    }
+
+    static void setFullViewport()
+    {
+        RECT rect;
+        rect.left = 0;
+        rect.top = 0;
+        rect.right = XBOX_OUTPUT_WIDTH;
+        rect.bottom = XBOX_OUTPUT_HEIGHT;
+        setViewportRect(rect);
+    }
+
+    static void setSafeViewport()
+    {
+        setViewportRect(s_destRect);
     }
 
     // -----------------------------------------------------------------------
@@ -2168,10 +2226,19 @@ namespace TFE_RenderBackend
         }
     }
 
-    void xboxSetOptionsScreen(bool enabled, bool pauseStyle, s32 selection, s32 scroll, u32 frame, const XboxOptionsItem* items, s32 itemCount)
+    void xboxSetOptionsScreen(bool enabled, bool pauseStyle, const char* title, s32 selection, s32 scroll, u32 frame, const XboxOptionsItem* items, s32 itemCount)
     {
         s_optionsScreenEnabled = enabled;
         s_optionsPauseStyle = pauseStyle;
+        if (title && title[0])
+        {
+            strncpy(s_optionsTitle, title, sizeof(s_optionsTitle) - 1);
+            s_optionsTitle[sizeof(s_optionsTitle) - 1] = 0;
+        }
+        else
+        {
+            strcpy(s_optionsTitle, "OPTIONS");
+        }
         s_optionsItemCount = pauseClamp(itemCount, 0, 32);
         s_optionsSelection = pauseClamp(selection, 0, s_optionsItemCount > 0 ? s_optionsItemCount - 1 : 0);
         s_optionsScroll = pauseClamp(scroll, 0, s_optionsItemCount > 7 ? s_optionsItemCount - 7 : 0);
@@ -2180,6 +2247,28 @@ namespace TFE_RenderBackend
         {
             s_optionsItems[i] = items[i];
         }
+    }
+
+    void xboxSetSafeZone(s32 percent, s32 offsetX, s32 offsetY)
+    {
+        if (percent < 80) percent = 80;
+        if (percent > 100) percent = 100;
+        if (offsetX < -40) offsetX = -40;
+        if (offsetX > 40) offsetX = 40;
+        if (offsetY < -30) offsetY = -30;
+        if (offsetY > 30) offsetY = 30;
+
+        s_safeZonePercent = percent;
+        s_safeZoneOffsetX = offsetX;
+        s_safeZoneOffsetY = offsetY;
+        computeDestRect();
+        if (s_deviceReady)
+        {
+            setFullViewport();
+        }
+        TFE_XboxLogf("RenderBackend", "safe zone percent=%d offset=%d,%d dest=%ld,%ld,%ld,%ld",
+            s_safeZonePercent, s_safeZoneOffsetX, s_safeZoneOffsetY,
+            s_destRect.left, s_destRect.top, s_destRect.right, s_destRect.bottom);
     }
 
     void xboxSetCheatScreen(bool enabled, s32 selection, s32 scroll, const XboxCheatItem* items, s32 itemCount)
@@ -2394,6 +2483,7 @@ namespace TFE_RenderBackend
         // all inside swap() because the 8-bit framebuffer is uploaded as a
         // texture and presented via a fullscreen quad here.
         s_device->BeginScene();
+        setFullViewport();
 
         // Always clear TARGET|ZBUFFER|STENCIL together (NV20 quirk).
         // OpenJKDF2 fakeglx.cpp:1829-1844. xquake same. Mercs same.
@@ -2535,6 +2625,7 @@ namespace TFE_RenderBackend
             s_device->BeginScene();
             s_gpuSceneOpen = true;
         }
+        setFullViewport();
         D3DCOLOR c = D3DCOLOR_XRGB(0, 0, 0);
         if (color && clearColor)
         {
@@ -2549,6 +2640,7 @@ namespace TFE_RenderBackend
         s_device->Clear(0, NULL,
                         D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL,
                         c, 1.0f, 0);
+        setSafeViewport();
     }
     void copyToVirtualDisplay(RenderTargetHandle /*src*/)  {}
 

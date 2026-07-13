@@ -37,6 +37,7 @@
 // inputMapping logic works without modification.
 
 #include <TFE_Input/input.h>
+#include <TFE_Input/input_xbox.h>
 #include <TFE_Input/inputEnum.h>
 #include <TFE_System/system.h>
 #include <xtl.h>
@@ -104,8 +105,10 @@ namespace TFE_InputXbox
     static int    s_openRetryCounter  = 0;   // throttle retries to ~1/sec @ 60fps
     static int    s_pollCounter       = 0;   // total polls since startup
     static int    s_edgeLogBudget     = 0;   // edge-event logs stall hardware menus; enable only while bringing input up.
-    static f32    s_lookSensitivity   = 1.0f;
-    static f32    s_stickDeadzone     = 0.09f;
+    static f32    s_lookSensitivityX  = 1.0f;
+    static f32    s_lookSensitivityY  = 1.0f;
+    static f32    s_leftStickDeadzone = 0.09f;
+    static f32    s_rightStickDeadzone = 0.09f;
 
     // Synthesized mouse cursor state (screen-space, accumulated across frames).
     // Initialized to screen center on init().
@@ -172,8 +175,9 @@ namespace TFE_InputXbox
         s_cursorY = 240.0f;
         TFE_Input::setMousePos((s32)s_cursorX, (s32)s_cursorY);
         TFE_System::logWrite(LOG_MSG, "InputXbox", "XInput polling initialised");
-        TFE_XboxLogf("InputXbox", "init sensitivity=%d deadzonePct=%d trigger=%d",
-            (int)(s_lookSensitivity * 100.0f), (int)(s_stickDeadzone * 100.0f), XINPUT_DEADZONE_TRIGGER);
+        TFE_XboxLogf("InputXbox", "init sensitivityX=%d sensitivityY=%d rightDeadzonePct=%d trigger=%d",
+            (int)(s_lookSensitivityX * 100.0f), (int)(s_lookSensitivityY * 100.0f),
+            (int)(s_rightStickDeadzone * 100.0f), XINPUT_DEADZONE_TRIGGER);
     }
 
     // Helper: clear all input state when no controller is connected.
@@ -261,12 +265,15 @@ namespace TFE_InputXbox
         // ---------------------------------------------------------------
         // Analog sticks
         // ---------------------------------------------------------------
-        SHORT stickDeadzone = (SHORT)(s_stickDeadzone * 32767.0f);
-        if (stickDeadzone < 0) stickDeadzone = 0;
-        if (stickDeadzone > 30000) stickDeadzone = 30000;
+        SHORT leftStickDeadzone = (SHORT)(s_leftStickDeadzone * 32767.0f);
+        if (leftStickDeadzone < 0) leftStickDeadzone = 0;
+        if (leftStickDeadzone > 30000) leftStickDeadzone = 30000;
+        SHORT rightStickDeadzone = (SHORT)(s_rightStickDeadzone * 32767.0f);
+        if (rightStickDeadzone < 0) rightStickDeadzone = 0;
+        if (rightStickDeadzone > 30000) rightStickDeadzone = 30000;
 
-        const f32 lx = applyDeadzone(pad.sThumbLX,  stickDeadzone);
-        const f32 ly = applyDeadzone(pad.sThumbLY,  stickDeadzone);
+        const f32 lx = applyDeadzone(pad.sThumbLX,  leftStickDeadzone);
+        const f32 ly = applyDeadzone(pad.sThumbLY,  leftStickDeadzone);
         TFE_Input::setAxis(AXIS_LEFT_X,  lx);
         TFE_Input::setAxis(AXIS_LEFT_Y,  ly);
         // Right stick - look. Deadzone + curve controlled by the
@@ -276,8 +283,8 @@ namespace TFE_InputXbox
         // Smaller deadzone + quadratic curve. sign(x)*x*x keeps full
         // range [-1,1] but compresses small inputs so a gentle nudge
         // gives a gentle look-speed.
-        f32 rx = applyDeadzone(pad.sThumbRX, stickDeadzone);
-        f32 ry = applyDeadzone(pad.sThumbRY, stickDeadzone);
+        f32 rx = applyDeadzone(pad.sThumbRX, rightStickDeadzone);
+        f32 ry = applyDeadzone(pad.sThumbRY, rightStickDeadzone);
         rx = (rx < 0.0f ? -1.0f : 1.0f) * rx * rx;
         ry = (ry < 0.0f ? -1.0f : 1.0f) * ry * ry;
 #else
@@ -285,15 +292,15 @@ namespace TFE_InputXbox
         f32 rx = applyDeadzone(pad.sThumbRX, XINPUT_DEADZONE_STICK);
         f32 ry = applyDeadzone(pad.sThumbRY, XINPUT_DEADZONE_STICK);
 #endif
-        TFE_Input::setAxis(AXIS_RIGHT_X, rx * s_lookSensitivity);
+        TFE_Input::setAxis(AXIS_RIGHT_X, rx * s_lookSensitivityX);
 #if XBOX_LOOK_Y_INVERT
         // Stick UP -> look UP. Raw XInput RY is +ve when pushed up,
         // and player.cpp adds AA_LOOK_VERT to s_playerPitch where +ve
         // pitch = look up - so DON'T negate.
-        TFE_Input::setAxis(AXIS_RIGHT_Y, ry * s_lookSensitivity);
+        TFE_Input::setAxis(AXIS_RIGHT_Y, ry * s_lookSensitivityY);
 #else
         // Pre-Phase-12 behavior: negate.
-        TFE_Input::setAxis(AXIS_RIGHT_Y, -ry * s_lookSensitivity);
+        TFE_Input::setAxis(AXIS_RIGHT_Y, -ry * s_lookSensitivityY);
 #endif
 
         // ---------------------------------------------------------------
@@ -418,26 +425,59 @@ namespace TFE_InputXbox
 
     void setLookSensitivity(float value)
     {
-        if (value < 0.25f) value = 0.25f;
-        if (value > 2.5f) value = 2.5f;
-        s_lookSensitivity = value;
+        setLookSensitivityX(value);
+        setLookSensitivityY(value);
     }
 
     float getLookSensitivity()
     {
-        return s_lookSensitivity;
+        return (s_lookSensitivityX + s_lookSensitivityY) * 0.5f;
+    }
+
+    void setLookSensitivityX(float value)
+    {
+        if (value < 0.25f) value = 0.25f;
+        if (value > 2.5f) value = 2.5f;
+        s_lookSensitivityX = value;
+    }
+
+    void setLookSensitivityY(float value)
+    {
+        if (value < 0.25f) value = 0.25f;
+        if (value > 2.5f) value = 2.5f;
+        s_lookSensitivityY = value;
+    }
+
+    float getLookSensitivityX()
+    {
+        return s_lookSensitivityX;
+    }
+
+    float getLookSensitivityY()
+    {
+        return s_lookSensitivityY;
     }
 
     void setStickDeadzone(float value)
     {
-        if (value < 0.0f) value = 0.0f;
-        if (value > 0.30f) value = 0.30f;
-        s_stickDeadzone = value;
+        setRightStickDeadzone(value);
     }
 
     float getStickDeadzone()
     {
-        return s_stickDeadzone;
+        return getRightStickDeadzone();
+    }
+
+    void setRightStickDeadzone(float value)
+    {
+        if (value < 0.0f) value = 0.0f;
+        if (value > 0.30f) value = 0.30f;
+        s_rightStickDeadzone = value;
+    }
+
+    float getRightStickDeadzone()
+    {
+        return s_rightStickDeadzone;
     }
 
 } // namespace TFE_InputXbox

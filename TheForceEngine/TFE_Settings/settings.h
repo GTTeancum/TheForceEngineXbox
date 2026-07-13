@@ -315,11 +315,20 @@ struct TFE_Settings_System
     bool showGifPathConfirmation;
     f32  xboxLookSensitivity;
     f32  xboxStickDeadzone;
+    f32  xboxLookSensitivityX;
+    f32  xboxLookSensitivityY;
+    f32  xboxRightStickDeadzone;
+    s32  xboxSafeZonePercent;
+    s32  xboxSafeZoneOffsetX;
+    s32  xboxSafeZoneOffsetY;
 
     TFE_Settings_System()
         : gameQuitExitsToMenu(true), returnToModLoader(true)
         , gifRecordingFramerate(18.0f), showGifPathConfirmation(true)
-        , xboxLookSensitivity(1.0f), xboxStickDeadzone(0.09f) {}
+        , xboxLookSensitivity(1.0f), xboxStickDeadzone(0.09f)
+        , xboxLookSensitivityX(1.0f), xboxLookSensitivityY(1.0f)
+        , xboxRightStickDeadzone(0.09f)
+        , xboxSafeZonePercent(100), xboxSafeZoneOffsetX(0), xboxSafeZoneOffsetY(0) {}
 };
 
 // ---------------------------------------------------------------------------

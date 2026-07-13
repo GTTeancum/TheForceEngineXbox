@@ -40,6 +40,8 @@ namespace TFE_RenderBackend
         s32 minValue;
         s32 maxValue;
         bool capture;
+        bool hasIcon;
+        s32 valueIcon;
     };
 
     struct XboxCheatItem
@@ -176,7 +178,12 @@ namespace TFE_RenderBackend
     void xboxSetStartScreen(bool enabled, s32 selection, u32 frame);
     void xboxSetLoadScreen(bool enabled, s32 selection, u32 frame, const XboxLoadSlotInfo* slots, s32 slotCount);
     void xboxSetModScreen(bool enabled, s32 selection, u32 frame, const XboxModInfo* mods, s32 modCount);
-    void xboxSetOptionsScreen(bool enabled, bool pauseStyle, s32 selection, s32 scroll, u32 frame, const XboxOptionsItem* items, s32 itemCount);
+    void xboxSetOptionsScreen(bool enabled, bool pauseStyle, const char* title, s32 selection, s32 scroll, u32 frame, const XboxOptionsItem* items, s32 itemCount);
+    inline void xboxSetOptionsScreen(bool enabled, bool pauseStyle, s32 selection, s32 scroll, u32 frame, const XboxOptionsItem* items, s32 itemCount)
+    {
+        xboxSetOptionsScreen(enabled, pauseStyle, "OPTIONS", selection, scroll, frame, items, itemCount);
+    }
+    void xboxSetSafeZone(s32 percent, s32 offsetX, s32 offsetY);
     void xboxSetCheatScreen(bool enabled, s32 selection, s32 scroll, const XboxCheatItem* items, s32 itemCount);
     void xboxSetPdaOverlay(bool enabled, s32 mode, s32 layer = 0);
     void xboxSetMissionCompleteScreen(bool enabled, s32 selection, u32 frame, const XboxMissionCompleteInfo* info);

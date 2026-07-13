@@ -12,6 +12,8 @@
 #include <TFE_Game/saveSystem.h>
 #include <TFE_Game/reticle.h>
 #include <TFE_Archive/archive.h>
+#include <TFE_FileSystem/filestream.h>
+#include <TFE_FileSystem/fileutil.h>
 #include <TFE_Settings/settings.h>
 #include <TFE_Input/inputMapping.h>
 #include <TFE_RenderBackend/renderBackend.h>
@@ -90,6 +92,13 @@ namespace TFE_DarkForces
 		XBOX_CHEAT_COUNT = 10,
 		XBOX_CHEAT_GIVE_ALL = 9
 	};
+	enum XboxPauseOptionsPage
+	{
+		XPOPAGE_ROOT = 0,
+		XPOPAGE_CONTROLS,
+		XPOPAGE_VIDEO,
+		XPOPAGE_AUDIO
+	};
 	static Vec2i c_escButtons[ESC_BTN_COUNT] =
 	{
 #ifdef _XBOX
@@ -135,6 +144,8 @@ namespace TFE_DarkForces
 		bool  optionsOpen;
 		s32   optionsSelection;
 		s32   optionsScroll;
+		s32   optionsItemCount;
+		s32   optionsPage;
 		u32   optionsFrame;
 		bool  optionsStickUpHeld;
 		bool  optionsStickDownHeld;
@@ -160,7 +171,8 @@ namespace TFE_DarkForces
 			, confirmState(CONFIRM_STATE_NONE)
 #ifdef _XBOX
 			, quickSaveStatus(0), quickSaveWaitRelease(false), quickSaveClosePending(false)
-			, optionsOpen(false), optionsSelection(0), optionsScroll(0), optionsFrame(0)
+			, optionsOpen(false), optionsSelection(0), optionsScroll(0), optionsItemCount(0)
+			, optionsPage(XPOPAGE_ROOT), optionsFrame(0)
 			, optionsStickUpHeld(false), optionsStickDownHeld(false)
 			, optionsStickLeftHeld(false), optionsStickRightHeld(false)
 			, cheatsOpen(false), cheatsSelection(0), cheatsScroll(0)
@@ -174,29 +186,76 @@ namespace TFE_DarkForces
 	};
 	static EscapeMenuState s_emState;
 
-	enum XboxPauseOptionIndex
+	enum XboxPauseRootOptionIndex
 	{
-		XPOPT_LOOK_SENS = 0,
-		XPOPT_STICK_DEADZONE,
-		XPOPT_MASTER_VOLUME,
-		XPOPT_SFX_VOLUME,
-		XPOPT_MUSIC_VOLUME,
-		XPOPT_CUTSCENE_SFX,
-		XPOPT_CUTSCENE_MUSIC,
-		XPOPT_BIND_JUMP,
-		XPOPT_BIND_CROUCH,
-		XPOPT_BIND_USE,
-		XPOPT_BIND_PRIMARY,
-		XPOPT_BIND_SECONDARY,
-		XPOPT_BIND_AUTOMAP,
-		XPOPT_BIND_PREV_WEAPON,
-		XPOPT_BIND_NEXT_WEAPON,
-		XPOPT_BIND_HEADLAMP,
-		XPOPT_BIND_CLEATS,
-		XPOPT_BIND_NIGHTVISION,
-		XPOPT_BIND_GASMASK,
-		XPOPT_BIND_MENU,
-		XPOPT_COUNT
+		XPROOT_CONTROLS = 0,
+		XPROOT_VIDEO,
+		XPROOT_AUDIO,
+		XPROOT_COUNT
+	};
+
+	enum XboxPauseControlsOptionIndex
+	{
+		XPCTRL_LOOK_SENS_X = 0,
+		XPCTRL_LOOK_SENS_Y,
+		XPCTRL_RIGHT_STICK_DEADZONE,
+		XPCTRL_BIND_JUMP,
+		XPCTRL_BIND_CROUCH,
+		XPCTRL_BIND_USE,
+		XPCTRL_BIND_PRIMARY,
+		XPCTRL_BIND_SECONDARY,
+		XPCTRL_BIND_AUTOMAP,
+		XPCTRL_BIND_PREV_WEAPON,
+		XPCTRL_BIND_NEXT_WEAPON,
+		XPCTRL_BIND_HEADLAMP,
+		XPCTRL_BIND_CLEATS,
+		XPCTRL_BIND_NIGHTVISION,
+		XPCTRL_BIND_GASMASK,
+		XPCTRL_BIND_MENU,
+		XPCTRL_COUNT
+	};
+
+	enum XboxPauseVideoOptionIndex
+	{
+		XPVID_SAFE_ZONE = 0,
+		XPVID_SCREEN_X,
+		XPVID_SCREEN_Y,
+		XPVID_COUNT
+	};
+
+	enum XboxPauseAudioOptionIndex
+	{
+		XPAUD_MASTER_VOLUME = 0,
+		XPAUD_SFX_VOLUME,
+		XPAUD_MUSIC_VOLUME,
+		XPAUD_CUTSCENE_SFX,
+		XPAUD_CUTSCENE_MUSIC,
+		XPAUD_COUNT
+	};
+
+	enum XboxPauseOptionIconId
+	{
+		XPICON_A = 0,
+		XPICON_B,
+		XPICON_X,
+		XPICON_Y,
+		XPICON_WHITE,
+		XPICON_BLACK,
+		XPICON_START,
+		XPICON_LSTICK,
+		XPICON_LSTICK_DPAD,
+		XPICON_LSTICK_SMALL,
+		XPICON_RSTICK,
+		XPICON_RSTICK_DPAD,
+		XPICON_RSTICK_SMALL,
+		XPICON_BACK,
+		XPICON_DPAD,
+		XPICON_DPAD_UP,
+		XPICON_DPAD_DOWN,
+		XPICON_DPAD_LEFT,
+		XPICON_DPAD_RIGHT,
+		XPICON_LT,
+		XPICON_RT
 	};
 
 	struct XboxPauseBindingOption
@@ -208,19 +267,19 @@ namespace TFE_DarkForces
 
 	static const XboxPauseBindingOption c_xboxPauseBindingOptions[] =
 	{
-		{ XPOPT_BIND_JUMP,        TFE_Input::IADF_JUMP,             "JUMP" },
-		{ XPOPT_BIND_CROUCH,      TFE_Input::IADF_CROUCH,           "CROUCH" },
-		{ XPOPT_BIND_USE,         TFE_Input::IADF_USE,              "USE" },
-		{ XPOPT_BIND_PRIMARY,     TFE_Input::IADF_PRIMARY_FIRE,     "PRIMARY FIRE" },
-		{ XPOPT_BIND_SECONDARY,   TFE_Input::IADF_SECONDARY_FIRE,   "SECONDARY FIRE" },
-		{ XPOPT_BIND_AUTOMAP,     TFE_Input::IADF_AUTOMAP,          "AUTOMAP" },
-		{ XPOPT_BIND_PREV_WEAPON, TFE_Input::IADF_CYCLEWPN_PREV,    "PREV WEAPON" },
-		{ XPOPT_BIND_NEXT_WEAPON, TFE_Input::IADF_CYCLEWPN_NEXT,    "NEXT WEAPON" },
-		{ XPOPT_BIND_HEADLAMP,    TFE_Input::IADF_HEAD_LAMP_TOGGLE, "HEADLAMP" },
-		{ XPOPT_BIND_CLEATS,      TFE_Input::IADF_CLEATS_TOGGLE,    "CLEATS" },
-		{ XPOPT_BIND_NIGHTVISION, TFE_Input::IADF_NIGHT_VISION_TOG, "NIGHT VISION" },
-		{ XPOPT_BIND_GASMASK,     TFE_Input::IADF_GAS_MASK_TOGGLE,  "GAS MASK" },
-		{ XPOPT_BIND_MENU,        TFE_Input::IADF_MENU_TOGGLE,      "PAUSE MENU" },
+		{ XPCTRL_BIND_JUMP,        TFE_Input::IADF_JUMP,             "JUMP" },
+		{ XPCTRL_BIND_CROUCH,      TFE_Input::IADF_CROUCH,           "CROUCH" },
+		{ XPCTRL_BIND_USE,         TFE_Input::IADF_USE,              "USE" },
+		{ XPCTRL_BIND_PRIMARY,     TFE_Input::IADF_PRIMARY_FIRE,     "PRIMARY FIRE" },
+		{ XPCTRL_BIND_SECONDARY,   TFE_Input::IADF_SECONDARY_FIRE,   "SECONDARY FIRE" },
+		{ XPCTRL_BIND_AUTOMAP,     TFE_Input::IADF_AUTOMAP,          "AUTOMAP" },
+		{ XPCTRL_BIND_PREV_WEAPON, TFE_Input::IADF_CYCLEWPN_PREV,    "PREV WEAPON" },
+		{ XPCTRL_BIND_NEXT_WEAPON, TFE_Input::IADF_CYCLEWPN_NEXT,    "NEXT WEAPON" },
+		{ XPCTRL_BIND_HEADLAMP,    TFE_Input::IADF_HEAD_LAMP_TOGGLE, "HEADLAMP" },
+		{ XPCTRL_BIND_CLEATS,      TFE_Input::IADF_CLEATS_TOGGLE,    "CLEATS" },
+		{ XPCTRL_BIND_NIGHTVISION, TFE_Input::IADF_NIGHT_VISION_TOG, "NIGHT VISION" },
+		{ XPCTRL_BIND_GASMASK,     TFE_Input::IADF_GAS_MASK_TOGGLE,  "GAS MASK" },
+		{ XPCTRL_BIND_MENU,        TFE_Input::IADF_MENU_TOGGLE,      "PAUSE MENU" },
 	};
 	static bool s_xboxPauseOptionsCapture = false;
 
@@ -1086,8 +1145,85 @@ namespace TFE_DarkForces
 		return pct;
 	}
 
+	static s32 xboxClampS32(s32 value, s32 minValue, s32 maxValue)
+	{
+		if (value < minValue) return minValue;
+		if (value > maxValue) return maxValue;
+		return value;
+	}
+
+	static float xboxClampF32(float value, float minValue, float maxValue)
+	{
+		if (value < minValue) return minValue;
+		if (value > maxValue) return maxValue;
+		return value;
+	}
+
+	static void xboxPauseRuntimeSettingsPath(char* path, size_t pathSize)
+	{
+		snprintf(path, pathSize, "%sSaves\\xbox_settings.cfg", TFE_Paths::getPath(PATH_PROGRAM));
+	}
+
+	static void xboxApplyPauseVideoSettings()
+	{
+		TFE_Settings_System* system = TFE_Settings::getSystemSettings();
+		system->xboxSafeZonePercent = xboxClampS32(system->xboxSafeZonePercent, 80, 100);
+		system->xboxSafeZoneOffsetX = xboxClampS32(system->xboxSafeZoneOffsetX, -40, 40);
+		system->xboxSafeZoneOffsetY = xboxClampS32(system->xboxSafeZoneOffsetY, -30, 30);
+		TFE_RenderBackend::xboxSetSafeZone(system->xboxSafeZonePercent,
+			system->xboxSafeZoneOffsetX, system->xboxSafeZoneOffsetY);
+	}
+
+	static void xboxApplyPauseControlSettings()
+	{
+		TFE_Settings_System* system = TFE_Settings::getSystemSettings();
+		system->xboxLookSensitivityX = xboxClampF32(system->xboxLookSensitivityX, 0.25f, 2.5f);
+		system->xboxLookSensitivityY = xboxClampF32(system->xboxLookSensitivityY, 0.25f, 2.5f);
+		system->xboxRightStickDeadzone = xboxClampF32(system->xboxRightStickDeadzone, 0.0f, 0.30f);
+		system->xboxLookSensitivity = (system->xboxLookSensitivityX + system->xboxLookSensitivityY) * 0.5f;
+		system->xboxStickDeadzone = system->xboxRightStickDeadzone;
+		TFE_InputXbox::setLookSensitivityX(system->xboxLookSensitivityX);
+		TFE_InputXbox::setLookSensitivityY(system->xboxLookSensitivityY);
+		TFE_InputXbox::setRightStickDeadzone(system->xboxRightStickDeadzone);
+	}
+
+	static bool xboxSaveRuntimeSettings()
+	{
+		char savesDir[TFE_MAX_PATH];
+		snprintf(savesDir, TFE_MAX_PATH, "%sSaves\\", TFE_Paths::getPath(PATH_PROGRAM));
+		FileUtil::makeDirectory(savesDir);
+
+		char path[TFE_MAX_PATH];
+		xboxPauseRuntimeSettingsPath(path, sizeof(path));
+		FileStream file;
+		if (!file.open(path, Stream::MODE_WRITE))
+		{
+			TFE_System::logWrite(LOG_WARNING, "Settings", "Cannot write Xbox runtime settings: '%s'", path);
+			return false;
+		}
+
+		TFE_Settings_System* system = TFE_Settings::getSystemSettings();
+		TFE_Settings_Sound* sound = TFE_Settings::getSoundSettings();
+		file.writeString("# TheForceEngineXbox runtime settings\r\n");
+		file.writeString("xboxLookSensitivityXPct=%d\r\n", (s32)(system->xboxLookSensitivityX * 100.0f + 0.5f));
+		file.writeString("xboxLookSensitivityYPct=%d\r\n", (s32)(system->xboxLookSensitivityY * 100.0f + 0.5f));
+		file.writeString("xboxRightStickDeadzonePct=%d\r\n", (s32)(system->xboxRightStickDeadzone * 100.0f + 0.5f));
+		file.writeString("xboxSafeZonePercent=%d\r\n", system->xboxSafeZonePercent);
+		file.writeString("xboxSafeZoneOffsetX=%d\r\n", system->xboxSafeZoneOffsetX);
+		file.writeString("xboxSafeZoneOffsetY=%d\r\n", system->xboxSafeZoneOffsetY);
+		file.writeString("masterVolumePct=%d\r\n", xboxOptionPercent(sound->masterVolume));
+		file.writeString("soundFxVolumePct=%d\r\n", xboxOptionPercent(sound->soundFxVolume));
+		file.writeString("musicVolumePct=%d\r\n", xboxOptionPercent(sound->musicVolume));
+		file.writeString("cutsceneSoundFxVolumePct=%d\r\n", xboxOptionPercent(sound->cutsceneSoundFxVolume));
+		file.writeString("cutsceneMusicVolumePct=%d\r\n", xboxOptionPercent(sound->cutsceneMusicVolume));
+		file.close();
+		TFE_System::logWrite(LOG_MSG, "Settings", "Xbox runtime settings saved from pause menu: '%s'", path);
+		return true;
+	}
+
 	static const XboxPauseBindingOption* xboxFindPauseBindingOption(s32 option)
 	{
+		if (s_emState.optionsPage != XPOPAGE_CONTROLS) return NULL;
 		for (s32 i = 0; i < (s32)TFE_ARRAYSIZE(c_xboxPauseBindingOptions); i++)
 		{
 			if (c_xboxPauseBindingOptions[i].option == option) return &c_xboxPauseBindingOptions[i];
@@ -1117,6 +1253,28 @@ namespace TFE_DarkForces
 		}
 	}
 
+	static s32 xboxPauseButtonIcon(Button button)
+	{
+		switch (button)
+		{
+			case CONTROLLER_BUTTON_A: return XPICON_A;
+			case CONTROLLER_BUTTON_B: return XPICON_B;
+			case CONTROLLER_BUTTON_X: return XPICON_X;
+			case CONTROLLER_BUTTON_Y: return XPICON_Y;
+			case CONTROLLER_BUTTON_BACK: return XPICON_BACK;
+			case CONTROLLER_BUTTON_START: return XPICON_START;
+			case CONTROLLER_BUTTON_LEFTSTICK: return XPICON_LSTICK;
+			case CONTROLLER_BUTTON_RIGHTSTICK: return XPICON_RSTICK;
+			case CONTROLLER_BUTTON_LEFTSHOULDER: return XPICON_WHITE;
+			case CONTROLLER_BUTTON_RIGHTSHOULDER: return XPICON_BLACK;
+			case CONTROLLER_BUTTON_DPAD_UP: return XPICON_DPAD_UP;
+			case CONTROLLER_BUTTON_DPAD_DOWN: return XPICON_DPAD_DOWN;
+			case CONTROLLER_BUTTON_DPAD_LEFT: return XPICON_DPAD_LEFT;
+			case CONTROLLER_BUTTON_DPAD_RIGHT: return XPICON_DPAD_RIGHT;
+			default: return -1;
+		}
+	}
+
 	static const char* xboxPauseAxisName(Axis axis)
 	{
 		switch (axis)
@@ -1128,6 +1286,20 @@ namespace TFE_DarkForces
 			case AXIS_RIGHT_X: return "RIGHT X";
 			case AXIS_RIGHT_Y: return "RIGHT Y";
 			default: return "AXIS";
+		}
+	}
+
+	static s32 xboxPauseAxisIcon(Axis axis)
+	{
+		switch (axis)
+		{
+			case AXIS_LEFT_TRIGGER: return XPICON_LT;
+			case AXIS_RIGHT_TRIGGER: return XPICON_RT;
+			case AXIS_LEFT_X:
+			case AXIS_LEFT_Y: return XPICON_LSTICK;
+			case AXIS_RIGHT_X:
+			case AXIS_RIGHT_Y: return XPICON_RSTICK;
+			default: return -1;
 		}
 	}
 
@@ -1150,88 +1322,177 @@ namespace TFE_DarkForces
 		return "UNMAPPED";
 	}
 
+	static s32 xboxPauseBindingIcon(TFE_Input::InputAction action)
+	{
+		u32 indices[16];
+		const u32 count = TFE_Input::inputMapping_getBindingsForAction(action, indices, TFE_ARRAYSIZE(indices));
+		for (u32 i = 0; i < count; i++)
+		{
+			TFE_Input::InputBinding* bind = TFE_Input::inputMapping_getBindingByIndex(indices[i]);
+			if (bind->type == TFE_Input::ITYPE_CONTROLLER)
+			{
+				return xboxPauseButtonIcon(bind->ctrlBtn);
+			}
+			if (bind->type == TFE_Input::ITYPE_CONTROLLER_AXIS)
+			{
+				return xboxPauseAxisIcon(bind->axis);
+			}
+		}
+		return -1;
+	}
+
+	static const char* xboxPauseOptionsTitle()
+	{
+		switch (s_emState.optionsPage)
+		{
+			case XPOPAGE_CONTROLS: return "CONTROLS";
+			case XPOPAGE_VIDEO: return "VIDEO";
+			case XPOPAGE_AUDIO: return "AUDIO";
+			default: return "OPTIONS";
+		}
+	}
+
+	static s32 xboxPauseOptionsVisibleCount()
+	{
+		switch (s_emState.optionsPage)
+		{
+			case XPOPAGE_CONTROLS: return XPCTRL_COUNT;
+			case XPOPAGE_VIDEO: return XPVID_COUNT;
+			case XPOPAGE_AUDIO: return XPAUD_COUNT;
+			default: return XPROOT_COUNT;
+		}
+	}
+
+	static void xboxSetPauseOptionText(s32 index, const char* label, const char* valueText)
+	{
+		s_emState.optionsItems[index].label = label;
+		s_emState.optionsItems[index].valueText = valueText;
+	}
+
+	static void xboxSetPauseOptionSlider(s32 index, const char* label, s32 value, s32 minValue, s32 maxValue)
+	{
+		s_emState.optionsItems[index].label = label;
+		s_emState.optionsItems[index].value = value;
+		s_emState.optionsItems[index].minValue = minValue;
+		s_emState.optionsItems[index].maxValue = maxValue;
+	}
+
+	static void xboxSetPauseOptionIcon(s32 index, const char* label, s32 icon)
+	{
+		s_emState.optionsItems[index].label = label;
+		if (icon >= 0)
+		{
+			s_emState.optionsItems[index].hasIcon = true;
+			s_emState.optionsItems[index].valueIcon = icon;
+		}
+		else
+		{
+			s_emState.optionsItems[index].valueText = "UNMAPPED";
+		}
+	}
+
 	static void xboxRefreshOptionsItems()
 	{
 		TFE_Settings_Sound* sound = TFE_Settings::getSoundSettings();
+		TFE_Settings_System* system = TFE_Settings::getSystemSettings();
 		memset(s_emState.optionsItems, 0, sizeof(s_emState.optionsItems));
+		s_emState.optionsItemCount = xboxPauseOptionsVisibleCount();
 
-		s_emState.optionsItems[XPOPT_LOOK_SENS].label = "LOOK SENSITIVITY";
-		s_emState.optionsItems[XPOPT_LOOK_SENS].value = (s32)(TFE_InputXbox::getLookSensitivity() * 100.0f + 0.5f);
-		s_emState.optionsItems[XPOPT_LOOK_SENS].minValue = 25;
-		s_emState.optionsItems[XPOPT_LOOK_SENS].maxValue = 250;
-
-		s_emState.optionsItems[XPOPT_STICK_DEADZONE].label = "STICK DEADZONE";
-		s_emState.optionsItems[XPOPT_STICK_DEADZONE].value = (s32)(TFE_InputXbox::getStickDeadzone() * 100.0f + 0.5f);
-		s_emState.optionsItems[XPOPT_STICK_DEADZONE].minValue = 0;
-		s_emState.optionsItems[XPOPT_STICK_DEADZONE].maxValue = 30;
-
-		s_emState.optionsItems[XPOPT_MASTER_VOLUME].label = "MASTER VOLUME";
-		s_emState.optionsItems[XPOPT_MASTER_VOLUME].value = xboxOptionPercent(sound->masterVolume);
-		s_emState.optionsItems[XPOPT_MASTER_VOLUME].minValue = 0;
-		s_emState.optionsItems[XPOPT_MASTER_VOLUME].maxValue = 100;
-
-		s_emState.optionsItems[XPOPT_SFX_VOLUME].label = "SFX VOLUME";
-		s_emState.optionsItems[XPOPT_SFX_VOLUME].value = xboxOptionPercent(sound->soundFxVolume);
-		s_emState.optionsItems[XPOPT_SFX_VOLUME].minValue = 0;
-		s_emState.optionsItems[XPOPT_SFX_VOLUME].maxValue = 100;
-
-		s_emState.optionsItems[XPOPT_MUSIC_VOLUME].label = "MUSIC VOLUME";
-		s_emState.optionsItems[XPOPT_MUSIC_VOLUME].value = xboxOptionPercent(sound->musicVolume);
-		s_emState.optionsItems[XPOPT_MUSIC_VOLUME].minValue = 0;
-		s_emState.optionsItems[XPOPT_MUSIC_VOLUME].maxValue = 100;
-
-		s_emState.optionsItems[XPOPT_CUTSCENE_SFX].label = "CUTSCENE SFX";
-		s_emState.optionsItems[XPOPT_CUTSCENE_SFX].value = xboxOptionPercent(sound->cutsceneSoundFxVolume);
-		s_emState.optionsItems[XPOPT_CUTSCENE_SFX].minValue = 0;
-		s_emState.optionsItems[XPOPT_CUTSCENE_SFX].maxValue = 100;
-
-		s_emState.optionsItems[XPOPT_CUTSCENE_MUSIC].label = "CUTSCENE MUSIC";
-		s_emState.optionsItems[XPOPT_CUTSCENE_MUSIC].value = xboxOptionPercent(sound->cutsceneMusicVolume);
-		s_emState.optionsItems[XPOPT_CUTSCENE_MUSIC].minValue = 0;
-		s_emState.optionsItems[XPOPT_CUTSCENE_MUSIC].maxValue = 100;
-
-		for (s32 i = 0; i < (s32)TFE_ARRAYSIZE(c_xboxPauseBindingOptions); i++)
+		if (s_emState.optionsPage == XPOPAGE_ROOT)
 		{
-			const XboxPauseBindingOption* option = &c_xboxPauseBindingOptions[i];
-			s_emState.optionsItems[option->option].label = option->label;
-			s_emState.optionsItems[option->option].valueText =
-				(s_xboxPauseOptionsCapture && s_emState.optionsSelection == option->option) ? "PRESS BUTTON" : xboxPauseBindingName(option->action);
-			s_emState.optionsItems[option->option].capture = s_xboxPauseOptionsCapture && s_emState.optionsSelection == option->option;
+			xboxSetPauseOptionText(XPROOT_CONTROLS, "CONTROLS", ">");
+			xboxSetPauseOptionText(XPROOT_VIDEO, "VIDEO", ">");
+			xboxSetPauseOptionText(XPROOT_AUDIO, "AUDIO", ">");
 		}
+		else if (s_emState.optionsPage == XPOPAGE_CONTROLS)
+		{
+			xboxSetPauseOptionSlider(XPCTRL_LOOK_SENS_X, "LOOK X SENS", (s32)(TFE_InputXbox::getLookSensitivityX() * 100.0f + 0.5f), 25, 250);
+			xboxSetPauseOptionSlider(XPCTRL_LOOK_SENS_Y, "LOOK Y SENS", (s32)(TFE_InputXbox::getLookSensitivityY() * 100.0f + 0.5f), 25, 250);
+			xboxSetPauseOptionSlider(XPCTRL_RIGHT_STICK_DEADZONE, "RIGHT DEADZONE", (s32)(TFE_InputXbox::getRightStickDeadzone() * 100.0f + 0.5f), 0, 30);
+
+			for (s32 i = 0; i < (s32)TFE_ARRAYSIZE(c_xboxPauseBindingOptions); i++)
+			{
+				const XboxPauseBindingOption* option = &c_xboxPauseBindingOptions[i];
+				if (s_xboxPauseOptionsCapture && s_emState.optionsSelection == option->option)
+				{
+					xboxSetPauseOptionText(option->option, option->label, "PRESS BUTTON");
+					s_emState.optionsItems[option->option].capture = true;
+				}
+				else
+				{
+					xboxSetPauseOptionIcon(option->option, option->label, xboxPauseBindingIcon(option->action));
+				}
+			}
+		}
+		else if (s_emState.optionsPage == XPOPAGE_VIDEO)
+		{
+			xboxSetPauseOptionSlider(XPVID_SAFE_ZONE, "SCREEN SIZE", system->xboxSafeZonePercent, 80, 100);
+			xboxSetPauseOptionSlider(XPVID_SCREEN_X, "H POSITION", system->xboxSafeZoneOffsetX, -40, 40);
+			xboxSetPauseOptionSlider(XPVID_SCREEN_Y, "V POSITION", system->xboxSafeZoneOffsetY, -30, 30);
+		}
+		else if (s_emState.optionsPage == XPOPAGE_AUDIO)
+		{
+			xboxSetPauseOptionSlider(XPAUD_MASTER_VOLUME, "MASTER VOLUME", xboxOptionPercent(sound->masterVolume), 0, 100);
+			xboxSetPauseOptionSlider(XPAUD_SFX_VOLUME, "SFX VOLUME", xboxOptionPercent(sound->soundFxVolume), 0, 100);
+			xboxSetPauseOptionSlider(XPAUD_MUSIC_VOLUME, "MUSIC VOLUME", xboxOptionPercent(sound->musicVolume), 0, 100);
+			xboxSetPauseOptionSlider(XPAUD_CUTSCENE_SFX, "CUTSCENE SFX", xboxOptionPercent(sound->cutsceneSoundFxVolume), 0, 100);
+			xboxSetPauseOptionSlider(XPAUD_CUTSCENE_MUSIC, "CUTSCENE MUSIC", xboxOptionPercent(sound->cutsceneMusicVolume), 0, 100);
+		}
+
+		if (s_emState.optionsSelection >= s_emState.optionsItemCount) s_emState.optionsSelection = s_emState.optionsItemCount > 0 ? s_emState.optionsItemCount - 1 : 0;
+		if (s_emState.optionsSelection < 0) s_emState.optionsSelection = 0;
+		if (s_emState.optionsScroll > s_emState.optionsItemCount - 7) s_emState.optionsScroll = s_emState.optionsItemCount > 7 ? s_emState.optionsItemCount - 7 : 0;
+		if (s_emState.optionsScroll < 0) s_emState.optionsScroll = 0;
 	}
 
 	static void xboxApplyOptionValue(s32 index, s32 value)
 	{
-		if (index < 0 || index >= XPOPT_COUNT) return;
+		if (index < 0 || index >= s_emState.optionsItemCount) return;
 		if (xboxFindPauseBindingOption(index)) return;
 		if (value < s_emState.optionsItems[index].minValue) value = s_emState.optionsItems[index].minValue;
 		if (value > s_emState.optionsItems[index].maxValue) value = s_emState.optionsItems[index].maxValue;
 
 		TFE_Settings_Sound* sound = TFE_Settings::getSoundSettings();
 		TFE_Settings_System* system = TFE_Settings::getSystemSettings();
-		switch (index)
+		if (s_emState.optionsPage == XPOPAGE_CONTROLS)
 		{
-			case XPOPT_LOOK_SENS:
-				system->xboxLookSensitivity = (float)value / 100.0f;
-				TFE_InputXbox::setLookSensitivity(system->xboxLookSensitivity);
-				break;
-			case XPOPT_STICK_DEADZONE:
-				system->xboxStickDeadzone = (float)value / 100.0f;
-				TFE_InputXbox::setStickDeadzone(system->xboxStickDeadzone);
-				break;
-			case XPOPT_MASTER_VOLUME: sound->masterVolume = (float)value / 100.0f; break;
-			case XPOPT_SFX_VOLUME: sound->soundFxVolume = (float)value / 100.0f; break;
-			case XPOPT_MUSIC_VOLUME: sound->musicVolume = (float)value / 100.0f; break;
-			case XPOPT_CUTSCENE_SFX: sound->cutsceneSoundFxVolume = (float)value / 100.0f; break;
-			case XPOPT_CUTSCENE_MUSIC: sound->cutsceneMusicVolume = (float)value / 100.0f; break;
+			switch (index)
+			{
+				case XPCTRL_LOOK_SENS_X: system->xboxLookSensitivityX = (float)value / 100.0f; break;
+				case XPCTRL_LOOK_SENS_Y: system->xboxLookSensitivityY = (float)value / 100.0f; break;
+				case XPCTRL_RIGHT_STICK_DEADZONE: system->xboxRightStickDeadzone = (float)value / 100.0f; break;
+			}
+			xboxApplyPauseControlSettings();
 		}
-		sound = TFE_Settings::getSoundSettings();
-		TFE_MidiPlayer::setVolume(sound->musicVolume * sound->masterVolume);
+		else if (s_emState.optionsPage == XPOPAGE_VIDEO)
+		{
+			switch (index)
+			{
+				case XPVID_SAFE_ZONE: system->xboxSafeZonePercent = value; break;
+				case XPVID_SCREEN_X: system->xboxSafeZoneOffsetX = value; break;
+				case XPVID_SCREEN_Y: system->xboxSafeZoneOffsetY = value; break;
+			}
+			xboxApplyPauseVideoSettings();
+		}
+		else if (s_emState.optionsPage == XPOPAGE_AUDIO)
+		{
+			switch (index)
+			{
+				case XPAUD_MASTER_VOLUME: sound->masterVolume = (float)value / 100.0f; break;
+				case XPAUD_SFX_VOLUME: sound->soundFxVolume = (float)value / 100.0f; break;
+				case XPAUD_MUSIC_VOLUME: sound->musicVolume = (float)value / 100.0f; break;
+				case XPAUD_CUTSCENE_SFX: sound->cutsceneSoundFxVolume = (float)value / 100.0f; break;
+				case XPAUD_CUTSCENE_MUSIC: sound->cutsceneMusicVolume = (float)value / 100.0f; break;
+			}
+			sound = TFE_Settings::getSoundSettings();
+			TFE_MidiPlayer::setVolume(sound->musicVolume * sound->masterVolume);
+		}
 		xboxRefreshOptionsItems();
 	}
 
 	static void xboxOpenOptions()
 	{
+		s_emState.optionsPage = XPOPAGE_ROOT;
 		xboxRefreshOptionsItems();
 		s_emState.optionsOpen = true;
 		s_emState.optionsSelection = 0;
@@ -1240,12 +1501,15 @@ namespace TFE_DarkForces
 		s_emState.optionsStickLeftHeld = s_emState.optionsStickRightHeld = false;
 		s_xboxPauseOptionsCapture = false;
 		TFE_RenderBackend::xboxSetPauseOverlay(false, 0, 0, false);
-		TFE_RenderBackend::xboxSetOptionsScreen(true, true, s_emState.optionsSelection, s_emState.optionsScroll, s_emState.optionsFrame, s_emState.optionsItems, XPOPT_COUNT);
+		TFE_RenderBackend::xboxSetOptionsScreen(true, true, xboxPauseOptionsTitle(),
+			s_emState.optionsSelection, s_emState.optionsScroll, s_emState.optionsFrame,
+			s_emState.optionsItems, s_emState.optionsItemCount);
 	}
 
 	static void xboxCloseOptions()
 	{
 		TFE_Settings::writeToDisk();
+		xboxSaveRuntimeSettings();
 		s_emState.optionsOpen = false;
 		s_xboxPauseOptionsCapture = false;
 		TFE_RenderBackend::xboxSetOptionsScreen(false, true, 0, 0, 0, NULL, 0);
@@ -1254,11 +1518,30 @@ namespace TFE_DarkForces
 	static void xboxMoveOptions(s32 delta)
 	{
 		s_emState.optionsSelection += delta;
-		if (s_emState.optionsSelection < 0) s_emState.optionsSelection = XPOPT_COUNT - 1;
-		if (s_emState.optionsSelection >= XPOPT_COUNT) s_emState.optionsSelection = 0;
+		if (s_emState.optionsSelection < 0) s_emState.optionsSelection = s_emState.optionsItemCount - 1;
+		if (s_emState.optionsSelection >= s_emState.optionsItemCount) s_emState.optionsSelection = 0;
 		if (s_emState.optionsSelection < s_emState.optionsScroll) s_emState.optionsScroll = s_emState.optionsSelection;
 		if (s_emState.optionsSelection >= s_emState.optionsScroll + 7) s_emState.optionsScroll = s_emState.optionsSelection - 6;
 		s_xboxPauseOptionsCapture = false;
+	}
+
+	static void xboxShowOptionsPage(s32 page)
+	{
+		s_emState.optionsPage = page;
+		s_emState.optionsSelection = 0;
+		s_emState.optionsScroll = 0;
+		s_xboxPauseOptionsCapture = false;
+		xboxRefreshOptionsItems();
+		TFE_RenderBackend::xboxSetOptionsScreen(s_emState.optionsOpen, true, xboxPauseOptionsTitle(),
+			s_emState.optionsSelection, s_emState.optionsScroll, s_emState.optionsFrame++,
+			s_emState.optionsItems, s_emState.optionsItemCount);
+	}
+
+	static void xboxRefreshOptionsScreen()
+	{
+		TFE_RenderBackend::xboxSetOptionsScreen(s_emState.optionsOpen, true, xboxPauseOptionsTitle(),
+			s_emState.optionsSelection, s_emState.optionsScroll, s_emState.optionsFrame++,
+			s_emState.optionsItems, s_emState.optionsItemCount);
 	}
 
 	static EscapeMenuAction xboxUpdateOptions()
@@ -1289,7 +1572,7 @@ namespace TFE_DarkForces
 				xboxRefreshOptionsItems();
 			}
 
-			TFE_RenderBackend::xboxSetOptionsScreen(s_emState.optionsOpen, true, s_emState.optionsSelection, s_emState.optionsScroll, s_emState.optionsFrame++, s_emState.optionsItems, XPOPT_COUNT);
+			xboxRefreshOptionsScreen();
 			return ESC_CONTINUE;
 		}
 
@@ -1310,11 +1593,21 @@ namespace TFE_DarkForces
 		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_RIGHT) || (stickRight && !s_emState.optionsStickRightHeld)) delta = 5;
 		s_emState.optionsStickLeftHeld = stickLeft;
 		s_emState.optionsStickRightHeld = stickRight;
-		if (delta) xboxApplyOptionValue(s_emState.optionsSelection, s_emState.optionsItems[s_emState.optionsSelection].value + delta);
+		if (delta && s_emState.optionsPage != XPOPAGE_ROOT)
+		{
+			xboxApplyOptionValue(s_emState.optionsSelection, s_emState.optionsItems[s_emState.optionsSelection].value + delta);
+		}
 
 		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_A))
 		{
-			if (xboxFindPauseBindingOption(s_emState.optionsSelection))
+			if (s_emState.optionsPage == XPOPAGE_ROOT)
+			{
+				if (s_emState.optionsSelection == XPROOT_CONTROLS) xboxShowOptionsPage(XPOPAGE_CONTROLS);
+				else if (s_emState.optionsSelection == XPROOT_VIDEO) xboxShowOptionsPage(XPOPAGE_VIDEO);
+				else if (s_emState.optionsSelection == XPROOT_AUDIO) xboxShowOptionsPage(XPOPAGE_AUDIO);
+				return ESC_CONTINUE;
+			}
+			else if (xboxFindPauseBindingOption(s_emState.optionsSelection))
 			{
 				s_xboxPauseOptionsCapture = true;
 				xboxRefreshOptionsItems();
@@ -1322,15 +1615,21 @@ namespace TFE_DarkForces
 			else
 			{
 				TFE_Settings::writeToDisk();
+				xboxSaveRuntimeSettings();
 			}
 		}
 		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_B) ||
 			inputMapping_getActionState(IADF_MENU_TOGGLE) == STATE_PRESSED)
 		{
+			if (s_emState.optionsPage != XPOPAGE_ROOT)
+			{
+				xboxShowOptionsPage(XPOPAGE_ROOT);
+				return ESC_CONTINUE;
+			}
 			xboxCloseOptions();
 		}
 
-		TFE_RenderBackend::xboxSetOptionsScreen(s_emState.optionsOpen, true, s_emState.optionsSelection, s_emState.optionsScroll, s_emState.optionsFrame++, s_emState.optionsItems, XPOPT_COUNT);
+		xboxRefreshOptionsScreen();
 		return ESC_CONTINUE;
 	}
 

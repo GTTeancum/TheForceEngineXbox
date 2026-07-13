@@ -10,6 +10,12 @@ namespace TFE_InputXbox
     void shutdown();
     void setLookSensitivity(float value);
     float getLookSensitivity();
+    void setLookSensitivityX(float value);
+    void setLookSensitivityY(float value);
+    float getLookSensitivityX();
+    float getLookSensitivityY();
     void setStickDeadzone(float value);
     float getStickDeadzone();
+    void setRightStickDeadzone(float value);
+    float getRightStickDeadzone();
 }

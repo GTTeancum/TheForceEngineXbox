@@ -563,6 +563,12 @@ namespace TFE_Settings
 		writeKeyValue_Bool(settings, "showGifPathConfirmation", s_systemSettings.showGifPathConfirmation);
 		writeKeyValue_Float(settings, "xboxLookSensitivity", s_systemSettings.xboxLookSensitivity);
 		writeKeyValue_Float(settings, "xboxStickDeadzone", s_systemSettings.xboxStickDeadzone);
+		writeKeyValue_Float(settings, "xboxLookSensitivityX", s_systemSettings.xboxLookSensitivityX);
+		writeKeyValue_Float(settings, "xboxLookSensitivityY", s_systemSettings.xboxLookSensitivityY);
+		writeKeyValue_Float(settings, "xboxRightStickDeadzone", s_systemSettings.xboxRightStickDeadzone);
+		writeKeyValue_Int(settings, "xboxSafeZonePercent", s_systemSettings.xboxSafeZonePercent);
+		writeKeyValue_Int(settings, "xboxSafeZoneOffsetX", s_systemSettings.xboxSafeZoneOffsetX);
+		writeKeyValue_Int(settings, "xboxSafeZoneOffsetY", s_systemSettings.xboxSafeZoneOffsetY);
 	}
 
 	void writeA11ySettings(FileStream& settings)
@@ -1083,10 +1089,37 @@ namespace TFE_Settings
 		else if (strcasecmp("xboxLookSensitivity", key) == 0)
 		{
 			s_systemSettings.xboxLookSensitivity = parseFloat(value);
+			s_systemSettings.xboxLookSensitivityX = s_systemSettings.xboxLookSensitivity;
+			s_systemSettings.xboxLookSensitivityY = s_systemSettings.xboxLookSensitivity;
 		}
 		else if (strcasecmp("xboxStickDeadzone", key) == 0)
 		{
 			s_systemSettings.xboxStickDeadzone = parseFloat(value);
+			s_systemSettings.xboxRightStickDeadzone = s_systemSettings.xboxStickDeadzone;
+		}
+		else if (strcasecmp("xboxLookSensitivityX", key) == 0)
+		{
+			s_systemSettings.xboxLookSensitivityX = parseFloat(value);
+		}
+		else if (strcasecmp("xboxLookSensitivityY", key) == 0)
+		{
+			s_systemSettings.xboxLookSensitivityY = parseFloat(value);
+		}
+		else if (strcasecmp("xboxRightStickDeadzone", key) == 0)
+		{
+			s_systemSettings.xboxRightStickDeadzone = parseFloat(value);
+		}
+		else if (strcasecmp("xboxSafeZonePercent", key) == 0)
+		{
+			s_systemSettings.xboxSafeZonePercent = parseInt(value);
+		}
+		else if (strcasecmp("xboxSafeZoneOffsetX", key) == 0)
+		{
+			s_systemSettings.xboxSafeZoneOffsetX = parseInt(value);
+		}
+		else if (strcasecmp("xboxSafeZoneOffsetY", key) == 0)
+		{
+			s_systemSettings.xboxSafeZoneOffsetY = parseInt(value);
 		}
 	}
 	
