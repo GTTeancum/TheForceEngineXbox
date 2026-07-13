@@ -546,11 +546,9 @@ namespace TFE_RenderBackend
         return (wheelTextWidth(text) * num) / den;
     }
 
-    static void wheelDrawTextRawScaled(const char* text, s32 x, s32 baselineY, u32 primary, bool shadow, s32 num, s32 den)
+    static void wheelDrawTextRawScaledTo(u32* dst, s32 width, s32 height, const char* text, s32 x, s32 baselineY, u32 primary, bool shadow, s32 num, s32 den)
     {
-        if (!text || num <= 0 || den <= 0) return;
-        const s32 width = (s32)s_vdispWidth;
-        const s32 height = (s32)s_vdispHeight;
+        if (!dst || !text || num <= 0 || den <= 0) return;
         const s32 ox = shadow ? 1 : 0;
         const s32 oy = shadow ? 1 : 0;
         s32 penX = x + ox;
@@ -580,12 +578,18 @@ namespace TFE_RenderBackend
                     if (!cov) continue;
                     const u32 src = shadow ? XPAUSE_BLACK : primary;
                     const u32 a = shadow ? (u32)(cov * 46) : (u32)(cov * 72);
-                    u32* pixel = s_expandBuf + dy * width + dx;
+                    u32* pixel = dst + dy * width + dx;
                     *pixel = pauseBlend(*pixel | 0xFF000000u, src, (u32)pauseClamp((s32)a, 0, 255));
                 }
             }
             penX += (g->xAdvance * num) / den;
         }
+    }
+
+    static void wheelDrawTextRawScaled(const char* text, s32 x, s32 baselineY, u32 primary, bool shadow, s32 num, s32 den)
+    {
+        wheelDrawTextRawScaledTo(s_expandBuf, (s32)s_vdispWidth, (s32)s_vdispHeight,
+            text, x, baselineY, primary, shadow, num, den);
     }
 
     static void wheelDrawTextScaled(const char* text, s32 x, s32 baselineY, u32 color, s32 num, s32 den)
@@ -594,16 +598,34 @@ namespace TFE_RenderBackend
         wheelDrawTextRawScaled(text, x, baselineY, color, false, num, den);
     }
 
+    static void wheelDrawTextScaledTo(u32* dst, s32 width, s32 height, const char* text, s32 x, s32 baselineY, u32 color, s32 num, s32 den)
+    {
+        wheelDrawTextRawScaledTo(dst, width, height, text, x, baselineY, color, true, num, den);
+        wheelDrawTextRawScaledTo(dst, width, height, text, x, baselineY, color, false, num, den);
+    }
+
     static void wheelDrawTextCenterScaled(const char* text, s32 centerX, s32 baselineY, u32 color, s32 num, s32 den)
     {
         const s32 x = centerX - wheelTextWidthScaled(text, num, den) / 2;
         wheelDrawTextScaled(text, x, baselineY, color, num, den);
     }
 
+    static void wheelDrawTextCenterScaledTo(u32* dst, s32 width, s32 height, const char* text, s32 centerX, s32 baselineY, u32 color, s32 num, s32 den)
+    {
+        const s32 x = centerX - wheelTextWidthScaled(text, num, den) / 2;
+        wheelDrawTextScaledTo(dst, width, height, text, x, baselineY, color, num, den);
+    }
+
     static void wheelDrawTextRightScaled(const char* text, s32 rightX, s32 baselineY, u32 color, s32 num, s32 den)
     {
         const s32 x = rightX - wheelTextWidthScaled(text, num, den);
         wheelDrawTextScaled(text, x, baselineY, color, num, den);
+    }
+
+    static void wheelDrawTextRightScaledTo(u32* dst, s32 width, s32 height, const char* text, s32 rightX, s32 baselineY, u32 color, s32 num, s32 den)
+    {
+        const s32 x = rightX - wheelTextWidthScaled(text, num, den);
+        wheelDrawTextScaledTo(dst, width, height, text, x, baselineY, color, num, den);
     }
 
     static void weaponWheelDrawSegment(s32 index, f32 centerDeg)
@@ -1564,7 +1586,8 @@ namespace TFE_RenderBackend
         if (!text || !text[0]) return;
         if (pauseStyle)
         {
-            wheelDrawTextScaled(text, x, y + 14, color, 2, 3);
+            wheelDrawTextScaledTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+                text, x, y + 14, color, 2, 3);
         }
         else
         {
@@ -1577,7 +1600,8 @@ namespace TFE_RenderBackend
         if (!text || !text[0]) return;
         if (pauseStyle)
         {
-            wheelDrawTextRightScaled(text, rightX, y + 14, color, 2, 3);
+            wheelDrawTextRightScaledTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+                text, rightX, y + 14, color, 2, 3);
         }
         else
         {
@@ -1589,9 +1613,9 @@ namespace TFE_RenderBackend
     {
         const s32 visibleRows = 7;
         const s32 rowH = pauseStyle ? 31 : 36;
-        const s32 labelX = panelX + (pauseStyle ? 28 : 34);
-        const s32 sliderX = panelX + panelW - (pauseStyle ? 182 : 218);
-        const s32 sliderW = pauseStyle ? 104 : 136;
+        const s32 labelX = panelX + (pauseStyle ? 16 : 34);
+        const s32 sliderX = panelX + panelW - (pauseStyle ? 224 : 218);
+        const s32 sliderW = pauseStyle ? 124 : 136;
         const u32 normalText = pauseStyle ? 0xFFC8C8C8u : 0xFF8E8B72u;
         const u32 selectedText = pauseStyle ? XPAUSE_WHITE : 0xFFFF3030u;
 
@@ -1605,14 +1629,16 @@ namespace TFE_RenderBackend
             if (selected)
             {
                 const u32 bar = pauseStyle ? XPAUSE_GREEN_MID : 0xFF24180Eu;
-                pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 12, y - 6, panelW - 24, pauseStyle ? 25 : 30, bar);
+                pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+                    panelX + (pauseStyle ? 0 : 12), y - 6,
+                    panelW - (pauseStyle ? 0 : 24), pauseStyle ? 25 : 30, bar);
             }
 
             optionsDrawTextLabel(s_optionsItems[index].label, labelX, y, selected ? selectedText : normalText, pauseStyle);
             if (s_optionsItems[index].valueText)
             {
                 const u32 valueColor = s_optionsItems[index].capture ? 0xFF33D033u : (selected ? selectedText : normalText);
-                optionsDrawTextRight(s_optionsItems[index].valueText, panelX + panelW - 24, y, valueColor, pauseStyle);
+                optionsDrawTextRight(s_optionsItems[index].valueText, panelX + panelW - (pauseStyle ? 8 : 24), y, valueColor, pauseStyle);
             }
             else if (s_optionsItems[index].hasIcon &&
                      s_optionsItems[index].valueIcon >= 0 &&
@@ -1622,7 +1648,7 @@ namespace TFE_RenderBackend
                 const s32 iconH = pauseStyle ? 20 : 24;
                 const s32 iconW = dukeIconWidthForHeight(icon, iconH);
                 dukeDrawIconTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, icon,
-                    panelX + panelW - 24 - iconW, y - (pauseStyle ? 6 : 8), iconH, 0xFFFFFFFFu);
+                    panelX + panelW - (pauseStyle ? 8 : 24) - iconW, y - (pauseStyle ? 6 : 8), iconH, 0xFFFFFFFFu);
             }
             else
             {
@@ -1630,7 +1656,7 @@ namespace TFE_RenderBackend
 
                 char valueText[16];
                 sprintf(valueText, "%d", s_optionsItems[index].value);
-                optionsDrawTextRight(valueText, panelX + panelW - 24, y, selected ? selectedText : normalText, pauseStyle);
+                optionsDrawTextRight(valueText, panelX + panelW - (pauseStyle ? 8 : 24), y, selected ? selectedText : normalText, pauseStyle);
             }
         }
     }
@@ -1647,18 +1673,14 @@ namespace TFE_RenderBackend
         }
 
         const bool pauseStyle = s_optionsPauseStyle;
-        const s32 panelX = pauseStyle ? 106 : 86;
-        const s32 panelY = pauseStyle ? 54 : 76;
-        const s32 panelW = pauseStyle ? 428 : 468;
-        const s32 panelH = pauseStyle ? 342 : 324;
+        const s32 panelX = pauseStyle ? ((XBOX_OUTPUT_WIDTH - XPAUSE_PANEL_WIDTH) / 2) : 86;
+        const s32 panelY = pauseStyle ? ((XBOX_OUTPUT_HEIGHT - XPAUSE_PANEL_HEIGHT) / 2) : 76;
+        const s32 panelW = pauseStyle ? XPAUSE_PANEL_WIDTH : 468;
+        const s32 panelH = pauseStyle ? XPAUSE_PANEL_HEIGHT : 324;
 
         if (pauseStyle)
         {
-            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 7, panelY + 7, panelW, panelH, 0xD0000000u);
-            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xFF2A2D2Au);
-            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH, 0xFF8B8F86u);
-            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 13, panelY + 17, panelW - 26, panelH - 34, XPAUSE_GREEN_DARK);
-            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX + 13, panelY + 17, panelW - 26, panelH - 34, XPAUSE_GREEN_EDGE);
+            pauseDrawFrame(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, panelX, panelY, panelW, panelH);
         }
         else
         {
@@ -1668,7 +1690,8 @@ namespace TFE_RenderBackend
 
         if (pauseStyle)
         {
-            wheelDrawTextCenter(s_optionsTitle, panelX + panelW / 2, panelY + 42, XPAUSE_WHITE);
+            wheelDrawTextCenterScaledTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+                s_optionsTitle, XBOX_OUTPUT_WIDTH / 2, panelY + 34, XPAUSE_WHITE, 1, 1);
         }
         else
         {
@@ -1676,29 +1699,22 @@ namespace TFE_RenderBackend
                 s_optionsTitle, XBOX_OUTPUT_WIDTH / 2, 38, 3, 0xFFFF3030u);
         }
 
-        optionsDrawRows(panelX + (pauseStyle ? 13 : 0), panelY, panelW - (pauseStyle ? 26 : 0), panelY + (pauseStyle ? 78 : 52), pauseStyle);
+        const s32 rowsX = pauseStyle ? 92 : panelX;
+        const s32 rowsW = pauseStyle ? 456 : panelW;
+        const s32 firstY = pauseStyle ? panelY + 64 : panelY + 52;
+        optionsDrawRows(rowsX, panelY, rowsW, firstY, pauseStyle);
 
         const u32 arrowColor = pauseStyle ? XPAUSE_GREEN_EDGE : 0xFFFF3030u;
         if (s_optionsScroll > 0)
         {
-            optionsDrawTriangle(panelX + panelW - (pauseStyle ? 28 : 18), panelY + (pauseStyle ? 74 : 52), 7, 10, true, arrowColor);
+            optionsDrawTriangle(rowsX + rowsW - (pauseStyle ? 10 : 18), firstY - (pauseStyle ? 18 : 0), 7, 10, true, arrowColor);
         }
         if (s_optionsScroll + 7 < s_optionsItemCount)
         {
-            optionsDrawTriangle(panelX + panelW - (pauseStyle ? 28 : 18), panelY + panelH - (pauseStyle ? 52 : 32), 7, 10, false, arrowColor);
+            optionsDrawTriangle(rowsX + rowsW - (pauseStyle ? 10 : 18), panelY + panelH - (pauseStyle ? 37 : 32), 7, 10, false, arrowColor);
         }
 
-        if (pauseStyle)
-        {
-            const s32 hintY = panelY + panelH - 31;
-            dukeDrawIcon(XDB_A, panelX + 28, hintY - 5, 16);
-            wheelDrawTextScaled("APPLY", panelX + 50, hintY + 8, 0xFF33D033u, 2, 3);
-            dukeDrawIcon(XDB_B, panelX + 128, hintY - 5, 16);
-            wheelDrawTextScaled("BACK", panelX + 150, hintY + 8, 0xFFFF3030u, 2, 3);
-            dukeDrawIcon(XDB_DPAD, panelX + 214, hintY - 6, 17);
-            wheelDrawTextScaled("ADJUST", panelX + 240, hintY + 8, 0xFFC8C8C8u, 2, 3);
-        }
-        else
+        if (!pauseStyle)
         {
             footerDrawBar(0xFF3C2E10u);
             footerDrawItem(XFT_A_APPLY, 28, 0xFF33D033u);

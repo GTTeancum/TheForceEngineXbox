@@ -2533,6 +2533,11 @@ static void applyOptionValue(s32 index, s32 value)
     refreshOptionsItems();
 }
 
+static s32 optionAdjustStep()
+{
+    return (s_optionsPage == XOPAGE_VIDEO) ? 1 : 5;
+}
+
 static void optionsMove(s32 delta)
 {
     s_optionsSelection += delta;
@@ -2639,8 +2644,9 @@ static void updateOptionsMenu()
     s_optionsStickDownHeld = stickDown;
 
     s32 delta = 0;
-    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_LEFT) || (stickLeft && !s_optionsStickLeftHeld)) delta = -5;
-    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_RIGHT) || (stickRight && !s_optionsStickRightHeld)) delta = 5;
+    const s32 adjustStep = optionAdjustStep();
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_LEFT) || (stickLeft && !s_optionsStickLeftHeld)) delta = -adjustStep;
+    if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_RIGHT) || (stickRight && !s_optionsStickRightHeld)) delta = adjustStep;
     s_optionsStickLeftHeld = stickLeft;
     s_optionsStickRightHeld = stickRight;
     if (delta) applyOptionValue(s_optionsSelection, s_optionsItems[s_optionsSelection].value + delta);

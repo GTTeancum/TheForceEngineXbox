@@ -1497,6 +1497,11 @@ namespace TFE_DarkForces
 		xboxRefreshOptionsItems();
 	}
 
+	static s32 xboxOptionAdjustStep()
+	{
+		return (s_emState.optionsPage == XPOPAGE_VIDEO) ? 1 : 5;
+	}
+
 	static void xboxOpenOptions()
 	{
 		s_emState.optionsPage = XPOPAGE_ROOT;
@@ -1596,8 +1601,9 @@ namespace TFE_DarkForces
 		s_emState.optionsStickDownHeld = stickDown;
 
 		s32 delta = 0;
-		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_LEFT) || (stickLeft && !s_emState.optionsStickLeftHeld)) delta = -5;
-		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_RIGHT) || (stickRight && !s_emState.optionsStickRightHeld)) delta = 5;
+		const s32 adjustStep = xboxOptionAdjustStep();
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_LEFT) || (stickLeft && !s_emState.optionsStickLeftHeld)) delta = -adjustStep;
+		if (TFE_Input::buttonPressed(CONTROLLER_BUTTON_DPAD_RIGHT) || (stickRight && !s_emState.optionsStickRightHeld)) delta = adjustStep;
 		s_emState.optionsStickLeftHeld = stickLeft;
 		s_emState.optionsStickRightHeld = stickRight;
 		if (delta && s_emState.optionsPage != XPOPAGE_ROOT)
