@@ -1654,6 +1654,8 @@ namespace TFE_RenderBackend
         s32 visibleRows;
     };
 
+    static const s32 OPTIONS_SCROLL_ARROW_H = 10;
+
     static s32 optionsEven(s32 value)
     {
         return value & ~1;
@@ -1691,7 +1693,7 @@ namespace TFE_RenderBackend
             layout->firstRowCenterY = layout->screenY + layout->screenH / 4 + layout->rowH / 2;
             layout->arrowX = layout->screenX + layout->screenW - sideInset / 2;
             layout->arrowUpY = layout->firstRowCenterY - layout->rowH;
-            layout->arrowDownY = layout->screenY + layout->screenH - layout->rowH / 2;
+            layout->arrowDownY = layout->firstRowCenterY + (layout->visibleRows - 1) * layout->rowH - OPTIONS_SCROLL_ARROW_H / 2;
         }
         else
         {
@@ -1854,11 +1856,11 @@ namespace TFE_RenderBackend
         const u32 arrowColor = pauseStyle ? XPAUSE_GREEN_EDGE : 0xFFFF3030u;
         if (s_optionsScroll > 0)
         {
-            optionsDrawTriangle(layout.arrowX, layout.arrowUpY, 7, 10, true, arrowColor);
+            optionsDrawTriangle(layout.arrowX, layout.arrowUpY, 7, OPTIONS_SCROLL_ARROW_H, true, arrowColor);
         }
         if (s_optionsScroll + 7 < s_optionsItemCount)
         {
-            optionsDrawTriangle(layout.arrowX, layout.arrowDownY, 7, 10, false, arrowColor);
+            optionsDrawTriangle(layout.arrowX, layout.arrowDownY, 7, OPTIONS_SCROLL_ARROW_H, false, arrowColor);
         }
 
         if (!pauseStyle)
