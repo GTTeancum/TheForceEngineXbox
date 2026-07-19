@@ -2341,6 +2341,8 @@ static void xboxApplyVideoModeToSettings()
     u32 outputH = 480u;
     u32 displayW = 640u;
     u32 displayH = 480u;
+    u32 renderW = 640u;
+    u32 renderH = 480u;
     bool widescreen = false;
     bool progressive = false;
 
@@ -2350,6 +2352,8 @@ static void xboxApplyVideoModeToSettings()
         outputH = 720u;
         displayW = 1280u;
         displayH = 720u;
+        renderW = 856u;
+        renderH = 480u;
         widescreen = true;
         progressive = true;
     }
@@ -2359,6 +2363,8 @@ static void xboxApplyVideoModeToSettings()
         outputH = 480u;
         displayW = 856u;
         displayH = 480u;
+        renderW = 856u;
+        renderH = 480u;
         widescreen = true;
         progressive = true;
     }
@@ -2367,8 +2373,8 @@ static void xboxApplyVideoModeToSettings()
     windowSettings->width = outputW;
     windowSettings->height = outputH;
 
-    graphics->gameResolution.x = outputW;
-    graphics->gameResolution.z = outputH;
+    graphics->gameResolution.x = renderW;
+    graphics->gameResolution.z = renderH;
     graphics->widescreen = widescreen;
     graphics->rendererIndex = 0;        // RENDERER_SOFTWARE
     graphics->colorMode = (ColorMode)0; // COLORMODE_8BIT
@@ -2377,10 +2383,10 @@ static void xboxApplyVideoModeToSettings()
 
     TFE_RenderBackend::xboxSetVideoMode(outputW, outputH, displayW, displayH, widescreen, progressive);
     TFE_System::logWrite(LOG_MSG, "Video",
-        "Xbox video selected: requested=%s marker=%d selected=%s avPack=%lu flags=0x%08lx dashWide=%d can480p=%d can720p=%d output=%ux%u display=%ux%u progressive=%d",
+        "Xbox video selected: requested=%s marker=%d selected=%s avPack=%lu flags=0x%08lx dashWide=%d can480p=%d can720p=%d output=%ux%u display=%ux%u render=%ux%u progressive=%d",
         xboxVideoModeName(system->xboxVideoMode), markerMode, xboxVideoModeName(selectedMode),
         avPack, videoFlags, dashWidescreen ? 1 : 0, can480p ? 1 : 0, can720p ? 1 : 0,
-        outputW, outputH, displayW, displayH, progressive ? 1 : 0);
+        outputW, outputH, displayW, displayH, renderW, renderH, progressive ? 1 : 0);
 }
 
 static const XboxBindingOption* findXboxBindingOption(s32 option)
