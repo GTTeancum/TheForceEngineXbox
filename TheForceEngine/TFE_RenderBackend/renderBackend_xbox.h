@@ -183,6 +183,8 @@ namespace TFE_RenderBackend
     {
         xboxSetOptionsScreen(enabled, pauseStyle, "OPTIONS", selection, scroll, frame, items, itemCount);
     }
+    void xboxCaptureScreenToMemoryScaled(u32* mem, u32 outWidth, u32 outHeight);
+    void xboxSetVideoMode(u32 outputWidth, u32 outputHeight, u32 displayWidth, u32 displayHeight, bool widescreen, bool progressive);
     void xboxSetSafeZone(s32 widthPercent, s32 heightPercent, s32 offsetX, s32 offsetY);
     void xboxSetCheatScreen(bool enabled, s32 selection, s32 scroll, const XboxCheatItem* items, s32 itemCount);
     void xboxSetPdaOverlay(bool enabled, s32 mode, s32 layer = 0);

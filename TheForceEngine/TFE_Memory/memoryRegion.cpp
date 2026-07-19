@@ -837,12 +837,12 @@ namespace TFE_Memory
 		MemoryBlock* newBlock = (MemoryBlock*)malloc(sizeof(MemoryBlock) + region->blockSize);
 		if (!newBlock)
 		{
-			TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Failed to allocate block of size %u in region '%s'.", region->blockSize, region->name);
+			TFE_System::logWrite(LOG_ERROR, "MemoryRegion", "Failed to allocate block of size %u in region '%s'.", (u32)region->blockSize, region->name);
 			return false;
 		}
 		region->memBlocks[blockIndex] = newBlock;
 		region->blockCount++;
-		TFE_System::logWrite(LOG_MSG, "MemoryRegion", "Allocated new memory block in region '%s' - new size is %u blocks, total size is '%u'", region->name, region->blockCount, region->blockSize * region->blockCount);
+		TFE_System::logWrite(LOG_MSG, "MemoryRegion", "Allocated new memory block in region '%s' - new size is %u blocks, total size is '%u'", region->name, (u32)region->blockCount, (u32)(region->blockSize * region->blockCount));
 
 		MemoryBlock* block = region->memBlocks[blockIndex];
 		block->sizeFree = u32(region->blockSize);

@@ -11,7 +11,7 @@
 enum GameConstants
 {
 #ifdef _XBOX
-	GAME_MEMORY_BASE  = 1024 * 1024, // 1 MB chunks; OG Xbox cannot afford 8 MB growth slabs.
+	GAME_MEMORY_BASE  = 2 * 1024 * 1024, // 2 MB chunks; 720p classic renderer tables exceed 1 MB each.
 	LEVEL_MEMORY_BASE = 1024 * 1024, // Large enough for known level/HUD allocations, small enough to grow safely.
 	RES_MEMORY_BASE   = 1024 * 1024,
 #else
@@ -106,25 +106,14 @@ void game_resetLevelRegion(const char* context)
 	TFE_System::logWrite(LOG_MSG, "Game", "resetLevelRegion begin context='%s'", context ? context : "");
 	logRegionState("resetLevelRegion before");
 
-	MemoryRegion* oldRegion = s_levelRegion;
-	MemoryRegion* newRegion = region_create("level", LEVEL_MEMORY_BASE);
-	if (newRegion)
+	if (s_levelRegion)
 	{
-		if (oldRegion)
-		{
-			region_destroy(oldRegion);
-		}
-		s_levelRegion = newRegion;
+		region_clear(s_levelRegion);
 	}
 	else
 	{
-		s_levelRegion = oldRegion;
-		if (s_levelRegion)
-		{
-			TFE_System::logWrite(LOG_WARNING, "Game", "resetLevelRegion could not preallocate replacement; keeping old region");
-			region_clear(s_levelRegion);
-		}
-		else
+		s_levelRegion = region_create("level", LEVEL_MEMORY_BASE);
+		if (!s_levelRegion)
 		{
 			TFE_System::logWrite(LOG_ERROR, "Game", "resetLevelRegion failed with no existing level region");
 		}

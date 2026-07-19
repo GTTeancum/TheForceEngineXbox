@@ -7,9 +7,8 @@
 //   framebuffer is still updated each frame for HUD, weapon, messages, and
 //   menu overlays; swap() alpha-tests that overlay on top of the D3D8 scene.
 //
-// 720p is the fixed output resolution. The Xbox dashboard is expected
-// to have widescreen enabled in system settings; we do not force AV pack
-// settings here.
+// 640x480 is the always-supported baseline. Optional widescreen/HD modes are
+// selected before D3D init from Xbox settings plus dashboard/EEPROM flags.
 
 #include <TFE_RenderBackend/renderBackend.h>
 #include <TFE_RenderBackend/renderBackend_xbox.h>
@@ -37,16 +36,31 @@
 #include <TFE_RenderBackend/xboxWheelFont.inc>
 #include <TFE_RenderBackend/xboxPdaFrame.inc>
 
+#ifndef D3DPRESENTFLAG_PROGRESSIVE
+#define D3DPRESENTFLAG_PROGRESSIVE 0x00000004
+#endif
+#ifndef D3DPRESENTFLAG_WIDESCREEN
+#define D3DPRESENTFLAG_WIDESCREEN  0x00000010
+#endif
+#ifndef D3DPRESENTFLAG_INTERLACED
+#define D3DPRESENTFLAG_INTERLACED  0x00000002
+#endif
+
 // ---------------------------------------------------------------------------
-// Output resolution
+// Output resolution.
 //
-// xquake (xbox/private/test/games/xquake/gl_fakegl.cpp:91-92) ships with
-// 640x480 on Xbox. This is the always-supported NTSC mode, works on every
-// dashboard config, and is what we match 1:1 for the initial port. 720p is
-// a future enhancement after baseline rendering is confirmed.
+// 640x480 remains the always-supported baseline. Widescreen on Xbox is
+// normally an anamorphic 480-line signal: the physical back buffer stays
+// 640x480, D3D gets the WIDESCREEN present flag, and the engine is told about
+// a wider logical display so gameplay renders into a wider virtual display.
+// 1280x720 is kept as an explicit experiment for XEMU / HDTV-capable configs.
 // ---------------------------------------------------------------------------
-#define XBOX_OUTPUT_WIDTH   640
-#define XBOX_OUTPUT_HEIGHT  480
+#define XBOX_OUTPUT_DEFAULT_WIDTH    640u
+#define XBOX_OUTPUT_DEFAULT_HEIGHT   480u
+#define XBOX_OUTPUT_MAX_WIDTH        1280u
+#define XBOX_OUTPUT_MAX_HEIGHT       720u
+#define XBOX_DISPLAY_480WIDE_WIDTH   856u
+#define XBOX_DISPLAY_480WIDE_HEIGHT  480u
 
 // ---------------------------------------------------------------------------
 // Log shim - VC71 doesn't support variadic macros. Inline variadic functions
@@ -83,6 +97,16 @@ namespace TFE_RenderBackend
     static bool               s_vdispHasAlpha = false;
     static u32                s_vdispTexWidth = 0;
     static u32                s_vdispTexHeight = 0;
+
+    static u32  s_outputWidth = XBOX_OUTPUT_DEFAULT_WIDTH;
+    static u32  s_outputHeight = XBOX_OUTPUT_DEFAULT_HEIGHT;
+    static u32  s_displayInfoWidth = XBOX_OUTPUT_DEFAULT_WIDTH;
+    static u32  s_displayInfoHeight = XBOX_OUTPUT_DEFAULT_HEIGHT;
+    static bool s_outputWidescreen = false;
+    static bool s_outputProgressive = false;
+
+#define XBOX_OUTPUT_WIDTH  s_outputWidth
+#define XBOX_OUTPUT_HEIGHT s_outputHeight
 
     static u32 s_vdispWidth  = 320;
     static u32 s_vdispHeight = 200;
@@ -139,14 +163,11 @@ namespace TFE_RenderBackend
     static s32  s_safeZoneOffsetY = 0;
 
     // Scratch expand buffer (palette -> XRGB).
-    // Xbox virtual displays are capped to the fixed 640x480 output. Keeping
-    // these at the old "safe" 1280x960 size reserved almost 10 MB across the
-    // expand/capture buffers, which starves retail hardware before Landru can
-    // allocate a display texture for the boot intro.
-    #define MAX_VDISP_PIXELS (XBOX_OUTPUT_WIDTH * XBOX_OUTPUT_HEIGHT)
+    // The normal Xbox path stays at 640x480 (or 856x480 for anamorphic
+    // widescreen), but the XEMU HDTV experiment can request 1280x720. Cap the
+    // static buffers there instead of the old 1280x960 reservation.
+    #define MAX_VDISP_PIXELS (XBOX_OUTPUT_MAX_WIDTH * XBOX_OUTPUT_MAX_HEIGHT)
     static u32 s_expandBuf[MAX_VDISP_PIXELS];
-    static u32 s_captureBuf[MAX_VDISP_PIXELS];
-    static bool s_captureBufValid = false;
 
     static bool s_pauseOverlayEnabled = false;
     static s32  s_pauseSelection = 0;
@@ -2042,14 +2063,77 @@ namespace TFE_RenderBackend
         setViewportRect(s_destRect);
     }
 
+    static DWORD xboxPresentFlags()
+    {
+        DWORD flags = 0;
+        if (s_outputWidescreen) flags |= D3DPRESENTFLAG_WIDESCREEN;
+        flags |= s_outputProgressive ? D3DPRESENTFLAG_PROGRESSIVE : D3DPRESENTFLAG_INTERLACED;
+        return flags;
+    }
+
+    static void xboxFillPresentParameters(D3DPRESENT_PARAMETERS* pp)
+    {
+        memset(pp, 0, sizeof(D3DPRESENT_PARAMETERS));
+        pp->BackBufferWidth              = XBOX_OUTPUT_WIDTH;
+        pp->BackBufferHeight             = XBOX_OUTPUT_HEIGHT;
+        pp->BackBufferFormat             = D3DFMT_X8R8G8B8;
+        pp->BackBufferCount              = 1;
+        pp->Windowed                     = FALSE;       // must be FALSE on Xbox
+        pp->EnableAutoDepthStencil       = TRUE;
+        pp->AutoDepthStencilFormat       = D3DFMT_D24S8;
+        pp->SwapEffect                   = D3DSWAPEFFECT_COPY;
+        pp->FullScreen_RefreshRateInHz   = 60;
+        pp->hDeviceWindow                = NULL;
+        pp->FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+        pp->Flags                        = xboxPresentFlags();
+    }
+
+    void xboxSetVideoMode(u32 outputWidth, u32 outputHeight, u32 displayWidth, u32 displayHeight, bool widescreen, bool progressive)
+    {
+        if (s_deviceReady)
+        {
+            TFE_XboxLogf("Video", "xboxSetVideoMode ignored after device init");
+            return;
+        }
+
+        if (outputWidth < 320u || outputHeight < 200u ||
+            outputWidth > XBOX_OUTPUT_MAX_WIDTH || outputHeight > XBOX_OUTPUT_MAX_HEIGHT)
+        {
+            outputWidth = XBOX_OUTPUT_DEFAULT_WIDTH;
+            outputHeight = XBOX_OUTPUT_DEFAULT_HEIGHT;
+        }
+        if (displayWidth < 320u || displayHeight < 200u ||
+            displayWidth > XBOX_OUTPUT_MAX_WIDTH || displayHeight > XBOX_OUTPUT_MAX_HEIGHT)
+        {
+            displayWidth = outputWidth;
+            displayHeight = outputHeight;
+        }
+
+        s_outputWidth = outputWidth;
+        s_outputHeight = outputHeight;
+        s_displayInfoWidth = displayWidth;
+        s_displayInfoHeight = displayHeight;
+        s_outputWidescreen = widescreen;
+        s_outputProgressive = progressive;
+        computeDestRect();
+
+        TFE_XboxLogf("Video", "prepared output=%ux%u display=%ux%u widescreen=%d progressive=%d flags=0x%08x",
+            s_outputWidth, s_outputHeight, s_displayInfoWidth, s_displayInfoHeight,
+            s_outputWidescreen ? 1 : 0, s_outputProgressive ? 1 : 0, xboxPresentFlags());
+    }
+
     // -----------------------------------------------------------------------
     // Create / recreate the virtual display texture.
     // -----------------------------------------------------------------------
     static bool createVdispTexture(u32 width, u32 height)
     {
         const bool needsAlpha = s_vdispGpuMode;
-        const u32 texWidth = XBOX_OUTPUT_WIDTH;
-        const u32 texHeight = XBOX_OUTPUT_HEIGHT;
+        u32 texWidth = XBOX_OUTPUT_WIDTH;
+        u32 texHeight = XBOX_OUTPUT_HEIGHT;
+        if (width > texWidth) texWidth = width;
+        if (height > texHeight) texHeight = height;
+        if (texWidth > XBOX_OUTPUT_MAX_WIDTH) texWidth = XBOX_OUTPUT_MAX_WIDTH;
+        if (texHeight > XBOX_OUTPUT_MAX_HEIGHT) texHeight = XBOX_OUTPUT_MAX_HEIGHT;
 
         if (width > texWidth || height > texHeight)
         {
@@ -2082,8 +2166,9 @@ namespace TFE_RenderBackend
         // XbConvert.cpp:1105-1132 confirms swizzled vs linear classification.
         // Non-power-of-2 dimensions like 320x200 force linear in any case;
         // making it explicit removes ambiguity.)
-        // Allocate a full 640x480 backing texture once and reuse top-left
-        // logical subrects for 320x200 Landru and 640x480 menus/gameplay.
+        // Allocate a backing texture large enough for the selected logical
+        // display once, then reuse top-left subrects for Landru, menus, and
+        // gameplay.
         // This avoids late texture allocation after Landru/game arenas have
         // fragmented memory. Prefer alpha so the later GPU HUD overlay path
         // can also reuse the same surface.
@@ -2165,39 +2250,16 @@ namespace TFE_RenderBackend
             return false;
         }
 
-        // Match xquake gl_fakegl.cpp InitD3DX() 1:1 for the Xbox path.
-        // Notably: EnableAutoDepthStencil = TRUE with D3DFMT_D24S8, and
-        // CreateDevice flag set is HARDWARE_VERTEXPROCESSING | PUREDEVICE.
-        // These are what xquake ships with on retail and what we adopt.
+        // Keep the existing Xbox D3D8 setup, then vary only the present mode
+        // fields needed for widescreen / HDTV experiments.
         D3DPRESENT_PARAMETERS pp;
-        memset(&pp, 0, sizeof(pp));
-        pp.BackBufferWidth              = XBOX_OUTPUT_WIDTH;
-        pp.BackBufferHeight             = XBOX_OUTPUT_HEIGHT;
-        pp.BackBufferFormat             = D3DFMT_X8R8G8B8;
-        pp.BackBufferCount              = 1;
-        pp.Windowed                     = FALSE;       // must be FALSE on Xbox
-        pp.EnableAutoDepthStencil       = TRUE;
-        pp.AutoDepthStencilFormat       = D3DFMT_D24S8;
-        // D3DSWAPEFFECT_COPY (not DISCARD) so the back buffer retains
-        // the just-presented frame after Present(). Upstream's escape-
-        // menu capture path is:
-        //   TFE_RenderBackend::swap(true);   // present current world
-        //   TFE_RenderBackend::copyBackbufferToRenderTarget(rt);
-        // The copy-after-swap only works if Present preserves back
-        // buffer contents. With DISCARD the back buffer is undefined
-        // after Present and the captured RT comes out black.
-        // COPY costs an extra back-to-front blit per frame; on NV2A
-        // at 640x480 that's ~1.2MB of fast video memory bandwidth -
-        // negligible compared to the world render cost.
-        pp.SwapEffect                   = D3DSWAPEFFECT_COPY;
-        pp.FullScreen_RefreshRateInHz   = 60;
-        pp.hDeviceWindow                = NULL;
-        pp.FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+        xboxFillPresentParameters(&pp);
 
-        // xquake hardcodes IMMEDIATE on Xbox. Record the requested vsync
-        // intent for reporting; we don't toggle the device's actual interval.
+        // Record the requested vsync intent for reporting; the Xbox backend
+        // keeps its present interval fixed here.
         s_vsync = (state.flags & WINFLAG_VSYNC) != 0;
-        TFE_XboxLogf("RenderBackend", "present interval=immediate (xquake match)");
+        TFE_XboxLogf("RenderBackend", "present interval=immediate flags=0x%08x output=%ux%u display=%ux%u",
+            pp.Flags, s_outputWidth, s_outputHeight, s_displayInfoWidth, s_displayInfoHeight);
 
         HRESULT hr = s_d3d->CreateDevice(
             D3DADAPTER_DEFAULT,
@@ -2207,6 +2269,31 @@ namespace TFE_RenderBackend
             &pp,
             &s_device);
         TFE_XboxLogf("RenderBackend", "CreateDevice hr=0x%08x dev=%p", hr, s_device);
+
+        if (FAILED(hr) &&
+            (s_outputWidth != XBOX_OUTPUT_DEFAULT_WIDTH ||
+             s_outputHeight != XBOX_OUTPUT_DEFAULT_HEIGHT ||
+             s_outputWidescreen || s_outputProgressive))
+        {
+            RB_LOG_ERROR("CreateDevice failed for requested output=%ux%u display=%ux%u flags=0x%08x hr=0x%08x; retrying 640x480 interlaced",
+                s_outputWidth, s_outputHeight, s_displayInfoWidth, s_displayInfoHeight, pp.Flags, hr);
+            if (s_device)
+            {
+                s_device->Release();
+                s_device = NULL;
+            }
+            xboxSetVideoMode(XBOX_OUTPUT_DEFAULT_WIDTH, XBOX_OUTPUT_DEFAULT_HEIGHT,
+                XBOX_OUTPUT_DEFAULT_WIDTH, XBOX_OUTPUT_DEFAULT_HEIGHT, false, false);
+            xboxFillPresentParameters(&pp);
+            hr = s_d3d->CreateDevice(
+                D3DADAPTER_DEFAULT,
+                D3DDEVTYPE_HAL,
+                0,
+                D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE,
+                &pp,
+                &s_device);
+            TFE_XboxLogf("RenderBackend", "CreateDevice fallback hr=0x%08x dev=%p", hr, s_device);
+        }
 
         if (FAILED(hr))
         {
@@ -2240,11 +2327,18 @@ namespace TFE_RenderBackend
 
         computeDestRect();
         s_deviceReady = true;
-        if (!createVdispTexture(XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT))
         {
-            RB_LOG_ERROR("Virtual display prewarm failed");
+            u32 prewarmW = XBOX_OUTPUT_WIDTH;
+            u32 prewarmH = XBOX_OUTPUT_HEIGHT;
+            if (s_displayInfoWidth > prewarmW) prewarmW = s_displayInfoWidth;
+            if (s_displayInfoHeight > prewarmH) prewarmH = s_displayInfoHeight;
+            if (!createVdispTexture(prewarmW, prewarmH))
+            {
+                RB_LOG_ERROR("Virtual display prewarm failed");
+            }
         }
-        RB_LOG_MSG("D3D8 device created. Output: %dx%d", XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT);
+        RB_LOG_MSG("D3D8 device created. Output: %dx%d display=%dx%d flags=0x%08x",
+            XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_displayInfoWidth, s_displayInfoHeight, xboxPresentFlags());
         TFE_XboxLogf("RenderBackend", "device ready dest=%ld,%ld,%ld,%ld",
             s_destRect.left, s_destRect.top, s_destRect.right, s_destRect.bottom);
         return true;
@@ -2353,9 +2447,6 @@ namespace TFE_RenderBackend
             s_expandBuf[i] = (idx == 0) ? 0u
                 : ((s_paletteCpu[idx] & 0x00FFFFFFu) | 0xFF000000u);
         }
-
-        memcpy(s_captureBuf, s_expandBuf, pixels * sizeof(u32));
-        s_captureBufValid = true;
 
         pauseCompositeOverlay();
         briefingCompositeFooter();
@@ -2755,8 +2846,8 @@ namespace TFE_RenderBackend
     void getDisplayInfo(DisplayInfo* displayInfo)
     {
         if (!displayInfo) return;
-        displayInfo->width       = XBOX_OUTPUT_WIDTH;
-        displayInfo->height      = XBOX_OUTPUT_HEIGHT;
+        displayInfo->width       = s_displayInfoWidth;
+        displayInfo->height      = s_displayInfoHeight;
         displayInfo->refreshRate = s_vsync ? 60.0f : 0.0f;
     }
 
@@ -2935,7 +3026,7 @@ namespace TFE_RenderBackend
         if (!mem) return;
         const u32 outW = XBOX_OUTPUT_WIDTH;
         const u32 outH = XBOX_OUTPUT_HEIGHT;
-        const u32* srcBuf = s_captureBufValid ? s_captureBuf : s_expandBuf;
+        const u32* srcBuf = s_expandBuf;
         if (s_vdispWidth == outW && s_vdispHeight == outH)
         {
             memcpy(mem, srcBuf, outW * outH * sizeof(u32));
@@ -2948,6 +3039,24 @@ namespace TFE_RenderBackend
             {
                 const u32 sx = s_vdispWidth ? (x * s_vdispWidth) / outW : 0;
                 mem[y * outW + x] = srcBuf[sy * s_vdispWidth + sx] | 0xFF000000u;
+            }
+        }
+    }
+    void xboxCaptureScreenToMemoryScaled(u32* mem, u32 outWidth, u32 outHeight)
+    {
+        if (!mem || !outWidth || !outHeight) return;
+        if (!s_vdispWidth || !s_vdispHeight)
+        {
+            memset(mem, 0, outWidth * outHeight * sizeof(u32));
+            return;
+        }
+        for (u32 y = 0; y < outHeight; y++)
+        {
+            const u32 sy = (y * s_vdispHeight) / outHeight;
+            for (u32 x = 0; x < outWidth; x++)
+            {
+                const u32 sx = (x * s_vdispWidth) / outWidth;
+                mem[y * outWidth + x] = s_expandBuf[sy * s_vdispWidth + sx] | 0xFF000000u;
             }
         }
     }

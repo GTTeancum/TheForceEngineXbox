@@ -217,11 +217,21 @@ namespace TFE_DarkForces
 
 	enum XboxPauseVideoOptionIndex
 	{
-		XPVID_SAFE_ZONE_WIDTH = 0,
+		XPVID_ASPECT_OUTPUT = 0,
+		XPVID_SAFE_ZONE_WIDTH,
 		XPVID_SAFE_ZONE_HEIGHT,
 		XPVID_SCREEN_X,
 		XPVID_SCREEN_Y,
 		XPVID_COUNT
+	};
+
+	enum XboxPauseVideoMode
+	{
+		XP_VIDEO_AUTO = 0,
+		XP_VIDEO_4X3,
+		XP_VIDEO_480P_WIDE,
+		XP_VIDEO_720P_WIDE,
+		XP_VIDEO_COUNT
 	};
 
 	enum XboxPauseAudioOptionIndex
@@ -1160,9 +1170,29 @@ namespace TFE_DarkForces
 		return value;
 	}
 
+	static const char* xboxPauseVideoModeName(s32 mode)
+	{
+		switch (mode)
+		{
+			case XP_VIDEO_4X3: return "4:3";
+			case XP_VIDEO_480P_WIDE: return "480P WIDE";
+			case XP_VIDEO_720P_WIDE: return "720P WIDE";
+			default: return "AUTO";
+		}
+	}
+
 	static void xboxPauseRuntimeSettingsPath(char* path, size_t pathSize)
 	{
-		snprintf(path, pathSize, "%sSaves\\xbox_settings.cfg", TFE_Paths::getPath(PATH_PROGRAM));
+		if (path && pathSize) path[0] = 0;
+		if (TFE_SaveSystem::xboxGetSaveDirectory(Game_Dark_Forces, path, (u32)pathSize))
+		{
+			size_t len = strlen(path);
+			if (len < pathSize)
+			{
+				snprintf(path + len, pathSize - len, "xbox_settings.cfg");
+				return;
+			}
+		}
 	}
 
 	static void xboxApplyPauseVideoSettings()
@@ -1173,6 +1203,7 @@ namespace TFE_DarkForces
 		system->xboxSafeZonePercent = (system->xboxSafeZoneWidthPercent + system->xboxSafeZoneHeightPercent) / 2;
 		system->xboxSafeZoneOffsetX = xboxClampS32(system->xboxSafeZoneOffsetX, -40, 40);
 		system->xboxSafeZoneOffsetY = xboxClampS32(system->xboxSafeZoneOffsetY, -30, 30);
+		system->xboxVideoMode = xboxClampS32(system->xboxVideoMode, XP_VIDEO_AUTO, XP_VIDEO_COUNT - 1);
 		TFE_RenderBackend::xboxSetSafeZone(system->xboxSafeZoneWidthPercent,
 			system->xboxSafeZoneHeightPercent,
 			system->xboxSafeZoneOffsetX, system->xboxSafeZoneOffsetY);
@@ -1193,10 +1224,6 @@ namespace TFE_DarkForces
 
 	static bool xboxSaveRuntimeSettings()
 	{
-		char savesDir[TFE_MAX_PATH];
-		snprintf(savesDir, TFE_MAX_PATH, "%sSaves\\", TFE_Paths::getPath(PATH_PROGRAM));
-		FileUtil::makeDirectory(savesDir);
-
 		char path[TFE_MAX_PATH];
 		xboxPauseRuntimeSettingsPath(path, sizeof(path));
 		FileStream file;
@@ -1216,6 +1243,7 @@ namespace TFE_DarkForces
 		file.writeString("xboxSafeZoneHeightPercent=%d\r\n", system->xboxSafeZoneHeightPercent);
 		file.writeString("xboxSafeZoneOffsetX=%d\r\n", system->xboxSafeZoneOffsetX);
 		file.writeString("xboxSafeZoneOffsetY=%d\r\n", system->xboxSafeZoneOffsetY);
+		file.writeString("xboxVideoMode=%d\r\n", system->xboxVideoMode);
 		file.writeString("masterVolumePct=%d\r\n", xboxOptionPercent(sound->masterVolume));
 		file.writeString("soundFxVolumePct=%d\r\n", xboxOptionPercent(sound->soundFxVolume));
 		file.writeString("musicVolumePct=%d\r\n", xboxOptionPercent(sound->musicVolume));
@@ -1382,6 +1410,12 @@ namespace TFE_DarkForces
 		s_emState.optionsItems[index].maxValue = maxValue;
 	}
 
+	static void xboxSetPauseOptionChoice(s32 index, const char* label, s32 value, s32 minValue, s32 maxValue, const char* valueText)
+	{
+		xboxSetPauseOptionSlider(index, label, value, minValue, maxValue);
+		s_emState.optionsItems[index].valueText = valueText;
+	}
+
 	static void xboxSetPauseOptionIcon(s32 index, const char* label, s32 icon)
 	{
 		s_emState.optionsItems[index].label = label;
@@ -1431,6 +1465,8 @@ namespace TFE_DarkForces
 		}
 		else if (s_emState.optionsPage == XPOPAGE_VIDEO)
 		{
+			xboxSetPauseOptionChoice(XPVID_ASPECT_OUTPUT, "ASPECT / OUTPUT", system->xboxVideoMode,
+				XP_VIDEO_AUTO, XP_VIDEO_COUNT - 1, xboxPauseVideoModeName(system->xboxVideoMode));
 			xboxSetPauseOptionSlider(XPVID_SAFE_ZONE_WIDTH, "SAFE AREA WIDTH", system->xboxSafeZoneWidthPercent, 80, 100);
 			xboxSetPauseOptionSlider(XPVID_SAFE_ZONE_HEIGHT, "SAFE AREA HEIGHT", system->xboxSafeZoneHeightPercent, 80, 100);
 			xboxSetPauseOptionSlider(XPVID_SCREEN_X, "HORIZONTAL SHIFT", system->xboxSafeZoneOffsetX, -40, 40);
@@ -1474,6 +1510,7 @@ namespace TFE_DarkForces
 		{
 			switch (index)
 			{
+				case XPVID_ASPECT_OUTPUT: system->xboxVideoMode = value; break;
 				case XPVID_SAFE_ZONE_WIDTH: system->xboxSafeZoneWidthPercent = value; break;
 				case XPVID_SAFE_ZONE_HEIGHT: system->xboxSafeZoneHeightPercent = value; break;
 				case XPVID_SCREEN_X: system->xboxSafeZoneOffsetX = value; break;

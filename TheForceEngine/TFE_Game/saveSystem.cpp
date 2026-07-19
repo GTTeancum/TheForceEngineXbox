@@ -5,6 +5,9 @@
 #include <TFE_FileSystem/paths.h>
 #include <TFE_Input/inputMapping.h>
 #include <TFE_RenderBackend/renderBackend.h>
+#ifdef _XBOX
+#include <TFE_RenderBackend/renderBackend_xbox.h>
+#endif
 #include <TFE_ExternalData/dfLogics.h>
 #include <TFE_ExternalData/weaponExternal.h>
 #include <TFE_ExternalData/pickupExternal.h>
@@ -122,6 +125,28 @@ namespace TFE_SaveSystem
 		TFE_System::logWrite(LOG_MSG, "SaveSystem", "UDATA save root ready '%s'", s_xboxSaveRoot);
 		return true;
 	}
+
+	bool xboxGetSaveDirectory(GameID id, char* path, u32 size)
+	{
+		if (!path || size == 0) return false;
+		path[0] = 0;
+		if (!xboxEnsureSaveRoot()) return false;
+
+		char relativeBasePath[TFE_MAX_PATH];
+		snprintf(relativeBasePath, TFE_MAX_PATH, "%sSaves\\", s_xboxSaveRoot);
+		if (!FileUtil::directoryExists(relativeBasePath))
+		{
+			FileUtil::makeDirectory(relativeBasePath);
+		}
+
+		snprintf(path, size, "%sSaves\\%s\\", s_xboxSaveRoot, TFE_Settings::c_gameName[id]);
+		path[size - 1] = 0;
+		if (!FileUtil::directoryExists(path))
+		{
+			FileUtil::makeDirectory(path);
+		}
+		return path[0] != 0;
+	}
 #endif
 
 	static u32 quickSaveHash(const char* text)
@@ -212,14 +237,34 @@ namespace TFE_SaveSystem
 		// Generate a screenshot.
 		DisplayInfo displayInfo;
 		TFE_RenderBackend::getDisplayInfo(&displayInfo);
-		size_t size = displayInfo.width * displayInfo.height * 4;
 #ifdef _XBOX
+		const u32 rawImageSize = SAVE_IMAGE_WIDTH * SAVE_IMAGE_HEIGHT * sizeof(u32);
 		if (s_verboseXboxSaveLog)
 		{
-			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader begin saveName='%s' display=%ux%u captureBytes=%u",
-				saveName ? saveName : "", (u32)displayInfo.width, (u32)displayInfo.height, (u32)size);
+			TFE_System::logWrite(LOG_MSG, "SaveSystem", "saveHeader begin saveName='%s' display=%ux%u thumbBytes=%u",
+				saveName ? saveName : "", (u32)displayInfo.width, (u32)displayInfo.height, rawImageSize);
 		}
-#endif
+		if (rawImageSize > s_imageBufferSize[1])
+		{
+			u32* newBuffer = (u32*)realloc(s_imageBuffer[1], rawImageSize);
+			if (newBuffer)
+			{
+				s_imageBuffer[1] = newBuffer;
+				s_imageBufferSize[1] = rawImageSize;
+			}
+			else
+			{
+				TFE_System::logWrite(LOG_ERROR, "SaveSystem", "failed to allocate thumbnail buffer (%u bytes)", rawImageSize);
+				s_imageBufferSize[1] = 0;
+			}
+		}
+		bool haveThumbnailBuffer = s_imageBuffer[1] && s_imageBufferSize[1] >= rawImageSize;
+		if (haveThumbnailBuffer)
+		{
+			TFE_RenderBackend::xboxCaptureScreenToMemoryScaled(s_imageBuffer[1], SAVE_IMAGE_WIDTH, SAVE_IMAGE_HEIGHT);
+		}
+#else
+		size_t size = displayInfo.width * displayInfo.height * 4;
 		if (size > s_imageBufferSize[0])
 		{
 			u32* newBuffer = (u32*)realloc(s_imageBuffer[0], size);
@@ -239,37 +284,6 @@ namespace TFE_SaveSystem
 		{
 			TFE_RenderBackend::captureScreenToMemory(s_imageBuffer[0]);
 		}
-#ifdef _XBOX
-		const u32 rawImageSize = SAVE_IMAGE_WIDTH * SAVE_IMAGE_HEIGHT * sizeof(u32);
-		if (rawImageSize > s_imageBufferSize[1])
-		{
-			u32* newBuffer = (u32*)realloc(s_imageBuffer[1], rawImageSize);
-			if (newBuffer)
-			{
-				s_imageBuffer[1] = newBuffer;
-				s_imageBufferSize[1] = rawImageSize;
-			}
-			else
-			{
-				TFE_System::logWrite(LOG_ERROR, "SaveSystem", "failed to allocate thumbnail buffer (%u bytes)", rawImageSize);
-				s_imageBufferSize[1] = 0;
-			}
-		}
-		bool haveThumbnailBuffer = s_imageBuffer[1] && s_imageBufferSize[1] >= rawImageSize;
-		if (haveCaptureBuffer && haveThumbnailBuffer)
-		{
-			for (u32 y = 0; y < SAVE_IMAGE_HEIGHT; y++)
-			{
-				const u32 sy = displayInfo.height ? (y * displayInfo.height) / SAVE_IMAGE_HEIGHT : 0;
-				for (u32 x = 0; x < SAVE_IMAGE_WIDTH; x++)
-				{
-					const u32 sx = displayInfo.width ? (x * displayInfo.width) / SAVE_IMAGE_WIDTH : 0;
-					s_imageBuffer[1][y * SAVE_IMAGE_WIDTH + x] =
-						s_imageBuffer[0][sy * displayInfo.width + sx] | 0xff000000u;
-				}
-			}
-		}
-#else
 		// Save to memory.
 		u8* png = (u8*)malloc(SAVE_IMAGE_WIDTH * SAVE_IMAGE_HEIGHT * 4);
 		u32 pngSize = 0;
@@ -729,25 +743,12 @@ namespace TFE_SaveSystem
 	void setCurrentGame(GameID id)
 	{
 #ifdef _XBOX
-		if (!xboxEnsureSaveRoot())
+		if (!xboxGetSaveDirectory(id, s_gameSavePath, TFE_MAX_PATH))
 		{
 			s_gameSavePath[0] = 0;
 			TFE_System::logWrite(LOG_ERROR, "SaveSystem", "setCurrentGame failed: UDATA unavailable id=%d", (s32)id);
 			xboxFatalSaveFailure(1);
 			return;
-		}
-
-		char relativeBasePath[TFE_MAX_PATH];
-		snprintf(relativeBasePath, TFE_MAX_PATH, "%sSaves\\", s_xboxSaveRoot);
-		if (!FileUtil::directoryExists(relativeBasePath))
-		{
-			FileUtil::makeDirectory(relativeBasePath);
-		}
-
-		snprintf(s_gameSavePath, TFE_MAX_PATH, "%sSaves\\%s\\", s_xboxSaveRoot, TFE_Settings::c_gameName[id]);
-		if (!FileUtil::directoryExists(s_gameSavePath))
-		{
-			FileUtil::makeDirectory(s_gameSavePath);
 		}
 		TFE_System::logWrite(LOG_MSG, "SaveSystem", "setCurrentGame UDATA id=%d path='%s'", (s32)id, s_gameSavePath);
 #else
