@@ -234,6 +234,7 @@ enum XboxControlsOptionIndex
 {
     XCTRL_LOOK_SENS_X = 0,
     XCTRL_LOOK_SENS_Y,
+    XCTRL_INVERT_LOOK_Y,
     XCTRL_RIGHT_STICK_DEADZONE,
     XCTRL_BIND_JUMP,
     XCTRL_BIND_CROUCH,
@@ -2121,6 +2122,15 @@ static s32 xboxParseVideoModeValue(const char* value)
     return atoi(value);
 }
 
+static bool xboxParseBoolValue(const char* value)
+{
+    if (!value || !value[0]) return false;
+    if (strcasecmp(value, "true") == 0) return true;
+    if (strcasecmp(value, "yes") == 0) return true;
+    if (strcasecmp(value, "on") == 0) return true;
+    return atoi(value) != 0;
+}
+
 static s32 xboxForcedVideoModeFromMarkers()
 {
     if (xboxAbsoluteFileExists("D:\\tfe_force_720p.txt") ||
@@ -2175,6 +2185,7 @@ static void applyXboxControlSettings()
     TFE_InputXbox::setLookSensitivityX(system->xboxLookSensitivityX);
     TFE_InputXbox::setLookSensitivityY(system->xboxLookSensitivityY);
     TFE_InputXbox::setRightStickDeadzone(system->xboxRightStickDeadzone);
+    TFE_InputXbox::setInvertLookY(system->xboxInvertLookY);
 }
 
 static void xboxApplyRuntimeSettings()
@@ -2220,6 +2231,7 @@ static void xboxParseRuntimeSetting(char* line)
     else if (strcasecmp(key, "xboxStickDeadzone") == 0) system->xboxRightStickDeadzone = (float)atof(value);
     else if (strcasecmp(key, "xboxRightStickDeadzone") == 0) system->xboxRightStickDeadzone = (float)atof(value);
     else if (strcasecmp(key, "xboxRightStickDeadzonePct") == 0) system->xboxRightStickDeadzone = (float)atoi(value) / 100.0f;
+    else if (strcasecmp(key, "xboxInvertLookY") == 0) system->xboxInvertLookY = xboxParseBoolValue(value);
     else if (strcasecmp(key, "xboxSafeZonePercent") == 0)
     {
         system->xboxSafeZonePercent = atoi(value);
@@ -2294,6 +2306,7 @@ static bool xboxSaveRuntimeSettings()
     file.writeString("xboxLookSensitivityXPct=%d\r\n", (s32)(system->xboxLookSensitivityX * 100.0f + 0.5f));
     file.writeString("xboxLookSensitivityYPct=%d\r\n", (s32)(system->xboxLookSensitivityY * 100.0f + 0.5f));
     file.writeString("xboxRightStickDeadzonePct=%d\r\n", (s32)(system->xboxRightStickDeadzone * 100.0f + 0.5f));
+    file.writeString("xboxInvertLookY=%d\r\n", system->xboxInvertLookY ? 1 : 0);
     file.writeString("xboxSafeZoneWidthPercent=%d\r\n", system->xboxSafeZoneWidthPercent);
     file.writeString("xboxSafeZoneHeightPercent=%d\r\n", system->xboxSafeZoneHeightPercent);
     file.writeString("xboxSafeZoneOffsetX=%d\r\n", system->xboxSafeZoneOffsetX);
@@ -2582,6 +2595,7 @@ static void refreshOptionsItems()
     {
         setOptionSlider(XCTRL_LOOK_SENS_X, "AIM SPEED X", (s32)(TFE_InputXbox::getLookSensitivityX() * 100.0f + 0.5f), 25, 250);
         setOptionSlider(XCTRL_LOOK_SENS_Y, "AIM SPEED Y", (s32)(TFE_InputXbox::getLookSensitivityY() * 100.0f + 0.5f), 25, 250);
+        setOptionChoice(XCTRL_INVERT_LOOK_Y, "INVERT Y AXIS", system->xboxInvertLookY ? 1 : 0, 0, 1, system->xboxInvertLookY ? "ON" : "OFF");
         setOptionSlider(XCTRL_RIGHT_STICK_DEADZONE, "AIM DEAD ZONE", (s32)(TFE_InputXbox::getRightStickDeadzone() * 100.0f + 0.5f), 0, 30);
 
         for (s32 i = 0; i < (s32)TFE_ARRAYSIZE(c_xboxBindingOptions); i++)
@@ -2643,6 +2657,9 @@ static void applyOptionValue(s32 index, s32 value)
                 break;
             case XCTRL_RIGHT_STICK_DEADZONE:
                 system->xboxRightStickDeadzone = (float)value / 100.0f;
+                break;
+            case XCTRL_INVERT_LOOK_Y:
+                system->xboxInvertLookY = value != 0;
                 break;
         }
         applyXboxControlSettings();

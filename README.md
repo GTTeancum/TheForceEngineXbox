@@ -138,7 +138,7 @@ Working in this port:
 - Native Xbox start menu, load menu, pause/datapad screens, mod browser, and
   Options menu split into Controls, Video, and Audio submenus.
 - XInput controller support with remappable core actions, separate X/Y aim
-  sensitivity, and right-stick deadzone control.
+  sensitivity, right-stick deadzone control, and right-stick Y-axis inversion.
 - Video settings for adjustable screen safe zone width, height, and shift.
 - Audio settings for in-game volume control.
 - Mission briefing flow, mission completion flow, and difficulty selection.

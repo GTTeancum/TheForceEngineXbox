@@ -318,6 +318,7 @@ struct TFE_Settings_System
     f32  xboxLookSensitivityX;
     f32  xboxLookSensitivityY;
     f32  xboxRightStickDeadzone;
+    bool xboxInvertLookY;
     s32  xboxSafeZonePercent;
     s32  xboxSafeZoneWidthPercent;
     s32  xboxSafeZoneHeightPercent;
@@ -330,7 +331,7 @@ struct TFE_Settings_System
         , gifRecordingFramerate(18.0f), showGifPathConfirmation(true)
         , xboxLookSensitivity(1.0f), xboxStickDeadzone(0.09f)
         , xboxLookSensitivityX(1.0f), xboxLookSensitivityY(1.0f)
-        , xboxRightStickDeadzone(0.09f)
+        , xboxRightStickDeadzone(0.09f), xboxInvertLookY(false)
         , xboxSafeZonePercent(100), xboxSafeZoneWidthPercent(100)
         , xboxSafeZoneHeightPercent(100), xboxSafeZoneOffsetX(0)
         , xboxSafeZoneOffsetY(0), xboxVideoMode(0) {}

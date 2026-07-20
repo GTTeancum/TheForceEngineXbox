@@ -566,6 +566,7 @@ namespace TFE_Settings
 		writeKeyValue_Float(settings, "xboxLookSensitivityX", s_systemSettings.xboxLookSensitivityX);
 		writeKeyValue_Float(settings, "xboxLookSensitivityY", s_systemSettings.xboxLookSensitivityY);
 		writeKeyValue_Float(settings, "xboxRightStickDeadzone", s_systemSettings.xboxRightStickDeadzone);
+		writeKeyValue_Bool(settings, "xboxInvertLookY", s_systemSettings.xboxInvertLookY);
 		writeKeyValue_Int(settings, "xboxSafeZoneWidthPercent", s_systemSettings.xboxSafeZoneWidthPercent);
 		writeKeyValue_Int(settings, "xboxSafeZoneHeightPercent", s_systemSettings.xboxSafeZoneHeightPercent);
 		writeKeyValue_Int(settings, "xboxSafeZoneOffsetX", s_systemSettings.xboxSafeZoneOffsetX);
@@ -1109,6 +1110,10 @@ namespace TFE_Settings
 		else if (strcasecmp("xboxRightStickDeadzone", key) == 0)
 		{
 			s_systemSettings.xboxRightStickDeadzone = parseFloat(value);
+		}
+		else if (strcasecmp("xboxInvertLookY", key) == 0)
+		{
+			s_systemSettings.xboxInvertLookY = parseBool(value);
 		}
 		else if (strcasecmp("xboxSafeZonePercent", key) == 0)
 		{

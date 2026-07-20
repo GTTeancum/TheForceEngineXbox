@@ -18,4 +18,6 @@ namespace TFE_InputXbox
     float getStickDeadzone();
     void setRightStickDeadzone(float value);
     float getRightStickDeadzone();
+    void setInvertLookY(bool enabled);
+    bool getInvertLookY();
 }
