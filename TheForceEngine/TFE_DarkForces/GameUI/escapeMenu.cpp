@@ -626,7 +626,11 @@ namespace TFE_DarkForces
 		{
 			if (drawBackground)
 			{
+			#ifdef _XBOX
+				memcpy(s_emState.framebuffer, s_emState.framebufferCopy->image, dispWidth * dispHeight);
+			#else
 				hud_drawElementToScreen(s_emState.framebufferCopy, drawRect, 0, 0, s_emState.framebuffer);
+			#endif
 			}
 
 			if (s_emState.confirmState == CONFIRM_STATE_NONE)
@@ -683,7 +687,13 @@ namespace TFE_DarkForces
 
 			if (drawBackground)
 			{
+			#ifdef _XBOX
+				// The pause capture is a full-resolution framebuffer, not a UI
+				// element. Copy it byte-for-byte so widescreen has no X offset.
+				memcpy(s_emState.framebuffer, s_emState.framebufferCopy->image, dispWidth * dispHeight);
+			#else
 				hud_drawElementToScreen(s_emState.framebufferCopy, drawRect, 0, 0, s_emState.framebuffer);
+			#endif
 			}
 
 			if (s_emState.confirmState == CONFIRM_STATE_NONE)

@@ -2357,7 +2357,10 @@ static void xboxApplyVideoModeToSettings()
     u32 renderW = 640u;
     u32 renderH = 480u;
     bool widescreen = false;
-    bool progressive = false;
+    // 480p availability is independent of the dashboard's aspect-ratio flag.
+    // A 4:3 dashboard configuration should still use progressive scan when
+    // the HDTV pack and 480p setting are present.
+    bool progressive = can480p;
 
     if (selectedMode == XBOX_VIDEO_720P_WIDE)
     {
