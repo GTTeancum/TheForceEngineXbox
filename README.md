@@ -4,8 +4,9 @@ TheForceEngineXbox is an original Xbox port of
 [The Force Engine](https://github.com/luciusDXL/TheForceEngine), the open-source
 Dark Forces engine recreation.
 
-This fork builds a real `default.xbe` for retail Xbox hardware and CXBX-R. It
-does not include Star Wars: Dark Forces. You need your own PC copy of the game.
+This fork builds a real `default.xbe` for retail Xbox hardware, XEMU, and
+CXBX-R. It does not include Star Wars: Dark Forces. You need your own PC copy
+of the game.
 
 ## Download
 
@@ -125,18 +126,21 @@ project or in the release zip.
 
 ## Current State
 
-This is a 1.0 release-candidate era Xbox build. The focus is hardware stability
-and a complete couch-playable Dark Forces experience.
+This is a 1.1 patch release. The focus is hardware stability and a complete
+couch-playable Dark Forces experience.
 
 Working in this port:
 
 - Original Xbox `default.xbe` output.
-- 640x480 software-rendered gameplay presented through the Xbox D3D8 backend.
-- Native Xbox start menu, load menu, options menu, pause/datapad screens, and
-  mod browser.
-- XInput controller support with separate X/Y look sensitivity, right-stick
-  deadzone, volume settings, adjustable screen safe zone, and remappable core
-  actions.
+- Software-rendered gameplay presented through the Xbox D3D8 backend, with
+  4:3 plus widescreen 480p/720p output selected by the Xbox dashboard video
+  settings.
+- Native Xbox start menu, load menu, pause/datapad screens, mod browser, and
+  Options menu split into Controls, Video, and Audio submenus.
+- XInput controller support with remappable core actions, separate X/Y aim
+  sensitivity, and right-stick deadzone control.
+- Video settings for adjustable screen safe zone width, height, and shift.
+- Audio settings for in-game volume control.
 - Mission briefing flow, mission completion flow, and difficulty selection.
 - Save/load support using the Xbox title save area, including save thumbnails.
 - DirectSound audio path for game audio.
