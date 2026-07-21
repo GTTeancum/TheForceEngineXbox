@@ -37,13 +37,13 @@
 #include <TFE_RenderBackend/xboxPdaFrame.inc>
 
 #ifndef D3DPRESENTFLAG_PROGRESSIVE
-#define D3DPRESENTFLAG_PROGRESSIVE 0x00000004
+#define D3DPRESENTFLAG_PROGRESSIVE 0x00000040
 #endif
 #ifndef D3DPRESENTFLAG_WIDESCREEN
 #define D3DPRESENTFLAG_WIDESCREEN  0x00000010
 #endif
 #ifndef D3DPRESENTFLAG_INTERLACED
-#define D3DPRESENTFLAG_INTERLACED  0x00000002
+#define D3DPRESENTFLAG_INTERLACED  0x00000020
 #endif
 
 // ---------------------------------------------------------------------------

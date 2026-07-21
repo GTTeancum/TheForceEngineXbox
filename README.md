@@ -21,6 +21,12 @@ TheForceEngine-Xbox-Install.zip
 The zip is an overlay package. Copy your PC Dark Forces install to the Xbox
 first, then extract this zip over it.
 
+## 1.1.1 Patch Notes
+
+- Fixed a 4:3 480p startup failure that could report `Unable to determine
+  default Xbox backbuffer` when 480p was enabled in the Xbox dashboard.
+- Updated the in-game main-menu version label to `VER 1.1.1`.
+
 ## Install
 
 1. On your Xbox hard drive, make a folder for the game.
@@ -126,7 +132,7 @@ project or in the release zip.
 
 ## Current State
 
-This is a 1.1 patch release. The focus is hardware stability and a complete
+This is the 1.1.1 release. The focus is hardware stability and a complete
 couch-playable Dark Forces experience.
 
 Working in this port:
