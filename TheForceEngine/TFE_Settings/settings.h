@@ -324,7 +324,6 @@ struct TFE_Settings_System
     s32  xboxSafeZoneHeightPercent;
     s32  xboxSafeZoneOffsetX;
     s32  xboxSafeZoneOffsetY;
-    s32  xboxVideoMode;
 
     TFE_Settings_System()
         : gameQuitExitsToMenu(true), returnToModLoader(true)
@@ -334,7 +333,7 @@ struct TFE_Settings_System
         , xboxRightStickDeadzone(0.09f), xboxInvertLookY(false)
         , xboxSafeZonePercent(100), xboxSafeZoneWidthPercent(100)
         , xboxSafeZoneHeightPercent(100), xboxSafeZoneOffsetX(0)
-        , xboxSafeZoneOffsetY(0), xboxVideoMode(0) {}
+        , xboxSafeZoneOffsetY(0) {}
 };
 
 // ---------------------------------------------------------------------------

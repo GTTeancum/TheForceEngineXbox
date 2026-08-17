@@ -254,8 +254,7 @@ enum XboxControlsOptionIndex
 
 enum XboxVideoOptionIndex
 {
-    XVID_ASPECT_OUTPUT = 0,
-    XVID_SAFE_ZONE_WIDTH,
+    XVID_SAFE_ZONE_WIDTH = 0,
     XVID_SAFE_ZONE_HEIGHT,
     XVID_SCREEN_X,
     XVID_SCREEN_Y,
@@ -264,9 +263,8 @@ enum XboxVideoOptionIndex
 
 enum XboxVideoMode
 {
-    XBOX_VIDEO_AUTO = 0,
-    XBOX_VIDEO_4X3,
-    XBOX_VIDEO_480P_WIDE,
+    XBOX_VIDEO_4X3 = 0,
+    XBOX_VIDEO_WIDE,
     // XBOX_VIDEO_720P_WIDE,
     XBOX_VIDEO_COUNT
 };
@@ -2101,29 +2099,14 @@ static float clampF32(float value, float minValue, float maxValue)
     return value;
 }
 
-static const char* xboxVideoModeName(s32 mode)
+static const char* xboxAspectName(s32 mode)
 {
     switch (mode)
     {
-        case XBOX_VIDEO_4X3: return "4:3";
-        case XBOX_VIDEO_480P_WIDE: return "480P WIDE";
+        case XBOX_VIDEO_WIDE: return "16:9";
         // case XBOX_VIDEO_720P_WIDE: return "720P WIDE";
-        default: return "AUTO";
+        default: return "4:3";
     }
-}
-
-static s32 xboxParseVideoModeValue(const char* value)
-{
-    if (!value || !value[0]) return XBOX_VIDEO_AUTO;
-    if (strcasecmp(value, "auto") == 0) return XBOX_VIDEO_AUTO;
-    if (strcasecmp(value, "4:3") == 0 || strcasecmp(value, "4x3") == 0) return XBOX_VIDEO_4X3;
-    if (strcasecmp(value, "480p-wide") == 0 || strcasecmp(value, "480p wide") == 0) return XBOX_VIDEO_480P_WIDE;
-    if (strcasecmp(value, "720p-wide") == 0 || strcasecmp(value, "720p wide") == 0)
-    {
-        // return XBOX_VIDEO_720P_WIDE;
-        return XBOX_VIDEO_AUTO;
-    }
-    return atoi(value);
 }
 
 static bool xboxParseBoolValue(const char* value)
@@ -2133,23 +2116,6 @@ static bool xboxParseBoolValue(const char* value)
     if (strcasecmp(value, "yes") == 0) return true;
     if (strcasecmp(value, "on") == 0) return true;
     return atoi(value) != 0;
-}
-
-static s32 xboxForcedVideoModeFromMarkers()
-{
-#if 0
-    if (xboxAbsoluteFileExists("D:\\tfe_force_720p.txt") ||
-        xboxAbsoluteFileExists("tfe_force_720p.txt"))
-    {
-        return XBOX_VIDEO_720P_WIDE;
-    }
-#endif
-    if (xboxAbsoluteFileExists("D:\\tfe_force_480p.txt") ||
-        xboxAbsoluteFileExists("tfe_force_480p.txt"))
-    {
-        return XBOX_VIDEO_480P_WIDE;
-    }
-    return -1;
 }
 
 static void xboxRuntimeSettingsPath(char* path, size_t pathSize)
@@ -2174,7 +2140,6 @@ static void applyXboxVideoSettings()
     system->xboxSafeZonePercent = (system->xboxSafeZoneWidthPercent + system->xboxSafeZoneHeightPercent) / 2;
     system->xboxSafeZoneOffsetX = clampS32(system->xboxSafeZoneOffsetX, -40, 40);
     system->xboxSafeZoneOffsetY = clampS32(system->xboxSafeZoneOffsetY, -30, 30);
-    system->xboxVideoMode = clampS32(system->xboxVideoMode, XBOX_VIDEO_AUTO, XBOX_VIDEO_COUNT - 1);
     TFE_RenderBackend::xboxSetSafeZone(system->xboxSafeZoneWidthPercent,
         system->xboxSafeZoneHeightPercent,
         system->xboxSafeZoneOffsetX, system->xboxSafeZoneOffsetY);
@@ -2248,7 +2213,6 @@ static void xboxParseRuntimeSetting(char* line)
     else if (strcasecmp(key, "xboxSafeZoneHeightPercent") == 0) system->xboxSafeZoneHeightPercent = atoi(value);
     else if (strcasecmp(key, "xboxSafeZoneOffsetX") == 0) system->xboxSafeZoneOffsetX = atoi(value);
     else if (strcasecmp(key, "xboxSafeZoneOffsetY") == 0) system->xboxSafeZoneOffsetY = atoi(value);
-    else if (strcasecmp(key, "xboxVideoMode") == 0) system->xboxVideoMode = xboxParseVideoModeValue(value);
     else if (strcasecmp(key, "masterVolume") == 0) sound->masterVolume = (float)atof(value);
     else if (strcasecmp(key, "soundFxVolume") == 0) sound->soundFxVolume = (float)atof(value);
     else if (strcasecmp(key, "musicVolume") == 0) sound->musicVolume = (float)atof(value);
@@ -2317,7 +2281,6 @@ static bool xboxSaveRuntimeSettings()
     file.writeString("xboxSafeZoneHeightPercent=%d\r\n", system->xboxSafeZoneHeightPercent);
     file.writeString("xboxSafeZoneOffsetX=%d\r\n", system->xboxSafeZoneOffsetX);
     file.writeString("xboxSafeZoneOffsetY=%d\r\n", system->xboxSafeZoneOffsetY);
-    file.writeString("xboxVideoMode=%d\r\n", system->xboxVideoMode);
     file.writeString("masterVolumePct=%d\r\n", optionPercent(sound->masterVolume));
     file.writeString("soundFxVolumePct=%d\r\n", optionPercent(sound->soundFxVolume));
     file.writeString("musicVolumePct=%d\r\n", optionPercent(sound->musicVolume));
@@ -2332,7 +2295,6 @@ static void xboxApplyVideoModeToSettings()
 {
     TFE_Settings_Window* windowSettings = TFE_Settings::getWindowSettings();
     TFE_Settings_Graphics* graphics = TFE_Settings::getGraphicsSettings();
-    TFE_Settings_System* system = TFE_Settings::getSystemSettings();
 
     DWORD avPack = XGetAVPack();
     DWORD videoFlags = XGetVideoFlags();
@@ -2341,48 +2303,9 @@ static void xboxApplyVideoModeToSettings()
     const bool can480p = hasHdtv && ((videoFlags & XC_VIDEO_FLAGS_HDTV_480p) != 0);
     const bool can720p = hasHdtv && ((videoFlags & XC_VIDEO_FLAGS_HDTV_720p) != 0);
 
-    s32 requestedMode = clampS32(system->xboxVideoMode, XBOX_VIDEO_AUTO, XBOX_VIDEO_COUNT - 1);
-    const s32 markerMode = xboxForcedVideoModeFromMarkers();
-    if (markerMode >= 0) requestedMode = markerMode;
-
-    s32 selectedMode = XBOX_VIDEO_4X3;
-    if (markerMode >= 0)
-    {
-        // The marker files are an explicit hardware override for softmods,
-        // custom BIOSes, and HDMI adapters that support HDTV modes but do not
-        // expose the dashboard EEPROM flags through XGetVideoFlags().
-        selectedMode = requestedMode;
-        if (selectedMode == XBOX_VIDEO_480P_WIDE && (!can480p || !dashWidescreen))
-        {
-            TFE_System::logWrite(LOG_WARNING, "Video",
-                "Forced marker overrides reported video capabilities for %s (avPack=%lu flags=0x%08lx)",
-                xboxVideoModeName(selectedMode), avPack, videoFlags);
-        }
-    }
-    else if (requestedMode == XBOX_VIDEO_AUTO)
-    {
-        if (can480p && dashWidescreen) selectedMode = XBOX_VIDEO_480P_WIDE;
-        else selectedMode = XBOX_VIDEO_4X3;
-    }
-#if 0
-    else if (requestedMode == XBOX_VIDEO_720P_WIDE && !can720p)
-    {
-        selectedMode = (can480p && dashWidescreen) ? XBOX_VIDEO_480P_WIDE : XBOX_VIDEO_4X3;
-        TFE_System::logWrite(LOG_WARNING, "Video",
-            "Requested 720p widescreen is unavailable; falling back to %s",
-            xboxVideoModeName(selectedMode));
-    }
-#endif
-    else if (requestedMode == XBOX_VIDEO_480P_WIDE && (!can480p || !dashWidescreen))
-    {
-        selectedMode = XBOX_VIDEO_4X3;
-        TFE_System::logWrite(LOG_WARNING, "Video",
-            "Requested 480p widescreen requires HDTV 480p and dashboard widescreen; falling back to 4:3");
-    }
-    else
-    {
-        selectedMode = requestedMode;
-    }
+    // Dashboard aspect and scan mode are independent. Inherit both directly
+    // so no game-side setting can fight the console configuration.
+    const s32 selectedMode = dashWidescreen ? XBOX_VIDEO_WIDE : XBOX_VIDEO_4X3;
 
     u32 outputW = 640u;
     u32 outputH = 480u;
@@ -2410,7 +2333,7 @@ static void xboxApplyVideoModeToSettings()
     }
     else
 #endif
-    if (selectedMode == XBOX_VIDEO_480P_WIDE)
+    if (selectedMode == XBOX_VIDEO_WIDE)
     {
         outputW = 640u;
         outputH = 480u;
@@ -2419,7 +2342,6 @@ static void xboxApplyVideoModeToSettings()
         renderW = 856u;
         renderH = 480u;
         widescreen = true;
-        progressive = true;
     }
 
     windowSettings->fullscreen = true;
@@ -2436,8 +2358,8 @@ static void xboxApplyVideoModeToSettings()
 
     TFE_RenderBackend::xboxSetVideoMode(outputW, outputH, displayW, displayH, widescreen, progressive);
     TFE_System::logWrite(LOG_MSG, "Video",
-        "Xbox video selected: requested=%s marker=%d selected=%s avPack=%lu flags=0x%08lx dashWide=%d can480p=%d can720p=%d output=%ux%u display=%ux%u render=%ux%u progressive=%d",
-        xboxVideoModeName(requestedMode), markerMode, xboxVideoModeName(selectedMode),
+        "Xbox video inherited: selected=%s avPack=%lu flags=0x%08lx dashWide=%d can480p=%d can720p=%d output=%ux%u display=%ux%u render=%ux%u progressive=%d",
+        xboxAspectName(selectedMode),
         avPack, videoFlags, dashWidescreen ? 1 : 0, can480p ? 1 : 0, can720p ? 1 : 0,
         outputW, outputH, displayW, displayH, renderW, renderH, progressive ? 1 : 0);
 }
@@ -2654,8 +2576,6 @@ static void refreshOptionsItems()
     }
     else if (s_optionsPage == XOPAGE_VIDEO)
     {
-        setOptionChoice(XVID_ASPECT_OUTPUT, "ASPECT / OUTPUT", system->xboxVideoMode,
-            XBOX_VIDEO_AUTO, XBOX_VIDEO_COUNT - 1, xboxVideoModeName(system->xboxVideoMode));
         setOptionSlider(XVID_SAFE_ZONE_WIDTH, "SAFE AREA WIDTH", system->xboxSafeZoneWidthPercent, 80, 100);
         setOptionSlider(XVID_SAFE_ZONE_HEIGHT, "SAFE AREA HEIGHT", system->xboxSafeZoneHeightPercent, 80, 100);
         setOptionSlider(XVID_SCREEN_X, "HORIZONTAL SHIFT", system->xboxSafeZoneOffsetX, -40, 40);
@@ -2708,7 +2628,6 @@ static void applyOptionValue(s32 index, s32 value)
     {
         switch (index)
         {
-            case XVID_ASPECT_OUTPUT: system->xboxVideoMode = value; break;
             case XVID_SAFE_ZONE_WIDTH: system->xboxSafeZoneWidthPercent = value; break;
             case XVID_SAFE_ZONE_HEIGHT: system->xboxSafeZoneHeightPercent = value; break;
             case XVID_SCREEN_X: system->xboxSafeZoneOffsetX = value; break;

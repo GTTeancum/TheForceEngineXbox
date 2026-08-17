@@ -31,6 +31,13 @@ $PollDir = Join-Path $RunDir "ram"
 $ScreenshotDir = Join-Path $RunDir "screenshots"
 $SummaryPath = Join-Path $RunDir "summary.txt"
 $XemuExe = Join-Path $InstanceDir "xemu.exe"
+$ScreenshotConfigLine = Get-Content -LiteralPath $ConfigPath |
+    Where-Object { $_ -match '^\s*screenshot_dir\s*=' } |
+    Select-Object -First 1
+if (!$ScreenshotConfigLine) {
+    throw "XEMU screenshot_dir missing from config: $ConfigPath"
+}
+$XemuScreenshotDir = ($ScreenshotConfigLine -replace '^\s*screenshot_dir\s*=\s*[''"]', '') -replace '[''"]\s*$', ''
 
 function Require-Path([string]$Path, [string]$Name) {
     if (!(Test-Path -LiteralPath $Path)) {
@@ -71,7 +78,7 @@ function Test-AnyPattern([string[]]$Paths, [string]$Pattern) {
 }
 
 function Invoke-NativeScreenshot([int]$ProcId, [string]$StablePath) {
-    $out = & python $NativeScreenshotScript --pid ([string]$ProcId) --xemu-exe $XemuExe --screenshot-dir $ScreenshotDir --timeout 8 2>&1
+    $out = & python $NativeScreenshotScript --pid ([string]$ProcId) --xemu-exe $XemuExe --screenshot-dir $XemuScreenshotDir --timeout 8 2>&1
     $text = ($out | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) {
         throw $text
@@ -203,7 +210,7 @@ $levelTransitionOk = Test-AnyPattern $ramLogs "level transition complete"
 $secbaseOk = Test-AnyPattern $ramLogs "level ready cycle=0 level='SECBASE'"
 $talayOk = Test-AnyPattern $ramLogs "level ready cycle=1 level='TALAY'"
 $selected4x3 = Test-AnyPattern $ramLogs "selected=4:3"
-$selectedWide = Test-AnyPattern $ramLogs "selected=480P WIDE"
+$selectedWide = Test-AnyPattern $ramLogs "selected=16:9"
 
 $summary = @(
     "label=$Label",
