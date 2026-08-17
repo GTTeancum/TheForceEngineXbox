@@ -267,7 +267,7 @@ enum XboxVideoMode
     XBOX_VIDEO_AUTO = 0,
     XBOX_VIDEO_4X3,
     XBOX_VIDEO_480P_WIDE,
-    XBOX_VIDEO_720P_WIDE,
+    // XBOX_VIDEO_720P_WIDE,
     XBOX_VIDEO_COUNT
 };
 
@@ -2107,7 +2107,7 @@ static const char* xboxVideoModeName(s32 mode)
     {
         case XBOX_VIDEO_4X3: return "4:3";
         case XBOX_VIDEO_480P_WIDE: return "480P WIDE";
-        case XBOX_VIDEO_720P_WIDE: return "720P WIDE";
+        // case XBOX_VIDEO_720P_WIDE: return "720P WIDE";
         default: return "AUTO";
     }
 }
@@ -2118,7 +2118,11 @@ static s32 xboxParseVideoModeValue(const char* value)
     if (strcasecmp(value, "auto") == 0) return XBOX_VIDEO_AUTO;
     if (strcasecmp(value, "4:3") == 0 || strcasecmp(value, "4x3") == 0) return XBOX_VIDEO_4X3;
     if (strcasecmp(value, "480p-wide") == 0 || strcasecmp(value, "480p wide") == 0) return XBOX_VIDEO_480P_WIDE;
-    if (strcasecmp(value, "720p-wide") == 0 || strcasecmp(value, "720p wide") == 0) return XBOX_VIDEO_720P_WIDE;
+    if (strcasecmp(value, "720p-wide") == 0 || strcasecmp(value, "720p wide") == 0)
+    {
+        // return XBOX_VIDEO_720P_WIDE;
+        return XBOX_VIDEO_AUTO;
+    }
     return atoi(value);
 }
 
@@ -2133,11 +2137,13 @@ static bool xboxParseBoolValue(const char* value)
 
 static s32 xboxForcedVideoModeFromMarkers()
 {
+#if 0
     if (xboxAbsoluteFileExists("D:\\tfe_force_720p.txt") ||
         xboxAbsoluteFileExists("tfe_force_720p.txt"))
     {
         return XBOX_VIDEO_720P_WIDE;
     }
+#endif
     if (xboxAbsoluteFileExists("D:\\tfe_force_480p.txt") ||
         xboxAbsoluteFileExists("tfe_force_480p.txt"))
     {
@@ -2340,10 +2346,38 @@ static void xboxApplyVideoModeToSettings()
     if (markerMode >= 0) requestedMode = markerMode;
 
     s32 selectedMode = XBOX_VIDEO_4X3;
-    if (requestedMode == XBOX_VIDEO_AUTO)
+    if (markerMode >= 0)
+    {
+        // The marker files are an explicit hardware override for softmods,
+        // custom BIOSes, and HDMI adapters that support HDTV modes but do not
+        // expose the dashboard EEPROM flags through XGetVideoFlags().
+        selectedMode = requestedMode;
+        if (selectedMode == XBOX_VIDEO_480P_WIDE && (!can480p || !dashWidescreen))
+        {
+            TFE_System::logWrite(LOG_WARNING, "Video",
+                "Forced marker overrides reported video capabilities for %s (avPack=%lu flags=0x%08lx)",
+                xboxVideoModeName(selectedMode), avPack, videoFlags);
+        }
+    }
+    else if (requestedMode == XBOX_VIDEO_AUTO)
     {
         if (can480p && dashWidescreen) selectedMode = XBOX_VIDEO_480P_WIDE;
         else selectedMode = XBOX_VIDEO_4X3;
+    }
+#if 0
+    else if (requestedMode == XBOX_VIDEO_720P_WIDE && !can720p)
+    {
+        selectedMode = (can480p && dashWidescreen) ? XBOX_VIDEO_480P_WIDE : XBOX_VIDEO_4X3;
+        TFE_System::logWrite(LOG_WARNING, "Video",
+            "Requested 720p widescreen is unavailable; falling back to %s",
+            xboxVideoModeName(selectedMode));
+    }
+#endif
+    else if (requestedMode == XBOX_VIDEO_480P_WIDE && (!can480p || !dashWidescreen))
+    {
+        selectedMode = XBOX_VIDEO_4X3;
+        TFE_System::logWrite(LOG_WARNING, "Video",
+            "Requested 480p widescreen requires HDTV 480p and dashboard widescreen; falling back to 4:3");
     }
     else
     {
@@ -2362,6 +2396,7 @@ static void xboxApplyVideoModeToSettings()
     // the HDTV pack and 480p setting are present.
     bool progressive = can480p;
 
+#if 0
     if (selectedMode == XBOX_VIDEO_720P_WIDE)
     {
         outputW = 1280u;
@@ -2373,7 +2408,9 @@ static void xboxApplyVideoModeToSettings()
         widescreen = true;
         progressive = true;
     }
-    else if (selectedMode == XBOX_VIDEO_480P_WIDE)
+    else
+#endif
+    if (selectedMode == XBOX_VIDEO_480P_WIDE)
     {
         outputW = 640u;
         outputH = 480u;
@@ -2400,7 +2437,7 @@ static void xboxApplyVideoModeToSettings()
     TFE_RenderBackend::xboxSetVideoMode(outputW, outputH, displayW, displayH, widescreen, progressive);
     TFE_System::logWrite(LOG_MSG, "Video",
         "Xbox video selected: requested=%s marker=%d selected=%s avPack=%lu flags=0x%08lx dashWide=%d can480p=%d can720p=%d output=%ux%u display=%ux%u render=%ux%u progressive=%d",
-        xboxVideoModeName(system->xboxVideoMode), markerMode, xboxVideoModeName(selectedMode),
+        xboxVideoModeName(requestedMode), markerMode, xboxVideoModeName(selectedMode),
         avPack, videoFlags, dashWidescreen ? 1 : 0, can480p ? 1 : 0, can720p ? 1 : 0,
         outputW, outputH, displayW, displayH, renderW, renderH, progressive ? 1 : 0);
 }

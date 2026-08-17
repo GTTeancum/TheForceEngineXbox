@@ -1,5 +1,9 @@
 # TheForceEngineXbox
 
+<p align="center">
+  <img src="box%20art.png" alt="The Force Engine Xbox box art" width="806">
+</p>
+
 TheForceEngineXbox is an original Xbox port of
 [The Force Engine](https://github.com/luciusDXL/TheForceEngine), the open-source
 Dark Forces engine recreation.
@@ -20,6 +24,15 @@ TheForceEngine-Xbox-Install.zip
 
 The zip is an overlay package. Copy your PC Dark Forces install to the Xbox
 first, then extract this zip over it.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/xemu-main-menu-480p-wide.png" alt="The Force Engine Xbox main menu in XEMU" width="49%">
+  <img src="docs/images/xemu-secbase-480p-wide.png" alt="SECBASE gameplay in 480p widescreen in XEMU" width="49%">
+</p>
+
+Both screenshots were captured with XEMU's native screenshot function.
 
 ## 1.1.1 Patch Notes
 
@@ -86,6 +99,7 @@ default_XTIMAGE.xbx
 TitleMeta.xbx
 TitleImage.xbx
 SaveImage.xbx
+box art.png
 README.txt
 
 DARK\effects.json
@@ -139,8 +153,7 @@ Working in this port:
 
 - Original Xbox `default.xbe` output.
 - Software-rendered gameplay presented through the Xbox D3D8 backend, with
-  4:3 plus widescreen 480p/720p output selected by the Xbox dashboard video
-  settings.
+  4:3 and widescreen 480p output selected by the Xbox dashboard video settings.
 - Native Xbox start menu, load menu, pause/datapad screens, mod browser, and
   Options menu split into Controls, Video, and Audio submenus.
 - XInput controller support with remappable core actions, separate X/Y aim
@@ -187,6 +200,10 @@ build\xbox\release\default.xbe
 
 Always test release builds on real Xbox hardware before treating a change as
 shipping-ready. CXBX-R is useful for iteration, but real hardware is the target.
+
+Release maintainers must follow
+[the Xbox release checklist](docs/xbox_release_checklist.md). The repository-root
+`box art.png` is a required file in every release package.
 
 ## Credits
 

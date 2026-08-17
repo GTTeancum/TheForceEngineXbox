@@ -366,6 +366,18 @@ if not exist "%~dp0build\xbox\release\default.xbe" (
     exit /b 1
 )
 
+REM box art.png is a mandatory release asset. Keep the repository-root name
+REM unchanged so release packaging and the GitHub README share one source.
+if not exist "%~dp0box art.png" (
+    echo  ERROR: Required release asset "box art.png" is missing.
+    exit /b 1
+)
+copy /y "%~dp0box art.png" "%~dp0build\xbox\release\box art.png" >nul
+if errorlevel 1 (
+    echo  ERROR: Failed to copy required release asset "box art.png".
+    exit /b 1
+)
+
 REM Copy dashboard assets beside the XBE. patchxbe.py embeds these into the
 REM XBE, but some replacement dashboards also look for title-level files next
 REM to default.xbe.

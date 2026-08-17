@@ -4,6 +4,14 @@
 
 Port **The Force Engine** (TFE, a Dark Forces remake built on the JEDI engine) to the original Xbox using VS2005 + XDK 5849. Target: produce a working `.xbe` testable in CXBX-R. Stretch goal: Xbox 360 BC via `xefu`.
 
+## Release Asset Invariant
+
+- The repository-root `box art.png` is mandatory for every future release.
+- Every install ZIP must include `box art.png` at its root beside `default.xbe`.
+- `build_xbox.bat` must continue to fail when the asset is missing and copy it
+  into `build\xbox\release` on success.
+- Follow `docs\xbox_release_checklist.md` before publishing a release.
+
 ---
 
 ## Build Environment

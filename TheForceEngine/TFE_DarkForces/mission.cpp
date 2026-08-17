@@ -797,6 +797,16 @@ namespace TFE_DarkForces
 				// If the PDA was closed, then unpause the game.
 				if (!pda_isOpen())
 				{
+#ifdef _XBOX
+					// pda_start() switches the virtual framebuffer to 640x480.
+					// Restore the gameplay mode before any mission rendering;
+					// this also refreshes the mission-owned framebuffer pointer.
+					mission_createRenderDisplay();
+					u32 restoredWidth = 0, restoredHeight = 0;
+					vfb_getResolution(&restoredWidth, &restoredHeight);
+					TFE_System::logWrite(LOG_MSG, "Datapad", "gameplay display restored resolution=%ux%u framebuffer=%p",
+						restoredWidth, restoredHeight, (void*)s_framebuffer);
+#endif
 					mission_pause(JFALSE);
 #ifdef _XBOX
 					xboxBeginResumeInputGuard();
