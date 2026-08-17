@@ -11,9 +11,34 @@
 #define XBOX_COMPAT_H
 
 // -----------------------------------------------------------------------
-// Pull in XDK headers first, same pattern as CoreXboxCompat.h
+// Pull in the XDK headers first.
+//
+// C:\XDK\xbox\include contains a desktop Direct3D 8 header.  Do not let
+// xtl.h select it: the desktop and Xbox enums and presentation structures
+// are not ABI-compatible.  The clean 5558 headers below are byte-identical
+// to the stock 5849 D3D8/D3D8Types headers and are already required by the
+// direct Xbox build.
 // -----------------------------------------------------------------------
+#ifndef NOD3D
+#define NOD3D
+#define TFE_XBOX_COMPAT_OWNS_NOD3D
+#endif
+#ifndef NODSOUND
+#define NODSOUND
+#define TFE_XBOX_COMPAT_OWNS_NODSOUND
+#endif
 #include <xtl.h>
+#include "C:/XDK_5558/XDK/xbox/include/D3D8.h"
+#include "C:/XDK_5558/XDK/xbox/include/D3DX8.h"
+#include "C:/XDK_5558/XDK/xbox/include/DSound.h"
+#ifdef TFE_XBOX_COMPAT_OWNS_NODSOUND
+#undef NODSOUND
+#undef TFE_XBOX_COMPAT_OWNS_NODSOUND
+#endif
+#ifdef TFE_XBOX_COMPAT_OWNS_NOD3D
+#undef NOD3D
+#undef TFE_XBOX_COMPAT_OWNS_NOD3D
+#endif
 #include <xgmath.h>
 
 // -----------------------------------------------------------------------

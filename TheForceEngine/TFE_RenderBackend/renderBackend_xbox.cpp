@@ -7,9 +7,8 @@
 //   framebuffer is still updated each frame for HUD, weapon, messages, and
 //   menu overlays; swap() alpha-tests that overlay on top of the D3D8 scene.
 //
-// 720p is the fixed output resolution. The Xbox dashboard is expected
-// to have widescreen enabled in system settings; we do not force AV pack
-// settings here.
+// 640x480 is the always-supported baseline. Optional widescreen/HD modes are
+// selected before D3D init from Xbox settings plus dashboard/EEPROM flags.
 
 #include <TFE_RenderBackend/renderBackend.h>
 #include <TFE_RenderBackend/renderBackend_xbox.h>
@@ -37,16 +36,31 @@
 #include <TFE_RenderBackend/xboxWheelFont.inc>
 #include <TFE_RenderBackend/xboxPdaFrame.inc>
 
+#if D3DPRESENTFLAG_WIDESCREEN != 0x00000010 || \
+    D3DPRESENTFLAG_INTERLACED != 0x00000020 || \
+    D3DPRESENTFLAG_PROGRESSIVE != 0x00000040 || \
+    D3DPRESENTFLAG_10X11PIXELASPECTRATIO != 0x00000100 || \
+    D3DPRESENTFLAG_LOCKABLE_BACKBUFFER != 0x00000001
+#error The Xbox renderer must be compiled against the stock Xbox D3D8 headers.
+#endif
+typedef char XboxD3DPresentParametersMustBe68Bytes[
+    sizeof(D3DPRESENT_PARAMETERS) == 68 ? 1 : -1];
+
 // ---------------------------------------------------------------------------
-// Output resolution
+// Output resolution.
 //
-// xquake (xbox/private/test/games/xquake/gl_fakegl.cpp:91-92) ships with
-// 640x480 on Xbox. This is the always-supported NTSC mode, works on every
-// dashboard config, and is what we match 1:1 for the initial port. 720p is
-// a future enhancement after baseline rendering is confirmed.
+// 640x480 remains the always-supported baseline. Widescreen on Xbox is
+// normally an anamorphic 480-line signal: the physical back buffer stays
+// 640x480, D3D gets the WIDESCREEN present flag, and the engine is told about
+// a wider logical display so gameplay renders into a wider virtual display.
+// 1280x720 is kept as an explicit experiment for XEMU / HDTV-capable configs.
 // ---------------------------------------------------------------------------
-#define XBOX_OUTPUT_WIDTH   640
-#define XBOX_OUTPUT_HEIGHT  480
+#define XBOX_OUTPUT_DEFAULT_WIDTH    640u
+#define XBOX_OUTPUT_DEFAULT_HEIGHT   480u
+#define XBOX_OUTPUT_MAX_WIDTH        1280u
+#define XBOX_OUTPUT_MAX_HEIGHT       720u
+#define XBOX_DISPLAY_480WIDE_WIDTH   856u
+#define XBOX_DISPLAY_480WIDE_HEIGHT  480u
 
 // ---------------------------------------------------------------------------
 // Log shim - VC71 doesn't support variadic macros. Inline variadic functions
@@ -79,10 +93,22 @@ namespace TFE_RenderBackend
     static IDirect3DDevice8*  s_device     = NULL;
     static IDirect3DTexture8* s_vdispTex   = NULL;   // Virtual display texture (XRGB)
     static IDirect3DSurface8* s_vdispSurf  = NULL;   // Level-0 surface of s_vdispTex
-    static IDirect3DTexture8* s_startTex   = NULL;   // 640x480 start screen texture
+    static IDirect3DTexture8* s_startTex   = NULL;   // Start/menu/overlay texture
     static bool               s_vdispHasAlpha = false;
     static u32                s_vdispTexWidth = 0;
     static u32                s_vdispTexHeight = 0;
+    static u32                s_startTexWidth = 0;
+    static u32                s_startTexHeight = 0;
+
+    static u32  s_outputWidth = XBOX_OUTPUT_DEFAULT_WIDTH;
+    static u32  s_outputHeight = XBOX_OUTPUT_DEFAULT_HEIGHT;
+    static u32  s_displayInfoWidth = XBOX_OUTPUT_DEFAULT_WIDTH;
+    static u32  s_displayInfoHeight = XBOX_OUTPUT_DEFAULT_HEIGHT;
+    static bool s_outputWidescreen = false;
+    static bool s_outputProgressive = false;
+
+#define XBOX_OUTPUT_WIDTH  s_outputWidth
+#define XBOX_OUTPUT_HEIGHT s_outputHeight
 
     static u32 s_vdispWidth  = 320;
     static u32 s_vdispHeight = 200;
@@ -139,14 +165,11 @@ namespace TFE_RenderBackend
     static s32  s_safeZoneOffsetY = 0;
 
     // Scratch expand buffer (palette -> XRGB).
-    // Xbox virtual displays are capped to the fixed 640x480 output. Keeping
-    // these at the old "safe" 1280x960 size reserved almost 10 MB across the
-    // expand/capture buffers, which starves retail hardware before Landru can
-    // allocate a display texture for the boot intro.
-    #define MAX_VDISP_PIXELS (XBOX_OUTPUT_WIDTH * XBOX_OUTPUT_HEIGHT)
+    // The normal Xbox path stays at 640x480 (or 856x480 for anamorphic
+    // widescreen), but the XEMU HDTV experiment can request 1280x720. Cap the
+    // static buffers there instead of the old 1280x960 reservation.
+    #define MAX_VDISP_PIXELS (XBOX_OUTPUT_MAX_WIDTH * XBOX_OUTPUT_MAX_HEIGHT)
     static u32 s_expandBuf[MAX_VDISP_PIXELS];
-    static u32 s_captureBuf[MAX_VDISP_PIXELS];
-    static bool s_captureBufValid = false;
 
     static bool s_pauseOverlayEnabled = false;
     static s32  s_pauseSelection = 0;
@@ -210,10 +233,12 @@ namespace TFE_RenderBackend
     static const s32 XPDA_SCREEN_SRC_Y    = 24;
     static const s32 XPDA_SCREEN_SRC_W    = 592;
     static const s32 XPDA_SCREEN_SRC_H    = 314;
-    static const s32 XPAUSE_SCREEN_SRC_X  = 46;
-    static const s32 XPAUSE_SCREEN_SRC_Y  = 60;
-    static const s32 XPAUSE_SCREEN_SRC_W  = 540;
-    static const s32 XPAUSE_SCREEN_SRC_H  = 251;
+    // The pause, options, and cheat overlays all use the complete transparent
+    // screen opening measured in the 640x400 PDA source artwork.
+    static const s32 XPAUSE_SCREEN_SRC_X  = XPDA_SCREEN_SRC_X;
+    static const s32 XPAUSE_SCREEN_SRC_Y  = XPDA_SCREEN_SRC_Y;
+    static const s32 XPAUSE_SCREEN_SRC_W  = XPDA_SCREEN_SRC_W;
+    static const s32 XPAUSE_SCREEN_SRC_H  = XPDA_SCREEN_SRC_H;
 
     static inline s32 pauseClamp(s32 v, s32 lo, s32 hi)
     {
@@ -264,12 +289,9 @@ namespace TFE_RenderBackend
 
     static void pauseFillPdaScreen(u32* dst, s32 width, s32 height, s32 frameX, s32 frameY, s32 frameW, s32 frameH, u32 color)
     {
-        // The measured pause rect is in 640x400 art/screen coordinates. The
-        // Xbox output is 640x480, so only Y needs conversion.
-        const s32 y0 = (XPAUSE_SCREEN_SRC_Y * height) / XBOX_PDA_FRAME_HEIGHT;
-        const s32 y1 = ((XPAUSE_SCREEN_SRC_Y + XPAUSE_SCREEN_SRC_H) * height) / XBOX_PDA_FRAME_HEIGHT;
-        pauseFillRect(dst, width, height, XPAUSE_SCREEN_SRC_X, y0,
-            XPAUSE_SCREEN_SRC_W, y1 - y0, color);
+        pauseFillPdaSourceRect(dst, width, height, frameX, frameY, frameW, frameH,
+            XPAUSE_SCREEN_SRC_X, XPAUSE_SCREEN_SRC_Y,
+            XPAUSE_SCREEN_SRC_W, XPAUSE_SCREEN_SRC_H, color);
     }
 
     static void pauseDrawFrame(u32* dst, s32 width, s32 height, s32 x, s32 y, s32 w, s32 h)
@@ -278,6 +300,10 @@ namespace TFE_RenderBackend
         const s32 frameH = h + 60;
         const s32 frameX = x - 60;
         const s32 frameY = y - 30;
+        const s32 greenX0 = frameX + (XPAUSE_SCREEN_SRC_X * frameW) / XBOX_PDA_FRAME_WIDTH;
+        const s32 greenY0 = frameY + (XPAUSE_SCREEN_SRC_Y * frameH) / XBOX_PDA_FRAME_HEIGHT;
+        const s32 greenX1 = frameX + ((XPAUSE_SCREEN_SRC_X + XPAUSE_SCREEN_SRC_W) * frameW) / XBOX_PDA_FRAME_WIDTH;
+        const s32 greenY1 = frameY + ((XPAUSE_SCREEN_SRC_Y + XPAUSE_SCREEN_SRC_H) * frameH) / XBOX_PDA_FRAME_HEIGHT;
 
         pauseFillRect(dst, width, height, x + 8, y + 8, w, h, XPAUSE_GREY_DARK);
         pauseFillPdaScreen(dst, width, height, frameX, frameY, frameW, frameH, XPAUSE_GREEN_DARK);
@@ -295,9 +321,7 @@ namespace TFE_RenderBackend
                 const u32 src = c_xboxPdaFrame[sy * XBOX_PDA_FRAME_WIDTH + sx];
                 const u32 a = (src >> 24) & 0xFFu;
                 if (!a) continue;
-                const s32 greenY0 = (XPAUSE_SCREEN_SRC_Y * height) / XBOX_PDA_FRAME_HEIGHT;
-                const s32 greenY1 = ((XPAUSE_SCREEN_SRC_Y + XPAUSE_SCREEN_SRC_H) * height) / XBOX_PDA_FRAME_HEIGHT;
-                if (px >= XPAUSE_SCREEN_SRC_X && px < XPAUSE_SCREEN_SRC_X + XPAUSE_SCREEN_SRC_W &&
+                if (px >= greenX0 && px < greenX1 &&
                     py >= greenY0 && py < greenY1 &&
                     ((src & 0x00FFFFFFu) == 0))
                 {
@@ -1263,7 +1287,7 @@ namespace TFE_RenderBackend
         const s32 originX = (width - XPAUSE_DESIGN_WIDTH) / 2;
         const s32 originY = (height - XPAUSE_DESIGN_HEIGHT) / 2;
         const s32 boxX = originX + (XPAUSE_DESIGN_WIDTH - boxW) / 2;
-        const s32 boxY = originY + (XPAUSE_DESIGN_HEIGHT - boxH) / 2 - 34;
+        const s32 boxY = originY + (XPAUSE_DESIGN_HEIGHT - boxH) / 2;
         pauseDrawFrame(s_expandBuf, width, height, boxX, boxY, boxW, boxH);
 
         const s32 visible = 7;
@@ -1566,7 +1590,17 @@ namespace TFE_RenderBackend
         }
     }
 
-    static void optionsDrawTriangle(s32 cx, s32 y, s32 halfW, s32 h, bool up, u32 color)
+    static s32 optionsCanvasWidth(bool pauseStyle)
+    {
+        return pauseStyle ? (s32)s_vdispWidth : (s32)XBOX_OUTPUT_WIDTH;
+    }
+
+    static s32 optionsCanvasHeight(bool pauseStyle)
+    {
+        return pauseStyle ? (s32)s_vdispHeight : (s32)XBOX_OUTPUT_HEIGHT;
+    }
+
+    static void optionsDrawTriangle(s32 width, s32 height, s32 cx, s32 y, s32 halfW, s32 h, bool up, u32 color)
     {
         for (s32 row = 0; row < h; row++)
         {
@@ -1575,13 +1609,13 @@ namespace TFE_RenderBackend
             for (s32 x = cx - w; x <= cx + w; x++)
             {
                 const s32 py = y + row;
-                if (x < 0 || x >= XBOX_OUTPUT_WIDTH || py < 0 || py >= XBOX_OUTPUT_HEIGHT) continue;
-                s_expandBuf[py * XBOX_OUTPUT_WIDTH + x] = color;
+                if (x < 0 || x >= width || py < 0 || py >= height) continue;
+                s_expandBuf[py * width + x] = color;
             }
         }
     }
 
-    static void optionsDrawCornerMarker(s32 x, s32 y, bool right, bool bottom, u32 edge, u32 highlight)
+    static void optionsDrawCornerMarker(s32 width, s32 height, s32 x, s32 y, bool right, bool bottom, u32 edge, u32 highlight)
     {
         const s32 len = 44;
         const s32 thick = 5;
@@ -1590,11 +1624,11 @@ namespace TFE_RenderBackend
         const s32 vX = right ? x - thick + 1 : x;
         const s32 vY = bottom ? y - len + 1 : y;
 
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, hX, hY, len, thick, edge);
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, vX, vY, thick, len, edge);
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+        pauseFillRect(s_expandBuf, width, height, hX, hY, len, thick, edge);
+        pauseFillRect(s_expandBuf, width, height, vX, vY, thick, len, edge);
+        pauseFillRect(s_expandBuf, width, height,
             hX + (right ? 3 : 0), hY + (bottom ? 0 : 3), len - 3, 2, highlight);
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+        pauseFillRect(s_expandBuf, width, height,
             vX + (right ? 0 : 3), vY + (bottom ? 3 : 0), 2, len - 3, highlight);
     }
 
@@ -1602,33 +1636,39 @@ namespace TFE_RenderBackend
     {
         if (strcmp(s_optionsTitle, "VIDEO") != 0) return;
 
+        const s32 width = optionsCanvasWidth(pauseStyle);
+        const s32 height = optionsCanvasHeight(pauseStyle);
         const u32 edge = pauseStyle ? XPAUSE_GREEN_EDGE : 0xFFFF3030u;
         const u32 highlight = pauseStyle ? XPAUSE_WHITE : 0xFFFFFFFFu;
-        optionsDrawCornerMarker(0, 0, false, false, edge, highlight);
-        optionsDrawCornerMarker(XBOX_OUTPUT_WIDTH - 1, 0, true, false, edge, highlight);
-        optionsDrawCornerMarker(0, XBOX_OUTPUT_HEIGHT - 1, false, true, edge, highlight);
-        optionsDrawCornerMarker(XBOX_OUTPUT_WIDTH - 1, XBOX_OUTPUT_HEIGHT - 1, true, true, edge, highlight);
+        optionsDrawCornerMarker(width, height, 0, 0, false, false, edge, highlight);
+        optionsDrawCornerMarker(width, height, width - 1, 0, true, false, edge, highlight);
+        optionsDrawCornerMarker(width, height, 0, height - 1, false, true, edge, highlight);
+        optionsDrawCornerMarker(width, height, width - 1, height - 1, true, true, edge, highlight);
     }
 
     static void optionsDrawSlider(s32 x, s32 y, s32 w, const XboxOptionsItem* item, bool selected, bool pauseStyle)
     {
+        const s32 width = optionsCanvasWidth(pauseStyle);
+        const s32 height = optionsCanvasHeight(pauseStyle);
         const u32 dim = pauseStyle ? 0xFF5F775Fu : 0xFF4F4A34u;
         const u32 fill = pauseStyle ? XPAUSE_GREEN_EDGE : 0xFFFF3030u;
         const u32 knob = selected ? 0xFFE8E8E8u : 0xFF8E8B72u;
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, x, y + 7, w, 4, dim);
+        pauseFillRect(s_expandBuf, width, height, x, y + 7, w, 4, dim);
 
         s32 range = item->maxValue - item->minValue;
         if (range <= 0) range = 1;
         s32 pos = ((item->value - item->minValue) * w) / range;
         if (pos < 0) pos = 0;
         if (pos > w) pos = w;
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, x, y + 7, pos, 4, fill);
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, x + pos - 3, y + 2, 6, 14, knob);
+        pauseFillRect(s_expandBuf, width, height, x, y + 7, pos, 4, fill);
+        pauseFillRect(s_expandBuf, width, height, x + pos - 3, y + 2, 6, 14, knob);
     }
 
     struct OptionsLayout
     {
         bool pauseStyle;
+        s32 canvasW;
+        s32 canvasH;
         s32 panelX;
         s32 panelY;
         s32 panelW;
@@ -1665,19 +1705,27 @@ namespace TFE_RenderBackend
     {
         memset(layout, 0, sizeof(*layout));
         layout->pauseStyle = pauseStyle;
+        layout->canvasW = optionsCanvasWidth(pauseStyle);
+        layout->canvasH = optionsCanvasHeight(pauseStyle);
         layout->visibleRows = 7;
 
         if (pauseStyle)
         {
             layout->panelW = XPAUSE_PANEL_WIDTH;
             layout->panelH = XPAUSE_PANEL_HEIGHT;
-            layout->panelX = (XBOX_OUTPUT_WIDTH - layout->panelW) / 2;
-            layout->panelY = (XBOX_OUTPUT_HEIGHT - layout->panelH) / 2;
+            layout->panelX = (layout->canvasW - layout->panelW) / 2;
+            layout->panelY = (layout->canvasH - layout->panelH) / 2;
 
-            layout->screenX = XPAUSE_SCREEN_SRC_X;
-            layout->screenY = (XPAUSE_SCREEN_SRC_Y * XBOX_OUTPUT_HEIGHT) / XBOX_PDA_FRAME_HEIGHT;
-            layout->screenW = XPAUSE_SCREEN_SRC_W;
-            layout->screenH = ((XPAUSE_SCREEN_SRC_Y + XPAUSE_SCREEN_SRC_H) * XBOX_OUTPUT_HEIGHT) / XBOX_PDA_FRAME_HEIGHT - layout->screenY;
+            const s32 frameX = layout->panelX - 60;
+            const s32 frameY = layout->panelY - 30;
+            const s32 frameW = layout->panelW + 120;
+            const s32 frameH = layout->panelH + 60;
+            layout->screenX = frameX + (XPAUSE_SCREEN_SRC_X * frameW) / XBOX_PDA_FRAME_WIDTH;
+            layout->screenY = frameY + (XPAUSE_SCREEN_SRC_Y * frameH) / XBOX_PDA_FRAME_HEIGHT;
+            const s32 screenX1 = frameX + ((XPAUSE_SCREEN_SRC_X + XPAUSE_SCREEN_SRC_W) * frameW) / XBOX_PDA_FRAME_WIDTH;
+            const s32 screenY1 = frameY + ((XPAUSE_SCREEN_SRC_Y + XPAUSE_SCREEN_SRC_H) * frameH) / XBOX_PDA_FRAME_HEIGHT;
+            layout->screenW = screenX1 - layout->screenX;
+            layout->screenH = screenY1 - layout->screenY;
 
             const s32 sideInset = layout->screenW / 12;
             layout->rowH = pauseClamp(layout->screenH / 10, 28, XPAUSE_ROW_STEP);
@@ -1697,10 +1745,10 @@ namespace TFE_RenderBackend
         }
         else
         {
-            layout->panelW = optionsEven((XBOX_OUTPUT_WIDTH * 73) / 100);
-            layout->panelH = (XBOX_OUTPUT_HEIGHT * 27) / 40;
-            layout->panelX = (XBOX_OUTPUT_WIDTH - layout->panelW) / 2;
-            layout->panelY = XBOX_OUTPUT_HEIGHT / 6 - 4;
+            layout->panelW = optionsEven((layout->canvasW * 73) / 100);
+            layout->panelH = (layout->canvasH * 27) / 40;
+            layout->panelX = (layout->canvasW - layout->panelW) / 2;
+            layout->panelY = layout->canvasH / 6 - 4;
 
             layout->screenX = layout->panelX;
             layout->screenY = layout->panelY;
@@ -1708,7 +1756,7 @@ namespace TFE_RenderBackend
             layout->screenH = layout->panelH;
 
             const s32 bandInset = layout->panelW / 40;
-            layout->rowH = (XBOX_OUTPUT_HEIGHT * 3) / 40;
+            layout->rowH = (layout->canvasH * 3) / 40;
             layout->selectedH = layout->rowH - 6;
             layout->rowsX = layout->panelX + bandInset;
             layout->rowsW = layout->panelW - bandInset * 2;
@@ -1716,7 +1764,7 @@ namespace TFE_RenderBackend
             layout->valueRightX = layout->panelX + layout->panelW - layout->panelW / 20;
             layout->sliderW = (layout->panelW * 29) / 100;
             layout->sliderX = layout->valueRightX - layout->sliderW - layout->panelW / 8;
-            layout->titleCenterX = XBOX_OUTPUT_WIDTH / 2;
+            layout->titleCenterX = layout->canvasW / 2;
             layout->titleY = layout->panelY / 2;
             layout->firstRowCenterY = layout->panelY + layout->panelH / 5 - 2;
             layout->arrowX = layout->panelX + layout->panelW - bandInset;
@@ -1733,15 +1781,17 @@ namespace TFE_RenderBackend
     static void optionsDrawTextLabel(const char* text, s32 x, s32 centerY, u32 color, bool pauseStyle)
     {
         if (!text || !text[0]) return;
+        const s32 width = optionsCanvasWidth(pauseStyle);
+        const s32 height = optionsCanvasHeight(pauseStyle);
         if (pauseStyle)
         {
             const s32 baseline = wheelTextBaselineForCenter(text, centerY, 2, 3);
-            wheelDrawTextScaledTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+            wheelDrawTextScaledTo(s_expandBuf, width, height,
                 text, x, baseline, color, 2, 3);
         }
         else
         {
-            loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+            loadDrawText(s_expandBuf, width, height,
                 text, x, loadTextYForCenter(centerY, 1), 1, color);
         }
     }
@@ -1749,15 +1799,17 @@ namespace TFE_RenderBackend
     static void optionsDrawTextRight(const char* text, s32 rightX, s32 centerY, u32 color, bool pauseStyle)
     {
         if (!text || !text[0]) return;
+        const s32 width = optionsCanvasWidth(pauseStyle);
+        const s32 height = optionsCanvasHeight(pauseStyle);
         if (pauseStyle)
         {
             const s32 baseline = wheelTextBaselineForCenter(text, centerY, 2, 3);
-            wheelDrawTextRightScaledTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+            wheelDrawTextRightScaledTo(s_expandBuf, width, height,
                 text, rightX, baseline, color, 2, 3);
         }
         else
         {
-            loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+            loadDrawTextRight(s_expandBuf, width, height,
                 text, rightX, loadTextYForCenter(centerY, 1), 1, color);
         }
     }
@@ -1778,7 +1830,7 @@ namespace TFE_RenderBackend
             if (selected)
             {
                 const u32 bar = pauseStyle ? XPAUSE_GREEN_MID : 0xFF24180Eu;
-                pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+                pauseFillRect(s_expandBuf, layout->canvasW, layout->canvasH,
                     layout->rowsX, rowCenterY - layout->selectedH / 2,
                     layout->rowsW, layout->selectedH, bar);
             }
@@ -1797,7 +1849,7 @@ namespace TFE_RenderBackend
                 const XboxDukeButtonIconId icon = (XboxDukeButtonIconId)s_optionsItems[index].valueIcon;
                 const s32 iconH = pauseStyle ? 20 : 24;
                 const s32 iconW = dukeIconWidthForHeight(icon, iconH);
-                dukeDrawIconTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, icon,
+                dukeDrawIconTo(s_expandBuf, layout->canvasW, layout->canvasH, icon,
                     layout->valueRightX - iconW, rowCenterY - iconH / 2, iconH, 0xFFFFFFFFu);
             }
             else
@@ -1814,40 +1866,40 @@ namespace TFE_RenderBackend
 
     static void optionsBuildFrame()
     {
-        if (s_optionsPauseStyle)
-        {
-            memset(s_expandBuf, 0, XBOX_OUTPUT_WIDTH * XBOX_OUTPUT_HEIGHT * sizeof(u32));
-        }
-        else
-        {
-            startDrawStarfield(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_optionsFrame);
-        }
-
         OptionsLayout layout;
         optionsBuildLayout(s_optionsPauseStyle, &layout);
         const bool pauseStyle = layout.pauseStyle;
 
         if (pauseStyle)
         {
-            pauseDrawFrame(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+            memset(s_expandBuf, 0, layout.canvasW * layout.canvasH * sizeof(u32));
+        }
+        else
+        {
+            startDrawStarfield(s_expandBuf, layout.canvasW, layout.canvasH, s_optionsFrame);
+        }
+
+        if (pauseStyle)
+        {
+            pauseDrawFrame(s_expandBuf, layout.canvasW, layout.canvasH,
                 layout.panelX, layout.panelY, layout.panelW, layout.panelH);
         }
         else
         {
-            pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+            pauseFillRect(s_expandBuf, layout.canvasW, layout.canvasH,
                 layout.panelX, layout.panelY, layout.panelW, layout.panelH, 0xCC080604u);
-            loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+            loadStrokeRect(s_expandBuf, layout.canvasW, layout.canvasH,
                 layout.panelX, layout.panelY, layout.panelW, layout.panelH, 0xFF4F4A34u);
         }
 
         if (pauseStyle)
         {
-            wheelDrawTextCenterScaledTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+            wheelDrawTextCenterScaledTo(s_expandBuf, layout.canvasW, layout.canvasH,
                 s_optionsTitle, layout.titleCenterX, layout.titleY, XPAUSE_WHITE, 1, 1);
         }
         else
         {
-            loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT,
+            loadDrawTextCenter(s_expandBuf, layout.canvasW, layout.canvasH,
                 s_optionsTitle, layout.titleCenterX, layout.titleY, 3, 0xFFFF3030u);
         }
 
@@ -1856,11 +1908,13 @@ namespace TFE_RenderBackend
         const u32 arrowColor = pauseStyle ? XPAUSE_GREEN_EDGE : 0xFFFF3030u;
         if (s_optionsScroll > 0)
         {
-            optionsDrawTriangle(layout.arrowX, layout.arrowUpY, 7, OPTIONS_SCROLL_ARROW_H, true, arrowColor);
+            optionsDrawTriangle(layout.canvasW, layout.canvasH,
+                layout.arrowX, layout.arrowUpY, 7, OPTIONS_SCROLL_ARROW_H, true, arrowColor);
         }
         if (s_optionsScroll + 7 < s_optionsItemCount)
         {
-            optionsDrawTriangle(layout.arrowX, layout.arrowDownY, 7, OPTIONS_SCROLL_ARROW_H, false, arrowColor);
+            optionsDrawTriangle(layout.canvasW, layout.canvasH,
+                layout.arrowX, layout.arrowDownY, 7, OPTIONS_SCROLL_ARROW_H, false, arrowColor);
         }
 
         if (!pauseStyle)
@@ -1923,19 +1977,31 @@ namespace TFE_RenderBackend
         footerDrawItem(XFT_A_CONFIRM, 28, 0xFF33D033u);
     }
 
-    static bool startUploadTexture()
+    static bool startUploadTexture(u32 width, u32 height)
     {
-        if (!s_deviceReady) return false;
-        if (!s_startTex)
+        if (!s_deviceReady || !width || !height ||
+            width > XBOX_OUTPUT_MAX_WIDTH || height > XBOX_OUTPUT_MAX_HEIGHT)
         {
+            return false;
+        }
+        if (!s_startTex || width > s_startTexWidth || height > s_startTexHeight)
+        {
+            const u32 newWidth = width > s_startTexWidth ? width : s_startTexWidth;
+            const u32 newHeight = height > s_startTexHeight ? height : s_startTexHeight;
+            IDirect3DTexture8* newTexture = NULL;
             HRESULT hr = s_device->CreateTexture(
-                XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 1, 0,
-                D3DFMT_LIN_A8R8G8B8, D3DPOOL_MANAGED, &s_startTex);
+                newWidth, newHeight, 1, 0,
+                D3DFMT_LIN_A8R8G8B8, D3DPOOL_MANAGED, &newTexture);
             if (FAILED(hr))
             {
-                RB_LOG_ERROR("Create start texture failed hr=0x%08x", hr);
+                RB_LOG_ERROR("Create start texture %ux%u failed hr=0x%08x",
+                    newWidth, newHeight, hr);
                 return false;
             }
+            if (s_startTex) s_startTex->Release();
+            s_startTex = newTexture;
+            s_startTexWidth = newWidth;
+            s_startTexHeight = newHeight;
         }
 
         D3DLOCKED_RECT lr;
@@ -1947,8 +2013,8 @@ namespace TFE_RenderBackend
         }
         const u8* srcRow = (const u8*)s_expandBuf;
         u8* dstRow = (u8*)lr.pBits;
-        const u32 pitch = XBOX_OUTPUT_WIDTH * 4;
-        for (u32 y = 0; y < XBOX_OUTPUT_HEIGHT; y++)
+        const u32 pitch = width * 4;
+        for (u32 y = 0; y < height; y++)
         {
             memcpy(dstRow, srcRow, pitch);
             srcRow += pitch;
@@ -2042,14 +2108,84 @@ namespace TFE_RenderBackend
         setViewportRect(s_destRect);
     }
 
+    static DWORD xboxPresentFlags()
+    {
+        DWORD flags = D3DPRESENTFLAG_LOCKABLE_BACKBUFFER;
+        // Retail Xbox renderers use the 10:11 pixel-aspect flag as the base
+        // for both 4:3 and anamorphic-widescreen 640x480 output. 720p uses
+        // square pixels and must not carry this flag.
+        if (s_outputWidth == 640u && s_outputHeight == 480u)
+        {
+            flags |= D3DPRESENTFLAG_10X11PIXELASPECTRATIO;
+        }
+        if (s_outputWidescreen) flags |= D3DPRESENTFLAG_WIDESCREEN;
+        flags |= s_outputProgressive ? D3DPRESENTFLAG_PROGRESSIVE : D3DPRESENTFLAG_INTERLACED;
+        return flags;
+    }
+
+    static void xboxFillPresentParameters(D3DPRESENT_PARAMETERS* pp)
+    {
+        memset(pp, 0, sizeof(D3DPRESENT_PARAMETERS));
+        pp->BackBufferWidth              = XBOX_OUTPUT_WIDTH;
+        pp->BackBufferHeight             = XBOX_OUTPUT_HEIGHT;
+        pp->BackBufferFormat             = D3DFMT_A8R8G8B8;
+        pp->BackBufferCount              = 1;
+        pp->Windowed                     = FALSE;       // must be FALSE on Xbox
+        pp->EnableAutoDepthStencil       = TRUE;
+        pp->AutoDepthStencilFormat       = D3DFMT_D24S8;
+        pp->SwapEffect                   = D3DSWAPEFFECT_DISCARD;
+        pp->FullScreen_RefreshRateInHz   = D3DPRESENT_RATE_DEFAULT;
+        pp->hDeviceWindow                = NULL;
+        pp->FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_ONE_OR_IMMEDIATE;
+        pp->Flags                        = xboxPresentFlags();
+    }
+
+    void xboxSetVideoMode(u32 outputWidth, u32 outputHeight, u32 displayWidth, u32 displayHeight, bool widescreen, bool progressive)
+    {
+        if (s_deviceReady)
+        {
+            TFE_XboxLogf("Video", "xboxSetVideoMode ignored after device init");
+            return;
+        }
+
+        if (outputWidth < 320u || outputHeight < 200u ||
+            outputWidth > XBOX_OUTPUT_MAX_WIDTH || outputHeight > XBOX_OUTPUT_MAX_HEIGHT)
+        {
+            outputWidth = XBOX_OUTPUT_DEFAULT_WIDTH;
+            outputHeight = XBOX_OUTPUT_DEFAULT_HEIGHT;
+        }
+        if (displayWidth < 320u || displayHeight < 200u ||
+            displayWidth > XBOX_OUTPUT_MAX_WIDTH || displayHeight > XBOX_OUTPUT_MAX_HEIGHT)
+        {
+            displayWidth = outputWidth;
+            displayHeight = outputHeight;
+        }
+
+        s_outputWidth = outputWidth;
+        s_outputHeight = outputHeight;
+        s_displayInfoWidth = displayWidth;
+        s_displayInfoHeight = displayHeight;
+        s_outputWidescreen = widescreen;
+        s_outputProgressive = progressive;
+        computeDestRect();
+
+        TFE_XboxLogf("Video", "prepared output=%ux%u display=%ux%u widescreen=%d progressive=%d flags=0x%08x",
+            s_outputWidth, s_outputHeight, s_displayInfoWidth, s_displayInfoHeight,
+            s_outputWidescreen ? 1 : 0, s_outputProgressive ? 1 : 0, xboxPresentFlags());
+    }
+
     // -----------------------------------------------------------------------
     // Create / recreate the virtual display texture.
     // -----------------------------------------------------------------------
     static bool createVdispTexture(u32 width, u32 height)
     {
         const bool needsAlpha = s_vdispGpuMode;
-        const u32 texWidth = XBOX_OUTPUT_WIDTH;
-        const u32 texHeight = XBOX_OUTPUT_HEIGHT;
+        u32 texWidth = XBOX_OUTPUT_WIDTH;
+        u32 texHeight = XBOX_OUTPUT_HEIGHT;
+        if (width > texWidth) texWidth = width;
+        if (height > texHeight) texHeight = height;
+        if (texWidth > XBOX_OUTPUT_MAX_WIDTH) texWidth = XBOX_OUTPUT_MAX_WIDTH;
+        if (texHeight > XBOX_OUTPUT_MAX_HEIGHT) texHeight = XBOX_OUTPUT_MAX_HEIGHT;
 
         if (width > texWidth || height > texHeight)
         {
@@ -2082,8 +2218,9 @@ namespace TFE_RenderBackend
         // XbConvert.cpp:1105-1132 confirms swizzled vs linear classification.
         // Non-power-of-2 dimensions like 320x200 force linear in any case;
         // making it explicit removes ambiguity.)
-        // Allocate a full 640x480 backing texture once and reuse top-left
-        // logical subrects for 320x200 Landru and 640x480 menus/gameplay.
+        // Allocate a backing texture large enough for the selected logical
+        // display once, then reuse top-left subrects for Landru, menus, and
+        // gameplay.
         // This avoids late texture allocation after Landru/game arenas have
         // fragmented memory. Prefer alpha so the later GPU HUD overlay path
         // can also reuse the same surface.
@@ -2152,52 +2289,26 @@ namespace TFE_RenderBackend
         TFE_XboxLogf("RenderBackend", "init state=%dx%d flags=0x%08x refresh=%d(x100)",
             state.width, state.height, state.flags, (int)(state.refreshRate * 100.0f));
 
-        // Pass 0, NOT the D3D_SDK_VERSION macro. On this XDK install
-        // <d3d8.h> resolves to the PC DirectX 8 header which defines
-        // D3D_SDK_VERSION = 120; the Xbox runtime / CXBX-R HLE both
-        // expect 0. The PC header's COM vtables happen to be ABI-
-        // compatible with d3d8-xbox.lib so the rest of the code works
-        // unchanged - only the SDK-version argument needs overriding.
-        s_d3d = Direct3DCreate8(0);
+        // The forced compatibility header guarantees the stock Xbox D3D8
+        // declarations, including the Xbox SDK version and presentation ABI.
+        s_d3d = Direct3DCreate8(D3D_SDK_VERSION);
         if (!s_d3d)
         {
             RB_LOG_ERROR("Direct3DCreate8 failed");
             return false;
         }
+        s_d3d->SetPushBufferSize(1024 * 1024, 32 * 1024);
 
-        // Match xquake gl_fakegl.cpp InitD3DX() 1:1 for the Xbox path.
-        // Notably: EnableAutoDepthStencil = TRUE with D3DFMT_D24S8, and
-        // CreateDevice flag set is HARDWARE_VERTEXPROCESSING | PUREDEVICE.
-        // These are what xquake ships with on retail and what we adopt.
+        // Keep the existing Xbox D3D8 setup, then vary only the present mode
+        // fields needed for widescreen / HDTV experiments.
         D3DPRESENT_PARAMETERS pp;
-        memset(&pp, 0, sizeof(pp));
-        pp.BackBufferWidth              = XBOX_OUTPUT_WIDTH;
-        pp.BackBufferHeight             = XBOX_OUTPUT_HEIGHT;
-        pp.BackBufferFormat             = D3DFMT_X8R8G8B8;
-        pp.BackBufferCount              = 1;
-        pp.Windowed                     = FALSE;       // must be FALSE on Xbox
-        pp.EnableAutoDepthStencil       = TRUE;
-        pp.AutoDepthStencilFormat       = D3DFMT_D24S8;
-        // D3DSWAPEFFECT_COPY (not DISCARD) so the back buffer retains
-        // the just-presented frame after Present(). Upstream's escape-
-        // menu capture path is:
-        //   TFE_RenderBackend::swap(true);   // present current world
-        //   TFE_RenderBackend::copyBackbufferToRenderTarget(rt);
-        // The copy-after-swap only works if Present preserves back
-        // buffer contents. With DISCARD the back buffer is undefined
-        // after Present and the captured RT comes out black.
-        // COPY costs an extra back-to-front blit per frame; on NV2A
-        // at 640x480 that's ~1.2MB of fast video memory bandwidth -
-        // negligible compared to the world render cost.
-        pp.SwapEffect                   = D3DSWAPEFFECT_COPY;
-        pp.FullScreen_RefreshRateInHz   = 60;
-        pp.hDeviceWindow                = NULL;
-        pp.FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+        xboxFillPresentParameters(&pp);
 
-        // xquake hardcodes IMMEDIATE on Xbox. Record the requested vsync
-        // intent for reporting; we don't toggle the device's actual interval.
+        // Record the requested vsync intent for reporting; the Xbox backend
+        // keeps its present interval fixed here.
         s_vsync = (state.flags & WINFLAG_VSYNC) != 0;
-        TFE_XboxLogf("RenderBackend", "present interval=immediate (xquake match)");
+        TFE_XboxLogf("RenderBackend", "present interval=one-or-immediate flags=0x%08x output=%ux%u display=%ux%u",
+            pp.Flags, s_outputWidth, s_outputHeight, s_displayInfoWidth, s_displayInfoHeight);
 
         HRESULT hr = s_d3d->CreateDevice(
             D3DADAPTER_DEFAULT,
@@ -2207,6 +2318,31 @@ namespace TFE_RenderBackend
             &pp,
             &s_device);
         TFE_XboxLogf("RenderBackend", "CreateDevice hr=0x%08x dev=%p", hr, s_device);
+
+        if (FAILED(hr) &&
+            (s_outputWidth != XBOX_OUTPUT_DEFAULT_WIDTH ||
+             s_outputHeight != XBOX_OUTPUT_DEFAULT_HEIGHT ||
+             s_outputWidescreen || s_outputProgressive))
+        {
+            RB_LOG_ERROR("CreateDevice failed for requested output=%ux%u display=%ux%u flags=0x%08x hr=0x%08x; retrying 640x480 interlaced",
+                s_outputWidth, s_outputHeight, s_displayInfoWidth, s_displayInfoHeight, pp.Flags, hr);
+            if (s_device)
+            {
+                s_device->Release();
+                s_device = NULL;
+            }
+            xboxSetVideoMode(XBOX_OUTPUT_DEFAULT_WIDTH, XBOX_OUTPUT_DEFAULT_HEIGHT,
+                XBOX_OUTPUT_DEFAULT_WIDTH, XBOX_OUTPUT_DEFAULT_HEIGHT, false, false);
+            xboxFillPresentParameters(&pp);
+            hr = s_d3d->CreateDevice(
+                D3DADAPTER_DEFAULT,
+                D3DDEVTYPE_HAL,
+                0,
+                D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE,
+                &pp,
+                &s_device);
+            TFE_XboxLogf("RenderBackend", "CreateDevice fallback hr=0x%08x dev=%p", hr, s_device);
+        }
 
         if (FAILED(hr))
         {
@@ -2240,11 +2376,18 @@ namespace TFE_RenderBackend
 
         computeDestRect();
         s_deviceReady = true;
-        if (!createVdispTexture(XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT))
         {
-            RB_LOG_ERROR("Virtual display prewarm failed");
+            u32 prewarmW = XBOX_OUTPUT_WIDTH;
+            u32 prewarmH = XBOX_OUTPUT_HEIGHT;
+            if (s_displayInfoWidth > prewarmW) prewarmW = s_displayInfoWidth;
+            if (s_displayInfoHeight > prewarmH) prewarmH = s_displayInfoHeight;
+            if (!createVdispTexture(prewarmW, prewarmH))
+            {
+                RB_LOG_ERROR("Virtual display prewarm failed");
+            }
         }
-        RB_LOG_MSG("D3D8 device created. Output: %dx%d", XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT);
+        RB_LOG_MSG("D3D8 device created. Output: %dx%d display=%dx%d flags=0x%08x",
+            XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_displayInfoWidth, s_displayInfoHeight, xboxPresentFlags());
         TFE_XboxLogf("RenderBackend", "device ready dest=%ld,%ld,%ld,%ld",
             s_destRect.left, s_destRect.top, s_destRect.right, s_destRect.bottom);
         return true;
@@ -2258,6 +2401,8 @@ namespace TFE_RenderBackend
         if (s_p8Palette) { s_p8Palette->Release(); s_p8Palette = NULL; }
         s_p8PaletteDirty = true;
         if (s_startTex)   { s_startTex->Release();   s_startTex   = NULL; }
+        s_startTexWidth = 0;
+        s_startTexHeight = 0;
         if (s_vdispSurf)  { s_vdispSurf->Release();  s_vdispSurf  = NULL; }
         if (s_vdispTex)   { s_vdispTex->Release();   s_vdispTex   = NULL; }
         s_vdispTexWidth = 0;
@@ -2353,9 +2498,6 @@ namespace TFE_RenderBackend
             s_expandBuf[i] = (idx == 0) ? 0u
                 : ((s_paletteCpu[idx] & 0x00FFFFFFu) | 0xFF000000u);
         }
-
-        memcpy(s_captureBuf, s_expandBuf, pixels * sizeof(u32));
-        s_captureBufValid = true;
 
         pauseCompositeOverlay();
         briefingCompositeFooter();
@@ -2702,16 +2844,18 @@ namespace TFE_RenderBackend
             {
                 blitVdispQuad(/*alphaTest*/false);
             }
+            const u32 optionsWidth = s_optionsPauseStyle ? s_vdispWidth : XBOX_OUTPUT_WIDTH;
+            const u32 optionsHeight = s_optionsPauseStyle ? s_vdispHeight : XBOX_OUTPUT_HEIGHT;
             optionsBuildFrame();
-            if (startUploadTexture())
+            if (startUploadTexture(optionsWidth, optionsHeight))
             {
-                blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_optionsPauseStyle);
+                blitTextureQuad(s_startTex, optionsWidth, optionsHeight, s_optionsPauseStyle);
             }
         }
         else if (s_missionCompleteScreenEnabled)
         {
             missionCompleteBuildFrame();
-            if (startUploadTexture())
+            if (startUploadTexture(XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT))
             {
                 blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, /*alphaTest*/false);
             }
@@ -2719,7 +2863,7 @@ namespace TFE_RenderBackend
         else if (s_loadScreenEnabled)
         {
             loadBuildFrame();
-            if (startUploadTexture())
+            if (startUploadTexture(XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT))
             {
                 blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, /*alphaTest*/false);
             }
@@ -2727,7 +2871,7 @@ namespace TFE_RenderBackend
         else if (s_modScreenEnabled)
         {
             modBuildFrame();
-            if (startUploadTexture())
+            if (startUploadTexture(XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT))
             {
                 blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, /*alphaTest*/false);
             }
@@ -2735,7 +2879,7 @@ namespace TFE_RenderBackend
         else if (s_startScreenEnabled)
         {
             startBuildFrame();
-            if (startUploadTexture())
+            if (startUploadTexture(XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT))
             {
                 blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, /*alphaTest*/false);
             }
@@ -2755,8 +2899,8 @@ namespace TFE_RenderBackend
     void getDisplayInfo(DisplayInfo* displayInfo)
     {
         if (!displayInfo) return;
-        displayInfo->width       = XBOX_OUTPUT_WIDTH;
-        displayInfo->height      = XBOX_OUTPUT_HEIGHT;
+        displayInfo->width       = s_displayInfoWidth;
+        displayInfo->height      = s_displayInfoHeight;
         displayInfo->refreshRate = s_vsync ? 60.0f : 0.0f;
     }
 
@@ -2935,7 +3079,7 @@ namespace TFE_RenderBackend
         if (!mem) return;
         const u32 outW = XBOX_OUTPUT_WIDTH;
         const u32 outH = XBOX_OUTPUT_HEIGHT;
-        const u32* srcBuf = s_captureBufValid ? s_captureBuf : s_expandBuf;
+        const u32* srcBuf = s_expandBuf;
         if (s_vdispWidth == outW && s_vdispHeight == outH)
         {
             memcpy(mem, srcBuf, outW * outH * sizeof(u32));
@@ -2948,6 +3092,24 @@ namespace TFE_RenderBackend
             {
                 const u32 sx = s_vdispWidth ? (x * s_vdispWidth) / outW : 0;
                 mem[y * outW + x] = srcBuf[sy * s_vdispWidth + sx] | 0xFF000000u;
+            }
+        }
+    }
+    void xboxCaptureScreenToMemoryScaled(u32* mem, u32 outWidth, u32 outHeight)
+    {
+        if (!mem || !outWidth || !outHeight) return;
+        if (!s_vdispWidth || !s_vdispHeight)
+        {
+            memset(mem, 0, outWidth * outHeight * sizeof(u32));
+            return;
+        }
+        for (u32 y = 0; y < outHeight; y++)
+        {
+            const u32 sy = (y * s_vdispHeight) / outHeight;
+            for (u32 x = 0; x < outWidth; x++)
+            {
+                const u32 sx = (x * s_vdispWidth) / outWidth;
+                mem[y * outWidth + x] = s_expandBuf[sy * s_vdispWidth + sx] | 0xFF000000u;
             }
         }
     }

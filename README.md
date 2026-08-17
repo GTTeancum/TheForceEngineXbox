@@ -1,11 +1,16 @@
 # TheForceEngineXbox
 
+<p align="center">
+  <img src="box%20art.png" alt="The Force Engine Xbox box art" width="806">
+</p>
+
 TheForceEngineXbox is an original Xbox port of
 [The Force Engine](https://github.com/luciusDXL/TheForceEngine), the open-source
 Dark Forces engine recreation.
 
-This fork builds a real `default.xbe` for retail Xbox hardware and CXBX-R. It
-does not include Star Wars: Dark Forces. You need your own PC copy of the game.
+This fork builds a real `default.xbe` for retail Xbox hardware, XEMU, and
+CXBX-R. It does not include Star Wars: Dark Forces. You need your own PC copy
+of the game.
 
 ## Download
 
@@ -19,6 +24,21 @@ TheForceEngine-Xbox-Install.zip
 
 The zip is an overlay package. Copy your PC Dark Forces install to the Xbox
 first, then extract this zip over it.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/xemu-main-menu-480p-wide.png" alt="The Force Engine Xbox main menu in XEMU" width="49%">
+  <img src="docs/images/xemu-secbase-480p-wide.png" alt="SECBASE gameplay in 480p widescreen in XEMU" width="49%">
+</p>
+
+Both screenshots were captured with XEMU's native screenshot function.
+
+## 1.1.1 Patch Notes
+
+- Fixed a 4:3 480p startup failure that could report `Unable to determine
+  default Xbox backbuffer` when 480p was enabled in the Xbox dashboard.
+- Updated the in-game main-menu version label to `VER 1.1.1`.
 
 ## Install
 
@@ -79,6 +99,7 @@ default_XTIMAGE.xbx
 TitleMeta.xbx
 TitleImage.xbx
 SaveImage.xbx
+box art.png
 README.txt
 
 DARK\effects.json
@@ -125,18 +146,20 @@ project or in the release zip.
 
 ## Current State
 
-This is a 1.0 release-candidate era Xbox build. The focus is hardware stability
-and a complete couch-playable Dark Forces experience.
+This is the 1.1.1 release. The focus is hardware stability and a complete
+couch-playable Dark Forces experience.
 
 Working in this port:
 
 - Original Xbox `default.xbe` output.
-- 640x480 software-rendered gameplay presented through the Xbox D3D8 backend.
-- Native Xbox start menu, load menu, options menu, pause/datapad screens, and
-  mod browser.
-- XInput controller support with separate X/Y look sensitivity, right-stick
-  deadzone, volume settings, adjustable screen safe zone, and remappable core
-  actions.
+- Software-rendered gameplay presented through the Xbox D3D8 backend, with
+  4:3 and widescreen 480p output selected by the Xbox dashboard video settings.
+- Native Xbox start menu, load menu, pause/datapad screens, mod browser, and
+  Options menu split into Controls, Video, and Audio submenus.
+- XInput controller support with remappable core actions, separate X/Y aim
+  sensitivity, right-stick deadzone control, and right-stick Y-axis inversion.
+- Video settings for adjustable screen safe zone width, height, and shift.
+- Audio settings for in-game volume control.
 - Mission briefing flow, mission completion flow, and difficulty selection.
 - Save/load support using the Xbox title save area, including save thumbnails.
 - DirectSound audio path for game audio.
@@ -177,6 +200,10 @@ build\xbox\release\default.xbe
 
 Always test release builds on real Xbox hardware before treating a change as
 shipping-ready. CXBX-R is useful for iteration, but real hardware is the target.
+
+Release maintainers must follow
+[the Xbox release checklist](docs/xbox_release_checklist.md). The repository-root
+`box art.png` is a required file in every release package.
 
 ## Credits
 

@@ -44,6 +44,7 @@ namespace TFE_SaveSystem
 	bool loadGameHeader(const char* filename, SaveHeader* header);
 #ifdef _XBOX
 	bool loadGameHeaderLite(const char* filename, SaveHeader* header);
+	bool xboxGetSaveDirectory(GameID id, char* path, u32 size);
 #endif
 
 	bool versionValid(s32 version);

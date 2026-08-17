@@ -9,6 +9,9 @@ namespace TFE_Jedi
 	static u8  s_frameBuffer320x200[320 * 200];
 	static u8* s_frameBuffer = nullptr;
 	static u8* s_curFrameBuffer = nullptr;
+#ifdef _XBOX
+	static u32 s_frameBufferCapacity = 0;
+#endif
 
 	static u32 s_width  = 0;
 	static u32 s_height = 0;
@@ -39,10 +42,27 @@ namespace TFE_Jedi
 	JBool vfb_setResolution(u32 width, u32 height)
 	{
 		TFE_Settings_Graphics* graphics = TFE_Settings::getGraphicsSettings();
+#ifdef _XBOX
+		u8* xboxNewFrameBuffer = NULL;
+		u32 xboxRequiredSize = 0;
+#endif
 		if (width == s_width && height == s_height && s_widescreen == graphics->widescreen && s_mode == s_nextMode)
 		{
 			return JFALSE;
 		}
+#ifdef _XBOX
+		if (width != 320 || height != 200)
+		{
+			xboxRequiredSize = width * height;
+			if (xboxRequiredSize > s_frameBufferCapacity)
+			{
+				// Allocate first so a failed mode change leaves every piece of
+				// the current framebuffer state intact.
+				xboxNewFrameBuffer = (u8*)malloc(xboxRequiredSize);
+				if (!xboxNewFrameBuffer) { return JFALSE; }
+			}
+		}
+#endif
 		s_widescreen = graphics->widescreen;
 		s_mode = s_nextMode;
 
@@ -60,13 +80,24 @@ namespace TFE_Jedi
 		}
 		else
 		{
+#ifdef _XBOX
+			// PDA and gameplay switch between 640x480 and widescreen. Keep a
+			// bounded high-water allocation so mode changes do not churn the
+			// Xbox heap or invalidate mission-owned framebuffer pointers.
+			if (xboxNewFrameBuffer)
+			{
+				free(s_frameBuffer);
+				s_frameBuffer = xboxNewFrameBuffer;
+				s_frameBufferCapacity = xboxRequiredSize;
+			}
+#else
+			free(s_frameBuffer);
+			s_frameBuffer = (u8*)malloc(width * height);
+#endif
 			s_width = width;
 			s_height = height;
 			s_prevWidth = s_width;
 			s_prevHeight = s_height;
-
-			free(s_frameBuffer);
-			s_frameBuffer = (u8*)malloc(s_width * s_height);
 			s_curFrameBuffer = s_frameBuffer;
 			
 			vfb_createVirtualDisplay(width, height);

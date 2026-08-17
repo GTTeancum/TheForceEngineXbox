@@ -49,16 +49,7 @@
 #define XINPUT_DEADZONE_STICK    8000
 
 // ---------------------------------------------------------------------
-// Right-stick look tuning (Phase 13 staging - rollback toggles).
-// Flip either to 0 to fall back to the pre-Phase-12 behaviour.
-//
-//   XBOX_LOOK_Y_INVERT   1 = pushing the stick UP makes the camera
-//                            LOOK UP (typical console FPS, also matches
-//                            mouse convention on Xbox).
-//                        0 = pushing UP makes the camera LOOK DOWN
-//                            (the original Phase 11 behaviour - it was
-//                            flipping the raw stick Y to compensate
-//                            for a different convention elsewhere).
+// Right-stick look tuning.
 //
 //   XBOX_LOOK_ANALOG     1 = smaller deadzone + quadratic curve so
 //                            small stick pushes give small look speeds
@@ -67,7 +58,6 @@
 //                            which feels stepped because crossing the
 //                            deadzone snaps to a non-trivial speed.
 // ---------------------------------------------------------------------
-#define XBOX_LOOK_Y_INVERT       1
 #define XBOX_LOOK_ANALOG         1
 #define XINPUT_DEADZONE_TRIGGER  30      // out of 255
 
@@ -109,6 +99,7 @@ namespace TFE_InputXbox
     static f32    s_lookSensitivityY  = 1.0f;
     static f32    s_leftStickDeadzone = 0.09f;
     static f32    s_rightStickDeadzone = 0.09f;
+    static bool   s_invertLookY = false;
 
     // Synthesized mouse cursor state (screen-space, accumulated across frames).
     // Initialized to screen center on init().
@@ -175,9 +166,9 @@ namespace TFE_InputXbox
         s_cursorY = 240.0f;
         TFE_Input::setMousePos((s32)s_cursorX, (s32)s_cursorY);
         TFE_System::logWrite(LOG_MSG, "InputXbox", "XInput polling initialised");
-        TFE_XboxLogf("InputXbox", "init sensitivityX=%d sensitivityY=%d rightDeadzonePct=%d trigger=%d",
+        TFE_XboxLogf("InputXbox", "init sensitivityX=%d sensitivityY=%d rightDeadzonePct=%d invertY=%d trigger=%d",
             (int)(s_lookSensitivityX * 100.0f), (int)(s_lookSensitivityY * 100.0f),
-            (int)(s_rightStickDeadzone * 100.0f), XINPUT_DEADZONE_TRIGGER);
+            (int)(s_rightStickDeadzone * 100.0f), s_invertLookY ? 1 : 0, XINPUT_DEADZONE_TRIGGER);
     }
 
     // Helper: clear all input state when no controller is connected.
@@ -293,15 +284,10 @@ namespace TFE_InputXbox
         f32 ry = applyDeadzone(pad.sThumbRY, XINPUT_DEADZONE_STICK);
 #endif
         TFE_Input::setAxis(AXIS_RIGHT_X, rx * s_lookSensitivityX);
-#if XBOX_LOOK_Y_INVERT
-        // Stick UP -> look UP. Raw XInput RY is +ve when pushed up,
-        // and player.cpp adds AA_LOOK_VERT to s_playerPitch where +ve
-        // pitch = look up - so DON'T negate.
+        // Default: stick UP -> look UP. Invert Y flips only the vertical
+        // look direction, leaving menu cursor and movement behavior alone.
+        if (s_invertLookY) ry = -ry;
         TFE_Input::setAxis(AXIS_RIGHT_Y, ry * s_lookSensitivityY);
-#else
-        // Pre-Phase-12 behavior: negate.
-        TFE_Input::setAxis(AXIS_RIGHT_Y, -ry * s_lookSensitivityY);
-#endif
 
         // ---------------------------------------------------------------
         // Synthesized mouse cursor from left stick.
@@ -478,6 +464,16 @@ namespace TFE_InputXbox
     float getRightStickDeadzone()
     {
         return s_rightStickDeadzone;
+    }
+
+    void setInvertLookY(bool enabled)
+    {
+        s_invertLookY = enabled;
+    }
+
+    bool getInvertLookY()
+    {
+        return s_invertLookY;
     }
 
 } // namespace TFE_InputXbox

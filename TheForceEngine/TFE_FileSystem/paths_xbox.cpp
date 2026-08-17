@@ -2,8 +2,8 @@
 // Xbox implementation of TFE_Paths.
 // Replaces paths.cpp and paths-posix.cpp for the Xbox build configuration.
 //
-// On Xbox, all paths are relative to the XBE launch directory (D:\).
-// Game data lives in DARK\ and user data lives in Saves\.
+// On Xbox, game data is read relative to the XBE launch directory (D:\).
+// User-writable data lives in the title's UDATA save container.
 // No Windows shell APIs (SHGetFolderPath, shlwapi) are used.
 
 #include "paths.h"
@@ -33,6 +33,59 @@ namespace TFE_Paths
     static std::vector<std::string> s_searchPaths;
     static std::vector<FileMapping> s_fileMappings;
     static const bool s_verbosePathLog = false;
+    static bool s_saveRootAttempted = false;
+    static bool s_saveRootValid = false;
+    static char s_saveRoot[TFE_MAX_PATH];
+
+    static void xboxAsciiToWide(const char* src, WCHAR* dst, size_t dstCount)
+    {
+        if (!dst || dstCount == 0) return;
+        if (!src) src = "";
+        size_t i = 0;
+        for (; src[i] && i < dstCount - 1; i++)
+        {
+            dst[i] = (WCHAR)(u8)src[i];
+        }
+        dst[i] = 0;
+    }
+
+    static void xboxEnsureTrailingSlash(char* path)
+    {
+        if (!path || !path[0]) return;
+        size_t len = strlen(path);
+        if (len > 0 && path[len - 1] != '\\' && path[len - 1] != '/' && len < TFE_MAX_PATH - 1)
+        {
+            path[len] = '\\';
+            path[len + 1] = 0;
+        }
+    }
+
+    static bool xboxEnsureTitleSaveRoot()
+    {
+        if (s_saveRootAttempted) return s_saveRootValid;
+        s_saveRootAttempted = true;
+        s_saveRootValid = false;
+        s_saveRoot[0] = 0;
+
+        WCHAR saveName[MAX_GAMENAME];
+        xboxAsciiToWide("Dark Forces Saves", saveName, MAX_GAMENAME);
+
+        char savePath[MAX_PATH];
+        memset(savePath, 0, sizeof(savePath));
+        DWORD result = XCreateSaveGame("U:\\", saveName, OPEN_ALWAYS, 0, savePath, MAX_PATH);
+        if (result != ERROR_SUCCESS || !savePath[0])
+        {
+            TFE_XboxLogf("Paths", "UDATA save root unavailable result=%lu path=%s", result, savePath);
+            return false;
+        }
+
+        strncpy(s_saveRoot, savePath, TFE_MAX_PATH - 1);
+        s_saveRoot[TFE_MAX_PATH - 1] = 0;
+        xboxEnsureTrailingSlash(s_saveRoot);
+        s_saveRootValid = true;
+        TFE_XboxLogf("Paths", "UDATA save root=%s", s_saveRoot);
+        return true;
+    }
 
     // -----------------------------------------------------------------------
     void setPath(TFE_PathType pathType, const char* path)
@@ -51,25 +104,28 @@ namespace TFE_Paths
 
     bool setProgramDataPath(const char* append)
     {
-        // On Xbox, program data goes to the title directory.
-        strncpy(s_paths[PATH_PROGRAM_DATA], s_paths[PATH_PROGRAM], TFE_MAX_PATH - 1);
+        // On Xbox, program data goes to the title save container.
+        if (!xboxEnsureTitleSaveRoot())
+        {
+            s_paths[PATH_PROGRAM_DATA][0] = 0;
+            return false;
+        }
+        strncpy(s_paths[PATH_PROGRAM_DATA], s_saveRoot, TFE_MAX_PATH - 1);
         s_paths[PATH_PROGRAM_DATA][TFE_MAX_PATH - 1] = 0;
         TFE_XboxLogf("Paths", "setProgramDataPath append=%s -> %s",
             append ? append : "", s_paths[PATH_PROGRAM_DATA]);
-        return s_paths[PATH_PROGRAM_DATA][0] != 0;
+        return true;
     }
 
     bool setUserDocumentsPath(const char* append)
     {
-        // On Xbox, user documents go alongside the XBE. Many softmod / HDD
-        // setups don't have E:\ mounted for the running title — writes there
-        // fail with ERROR_PATH_NOT_FOUND, which silently cascades into the
-        // pilot file (DARKPILO.CFG) never being created, no agent loading,
-        // and the agent menu sitting forever with zero entries.
-        // PATH_PROGRAM is the launch dir (e.g. D:\TFE\), which is always
-        // readable; on FATX HDD installs it's also writable. This matches
-        // OpenJKDF2's convention of writing saves next to the XBE.
-        strncpy(s_paths[PATH_USER_DOCUMENTS], s_paths[PATH_PROGRAM], TFE_MAX_PATH - 1);
+        // On Xbox, user documents go to the title save container.
+        if (!xboxEnsureTitleSaveRoot())
+        {
+            s_paths[PATH_USER_DOCUMENTS][0] = 0;
+            return false;
+        }
+        strncpy(s_paths[PATH_USER_DOCUMENTS], s_saveRoot, TFE_MAX_PATH - 1);
         s_paths[PATH_USER_DOCUMENTS][TFE_MAX_PATH - 1] = 0;
         TFE_XboxLogf("Paths", "setUserDocumentsPath append=%s -> %s",
             append ? append : "", s_paths[PATH_USER_DOCUMENTS]);

@@ -234,6 +234,7 @@ enum XboxControlsOptionIndex
 {
     XCTRL_LOOK_SENS_X = 0,
     XCTRL_LOOK_SENS_Y,
+    XCTRL_INVERT_LOOK_Y,
     XCTRL_RIGHT_STICK_DEADZONE,
     XCTRL_BIND_JUMP,
     XCTRL_BIND_CROUCH,
@@ -253,11 +254,21 @@ enum XboxControlsOptionIndex
 
 enum XboxVideoOptionIndex
 {
-    XVID_SAFE_ZONE_WIDTH = 0,
+    XVID_ASPECT_OUTPUT = 0,
+    XVID_SAFE_ZONE_WIDTH,
     XVID_SAFE_ZONE_HEIGHT,
     XVID_SCREEN_X,
     XVID_SCREEN_Y,
     XVID_COUNT
+};
+
+enum XboxVideoMode
+{
+    XBOX_VIDEO_AUTO = 0,
+    XBOX_VIDEO_4X3,
+    XBOX_VIDEO_480P_WIDE,
+    // XBOX_VIDEO_720P_WIDE,
+    XBOX_VIDEO_COUNT
 };
 
 enum XboxAudioOptionIndex
@@ -2090,9 +2101,69 @@ static float clampF32(float value, float minValue, float maxValue)
     return value;
 }
 
+static const char* xboxVideoModeName(s32 mode)
+{
+    switch (mode)
+    {
+        case XBOX_VIDEO_4X3: return "4:3";
+        case XBOX_VIDEO_480P_WIDE: return "480P WIDE";
+        // case XBOX_VIDEO_720P_WIDE: return "720P WIDE";
+        default: return "AUTO";
+    }
+}
+
+static s32 xboxParseVideoModeValue(const char* value)
+{
+    if (!value || !value[0]) return XBOX_VIDEO_AUTO;
+    if (strcasecmp(value, "auto") == 0) return XBOX_VIDEO_AUTO;
+    if (strcasecmp(value, "4:3") == 0 || strcasecmp(value, "4x3") == 0) return XBOX_VIDEO_4X3;
+    if (strcasecmp(value, "480p-wide") == 0 || strcasecmp(value, "480p wide") == 0) return XBOX_VIDEO_480P_WIDE;
+    if (strcasecmp(value, "720p-wide") == 0 || strcasecmp(value, "720p wide") == 0)
+    {
+        // return XBOX_VIDEO_720P_WIDE;
+        return XBOX_VIDEO_AUTO;
+    }
+    return atoi(value);
+}
+
+static bool xboxParseBoolValue(const char* value)
+{
+    if (!value || !value[0]) return false;
+    if (strcasecmp(value, "true") == 0) return true;
+    if (strcasecmp(value, "yes") == 0) return true;
+    if (strcasecmp(value, "on") == 0) return true;
+    return atoi(value) != 0;
+}
+
+static s32 xboxForcedVideoModeFromMarkers()
+{
+#if 0
+    if (xboxAbsoluteFileExists("D:\\tfe_force_720p.txt") ||
+        xboxAbsoluteFileExists("tfe_force_720p.txt"))
+    {
+        return XBOX_VIDEO_720P_WIDE;
+    }
+#endif
+    if (xboxAbsoluteFileExists("D:\\tfe_force_480p.txt") ||
+        xboxAbsoluteFileExists("tfe_force_480p.txt"))
+    {
+        return XBOX_VIDEO_480P_WIDE;
+    }
+    return -1;
+}
+
 static void xboxRuntimeSettingsPath(char* path, size_t pathSize)
 {
-    snprintf(path, pathSize, "%sSaves\\xbox_settings.cfg", TFE_Paths::getPath(PATH_PROGRAM));
+    if (path && pathSize) path[0] = 0;
+    if (TFE_SaveSystem::xboxGetSaveDirectory(Game_Dark_Forces, path, (u32)pathSize))
+    {
+        size_t len = strlen(path);
+        if (len < pathSize)
+        {
+            snprintf(path + len, pathSize - len, "xbox_settings.cfg");
+            return;
+        }
+    }
 }
 
 static void applyXboxVideoSettings()
@@ -2103,6 +2174,7 @@ static void applyXboxVideoSettings()
     system->xboxSafeZonePercent = (system->xboxSafeZoneWidthPercent + system->xboxSafeZoneHeightPercent) / 2;
     system->xboxSafeZoneOffsetX = clampS32(system->xboxSafeZoneOffsetX, -40, 40);
     system->xboxSafeZoneOffsetY = clampS32(system->xboxSafeZoneOffsetY, -30, 30);
+    system->xboxVideoMode = clampS32(system->xboxVideoMode, XBOX_VIDEO_AUTO, XBOX_VIDEO_COUNT - 1);
     TFE_RenderBackend::xboxSetSafeZone(system->xboxSafeZoneWidthPercent,
         system->xboxSafeZoneHeightPercent,
         system->xboxSafeZoneOffsetX, system->xboxSafeZoneOffsetY);
@@ -2119,6 +2191,7 @@ static void applyXboxControlSettings()
     TFE_InputXbox::setLookSensitivityX(system->xboxLookSensitivityX);
     TFE_InputXbox::setLookSensitivityY(system->xboxLookSensitivityY);
     TFE_InputXbox::setRightStickDeadzone(system->xboxRightStickDeadzone);
+    TFE_InputXbox::setInvertLookY(system->xboxInvertLookY);
 }
 
 static void xboxApplyRuntimeSettings()
@@ -2164,6 +2237,7 @@ static void xboxParseRuntimeSetting(char* line)
     else if (strcasecmp(key, "xboxStickDeadzone") == 0) system->xboxRightStickDeadzone = (float)atof(value);
     else if (strcasecmp(key, "xboxRightStickDeadzone") == 0) system->xboxRightStickDeadzone = (float)atof(value);
     else if (strcasecmp(key, "xboxRightStickDeadzonePct") == 0) system->xboxRightStickDeadzone = (float)atoi(value) / 100.0f;
+    else if (strcasecmp(key, "xboxInvertLookY") == 0) system->xboxInvertLookY = xboxParseBoolValue(value);
     else if (strcasecmp(key, "xboxSafeZonePercent") == 0)
     {
         system->xboxSafeZonePercent = atoi(value);
@@ -2174,6 +2248,7 @@ static void xboxParseRuntimeSetting(char* line)
     else if (strcasecmp(key, "xboxSafeZoneHeightPercent") == 0) system->xboxSafeZoneHeightPercent = atoi(value);
     else if (strcasecmp(key, "xboxSafeZoneOffsetX") == 0) system->xboxSafeZoneOffsetX = atoi(value);
     else if (strcasecmp(key, "xboxSafeZoneOffsetY") == 0) system->xboxSafeZoneOffsetY = atoi(value);
+    else if (strcasecmp(key, "xboxVideoMode") == 0) system->xboxVideoMode = xboxParseVideoModeValue(value);
     else if (strcasecmp(key, "masterVolume") == 0) sound->masterVolume = (float)atof(value);
     else if (strcasecmp(key, "soundFxVolume") == 0) sound->soundFxVolume = (float)atof(value);
     else if (strcasecmp(key, "musicVolume") == 0) sound->musicVolume = (float)atof(value);
@@ -2222,10 +2297,6 @@ static bool xboxLoadRuntimeSettings()
 
 static bool xboxSaveRuntimeSettings()
 {
-    char savesDir[TFE_MAX_PATH];
-    snprintf(savesDir, TFE_MAX_PATH, "%sSaves\\", TFE_Paths::getPath(PATH_PROGRAM));
-    FileUtil::makeDirectory(savesDir);
-
     char path[TFE_MAX_PATH];
     xboxRuntimeSettingsPath(path, sizeof(path));
     FileStream file;
@@ -2241,10 +2312,12 @@ static bool xboxSaveRuntimeSettings()
     file.writeString("xboxLookSensitivityXPct=%d\r\n", (s32)(system->xboxLookSensitivityX * 100.0f + 0.5f));
     file.writeString("xboxLookSensitivityYPct=%d\r\n", (s32)(system->xboxLookSensitivityY * 100.0f + 0.5f));
     file.writeString("xboxRightStickDeadzonePct=%d\r\n", (s32)(system->xboxRightStickDeadzone * 100.0f + 0.5f));
+    file.writeString("xboxInvertLookY=%d\r\n", system->xboxInvertLookY ? 1 : 0);
     file.writeString("xboxSafeZoneWidthPercent=%d\r\n", system->xboxSafeZoneWidthPercent);
     file.writeString("xboxSafeZoneHeightPercent=%d\r\n", system->xboxSafeZoneHeightPercent);
     file.writeString("xboxSafeZoneOffsetX=%d\r\n", system->xboxSafeZoneOffsetX);
     file.writeString("xboxSafeZoneOffsetY=%d\r\n", system->xboxSafeZoneOffsetY);
+    file.writeString("xboxVideoMode=%d\r\n", system->xboxVideoMode);
     file.writeString("masterVolumePct=%d\r\n", optionPercent(sound->masterVolume));
     file.writeString("soundFxVolumePct=%d\r\n", optionPercent(sound->soundFxVolume));
     file.writeString("musicVolumePct=%d\r\n", optionPercent(sound->musicVolume));
@@ -2253,6 +2326,120 @@ static bool xboxSaveRuntimeSettings()
     file.close();
     TFE_System::logWrite(LOG_MSG, "Settings", "Xbox runtime settings saved: '%s'", path);
     return true;
+}
+
+static void xboxApplyVideoModeToSettings()
+{
+    TFE_Settings_Window* windowSettings = TFE_Settings::getWindowSettings();
+    TFE_Settings_Graphics* graphics = TFE_Settings::getGraphicsSettings();
+    TFE_Settings_System* system = TFE_Settings::getSystemSettings();
+
+    DWORD avPack = XGetAVPack();
+    DWORD videoFlags = XGetVideoFlags();
+    const bool hasHdtv = (avPack == XC_AV_PACK_HDTV);
+    const bool dashWidescreen = (videoFlags & XC_VIDEO_FLAGS_WIDESCREEN) != 0;
+    const bool can480p = hasHdtv && ((videoFlags & XC_VIDEO_FLAGS_HDTV_480p) != 0);
+    const bool can720p = hasHdtv && ((videoFlags & XC_VIDEO_FLAGS_HDTV_720p) != 0);
+
+    s32 requestedMode = clampS32(system->xboxVideoMode, XBOX_VIDEO_AUTO, XBOX_VIDEO_COUNT - 1);
+    const s32 markerMode = xboxForcedVideoModeFromMarkers();
+    if (markerMode >= 0) requestedMode = markerMode;
+
+    s32 selectedMode = XBOX_VIDEO_4X3;
+    if (markerMode >= 0)
+    {
+        // The marker files are an explicit hardware override for softmods,
+        // custom BIOSes, and HDMI adapters that support HDTV modes but do not
+        // expose the dashboard EEPROM flags through XGetVideoFlags().
+        selectedMode = requestedMode;
+        if (selectedMode == XBOX_VIDEO_480P_WIDE && (!can480p || !dashWidescreen))
+        {
+            TFE_System::logWrite(LOG_WARNING, "Video",
+                "Forced marker overrides reported video capabilities for %s (avPack=%lu flags=0x%08lx)",
+                xboxVideoModeName(selectedMode), avPack, videoFlags);
+        }
+    }
+    else if (requestedMode == XBOX_VIDEO_AUTO)
+    {
+        if (can480p && dashWidescreen) selectedMode = XBOX_VIDEO_480P_WIDE;
+        else selectedMode = XBOX_VIDEO_4X3;
+    }
+#if 0
+    else if (requestedMode == XBOX_VIDEO_720P_WIDE && !can720p)
+    {
+        selectedMode = (can480p && dashWidescreen) ? XBOX_VIDEO_480P_WIDE : XBOX_VIDEO_4X3;
+        TFE_System::logWrite(LOG_WARNING, "Video",
+            "Requested 720p widescreen is unavailable; falling back to %s",
+            xboxVideoModeName(selectedMode));
+    }
+#endif
+    else if (requestedMode == XBOX_VIDEO_480P_WIDE && (!can480p || !dashWidescreen))
+    {
+        selectedMode = XBOX_VIDEO_4X3;
+        TFE_System::logWrite(LOG_WARNING, "Video",
+            "Requested 480p widescreen requires HDTV 480p and dashboard widescreen; falling back to 4:3");
+    }
+    else
+    {
+        selectedMode = requestedMode;
+    }
+
+    u32 outputW = 640u;
+    u32 outputH = 480u;
+    u32 displayW = 640u;
+    u32 displayH = 480u;
+    u32 renderW = 640u;
+    u32 renderH = 480u;
+    bool widescreen = false;
+    // 480p availability is independent of the dashboard's aspect-ratio flag.
+    // A 4:3 dashboard configuration should still use progressive scan when
+    // the HDTV pack and 480p setting are present.
+    bool progressive = can480p;
+
+#if 0
+    if (selectedMode == XBOX_VIDEO_720P_WIDE)
+    {
+        outputW = 1280u;
+        outputH = 720u;
+        displayW = 1280u;
+        displayH = 720u;
+        renderW = 856u;
+        renderH = 480u;
+        widescreen = true;
+        progressive = true;
+    }
+    else
+#endif
+    if (selectedMode == XBOX_VIDEO_480P_WIDE)
+    {
+        outputW = 640u;
+        outputH = 480u;
+        displayW = 856u;
+        displayH = 480u;
+        renderW = 856u;
+        renderH = 480u;
+        widescreen = true;
+        progressive = true;
+    }
+
+    windowSettings->fullscreen = true;
+    windowSettings->width = outputW;
+    windowSettings->height = outputH;
+
+    graphics->gameResolution.x = renderW;
+    graphics->gameResolution.z = renderH;
+    graphics->widescreen = widescreen;
+    graphics->rendererIndex = 0;        // RENDERER_SOFTWARE
+    graphics->colorMode = (ColorMode)0; // COLORMODE_8BIT
+    graphics->useMipmapping = false;
+    graphics->frameRateLimit = 60;
+
+    TFE_RenderBackend::xboxSetVideoMode(outputW, outputH, displayW, displayH, widescreen, progressive);
+    TFE_System::logWrite(LOG_MSG, "Video",
+        "Xbox video selected: requested=%s marker=%d selected=%s avPack=%lu flags=0x%08lx dashWide=%d can480p=%d can720p=%d output=%ux%u display=%ux%u render=%ux%u progressive=%d",
+        xboxVideoModeName(requestedMode), markerMode, xboxVideoModeName(selectedMode),
+        avPack, videoFlags, dashWidescreen ? 1 : 0, can480p ? 1 : 0, can720p ? 1 : 0,
+        outputW, outputH, displayW, displayH, renderW, renderH, progressive ? 1 : 0);
 }
 
 static const XboxBindingOption* findXboxBindingOption(s32 option)
@@ -2411,6 +2598,12 @@ static void setOptionSlider(s32 index, const char* label, s32 value, s32 minValu
     s_optionsItems[index].maxValue = maxValue;
 }
 
+static void setOptionChoice(s32 index, const char* label, s32 value, s32 minValue, s32 maxValue, const char* valueText)
+{
+    setOptionSlider(index, label, value, minValue, maxValue);
+    s_optionsItems[index].valueText = valueText;
+}
+
 static void setOptionIcon(s32 index, const char* label, s32 icon)
 {
     s_optionsItems[index].label = label;
@@ -2442,6 +2635,7 @@ static void refreshOptionsItems()
     {
         setOptionSlider(XCTRL_LOOK_SENS_X, "AIM SPEED X", (s32)(TFE_InputXbox::getLookSensitivityX() * 100.0f + 0.5f), 25, 250);
         setOptionSlider(XCTRL_LOOK_SENS_Y, "AIM SPEED Y", (s32)(TFE_InputXbox::getLookSensitivityY() * 100.0f + 0.5f), 25, 250);
+        setOptionChoice(XCTRL_INVERT_LOOK_Y, "INVERT Y AXIS", system->xboxInvertLookY ? 1 : 0, 0, 1, system->xboxInvertLookY ? "ON" : "OFF");
         setOptionSlider(XCTRL_RIGHT_STICK_DEADZONE, "AIM DEAD ZONE", (s32)(TFE_InputXbox::getRightStickDeadzone() * 100.0f + 0.5f), 0, 30);
 
         for (s32 i = 0; i < (s32)TFE_ARRAYSIZE(c_xboxBindingOptions); i++)
@@ -2460,6 +2654,8 @@ static void refreshOptionsItems()
     }
     else if (s_optionsPage == XOPAGE_VIDEO)
     {
+        setOptionChoice(XVID_ASPECT_OUTPUT, "ASPECT / OUTPUT", system->xboxVideoMode,
+            XBOX_VIDEO_AUTO, XBOX_VIDEO_COUNT - 1, xboxVideoModeName(system->xboxVideoMode));
         setOptionSlider(XVID_SAFE_ZONE_WIDTH, "SAFE AREA WIDTH", system->xboxSafeZoneWidthPercent, 80, 100);
         setOptionSlider(XVID_SAFE_ZONE_HEIGHT, "SAFE AREA HEIGHT", system->xboxSafeZoneHeightPercent, 80, 100);
         setOptionSlider(XVID_SCREEN_X, "HORIZONTAL SHIFT", system->xboxSafeZoneOffsetX, -40, 40);
@@ -2502,6 +2698,9 @@ static void applyOptionValue(s32 index, s32 value)
             case XCTRL_RIGHT_STICK_DEADZONE:
                 system->xboxRightStickDeadzone = (float)value / 100.0f;
                 break;
+            case XCTRL_INVERT_LOOK_Y:
+                system->xboxInvertLookY = value != 0;
+                break;
         }
         applyXboxControlSettings();
     }
@@ -2509,6 +2708,7 @@ static void applyOptionValue(s32 index, s32 value)
     {
         switch (index)
         {
+            case XVID_ASPECT_OUTPUT: system->xboxVideoMode = value; break;
             case XVID_SAFE_ZONE_WIDTH: system->xboxSafeZoneWidthPercent = value; break;
             case XVID_SAFE_ZONE_HEIGHT: system->xboxSafeZoneHeightPercent = value; break;
             case XVID_SCREEN_X: system->xboxSafeZoneOffsetX = value; break;
@@ -3042,35 +3242,20 @@ void __cdecl main()
     // Set source data path from program directory.
     setupSourceDataPath();
 
-    // Override settings for Xbox: always fullscreen with the known-good
-    // 640x480 software renderer. The D3D8 hardware bridge remains in the
-    // tree for future work, but it is not stable enough for hardware shipping.
-    TFE_Settings_Window* windowSettings = TFE_Settings::getWindowSettings();
-    windowSettings->fullscreen = true;
-    windowSettings->width      = 1280;
-    windowSettings->height     = 720;
+    // Load Xbox runtime settings from the writable title save container.
+    xboxLoadRuntimeSettings();
 
+    // Override settings for Xbox before D3D device creation. Output/aspect
+    // mode must be selected here; changing it live would require a device reset.
+    TFE_Settings_Window* windowSettings = TFE_Settings::getWindowSettings();
     TFE_Settings_Graphics* graphics = TFE_Settings::getGraphicsSettings();
-    graphics->gameResolution.x = 640;
-    graphics->gameResolution.z = 480;
-    graphics->widescreen = false;
-    graphics->rendererIndex = 0;  // RENDERER_SOFTWARE
-    graphics->colorMode = (ColorMode)0;  // COLORMODE_8BIT
-    graphics->useMipmapping = false;
-    graphics->frameRateLimit = 60;
+    xboxApplyVideoModeToSettings();
     TFE_System::logWrite(LOG_MSG, "Main",
         "Xbox settings applied: window=%dx%d game=%dx%d renderer=%d colorMode=%d vsync=%d fpsLimit=%d",
         windowSettings->width, windowSettings->height,
         graphics->gameResolution.x, graphics->gameResolution.z,
         graphics->rendererIndex, (int)graphics->colorMode, graphics->vsync ? 1 : 0,
         graphics->frameRateLimit);
-
-    // Ensure saves directory exists.
-    char savesDir[TFE_MAX_PATH];
-    snprintf(savesDir, TFE_MAX_PATH, "%sSaves\\", TFE_Paths::getPath(PATH_PROGRAM));
-    FileUtil::makeDirectory(savesDir);
-    TFE_System::logWrite(LOG_MSG, "Main", "Save directory ensured: '%s'", savesDir);
-    xboxLoadRuntimeSettings();
 
     // -----------------------------------------------------------------------
     // System init (timing)
@@ -3085,12 +3270,12 @@ void __cdecl main()
     WindowState windowState;
     memset(&windowState, 0, sizeof(windowState));
     strcpy(windowState.name, "The Force Engine");
-    windowState.width          = 1280;
-    windowState.height         = 720;
-    windowState.baseWindowWidth  = 1280;
-    windowState.baseWindowHeight = 720;
-    windowState.monitorWidth   = 1280;
-    windowState.monitorHeight  = 720;
+    windowState.width          = windowSettings->width;
+    windowState.height         = windowSettings->height;
+    windowState.baseWindowWidth  = windowSettings->width;
+    windowState.baseWindowHeight = windowSettings->height;
+    windowState.monitorWidth   = windowSettings->width;
+    windowState.monitorHeight  = windowSettings->height;
     windowState.flags          = WINFLAG_FULLSCREEN | (graphics->vsync ? WINFLAG_VSYNC : 0);
     windowState.refreshRate    = refreshRate;
 
