@@ -19,6 +19,10 @@ missing. This keeps the required release asset from being silently dropped.
 - [ ] Verify the install ZIP contains every file listed under "What The Zip
   Adds" in the root README.
 - [ ] Verify the package contains no copyrighted Dark Forces game data.
-- [ ] Smoke-test 4:3 and widescreen 480p on XEMU.
+- [ ] Smoke-test dashboard-selected 4:3 and 16:9 on XEMU using the same ISO.
+- [ ] Confirm the dashboard's 480p flag controls progressive scan independently
+  of aspect ratio when the XEMU EEPROM and AV-pack configuration support it.
+- [ ] Confirm no `tfe_force_480p.txt` or `tfe_force_720p.txt` override is present
+  or recognized.
 - [ ] Test the final release build on original Xbox hardware.
 - [ ] Confirm the README cover and screenshots render on GitHub.

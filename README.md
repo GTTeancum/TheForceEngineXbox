@@ -28,17 +28,30 @@ first, then extract this zip over it.
 ## Screenshots
 
 <p align="center">
-  <img src="docs/images/xemu-main-menu-480p-wide.png" alt="The Force Engine Xbox main menu in XEMU" width="49%">
-  <img src="docs/images/xemu-secbase-480p-wide.png" alt="SECBASE gameplay in 480p widescreen in XEMU" width="49%">
+  <img src="docs/images/xemu-main-menu-v1.1.2-16x9.png" alt="The Force Engine Xbox v1.1.2 main menu in XEMU" width="75%">
 </p>
 
-Both screenshots were captured with XEMU's native screenshot function.
+<p align="center">
+  <img src="docs/images/xemu-secbase-4x3-dashboard.png" alt="SECBASE gameplay using the Xbox dashboard 4:3 setting" width="43%">
+  <img src="docs/images/xemu-secbase-16x9-dashboard.png" alt="SECBASE gameplay using the Xbox dashboard 16:9 setting" width="56%">
+</p>
 
-## 1.1.1 Patch Notes
+The screenshots were captured with XEMU's native screenshot function. The
+gameplay pair uses the same build and game data; only the Xbox dashboard aspect
+ratio setting differs.
 
-- Fixed a 4:3 480p startup failure that could report `Unable to determine
-  default Xbox backbuffer` when 480p was enabled in the Xbox dashboard.
-- Updated the in-game main-menu version label to `VER 1.1.1`.
+## 1.1.2 Patch Notes
+
+- 4:3 and 16:9 now follow the Xbox dashboard aspect-ratio setting automatically.
+- 480i and 480p are selected independently from the dashboard's progressive-scan
+  setting and the connected AV pack's capabilities.
+- Removed the in-game forced output selector, saved output-mode override, and
+  `tfe_force_480p.txt`/`tfe_force_720p.txt` debug overrides.
+- Widescreen gameplay uses a wider horizontal field of view instead of stretching
+  the 4:3 picture.
+- Fixed widescreen datapad/pause transitions and background alignment.
+- 720p remains disabled in this release.
+- Updated the in-game main-menu version label to `VER 1.1.2`.
 
 ## Install
 
@@ -146,14 +159,15 @@ project or in the release zip.
 
 ## Current State
 
-This is the 1.1.1 release. The focus is hardware stability and a complete
+This is the 1.1.2 release. The focus is hardware stability and a complete
 couch-playable Dark Forces experience.
 
 Working in this port:
 
 - Original Xbox `default.xbe` output.
 - Software-rendered gameplay presented through the Xbox D3D8 backend, with
-  4:3 and widescreen 480p output selected by the Xbox dashboard video settings.
+  4:3/16:9 and 480i/480p output inherited from the Xbox dashboard video
+  settings. Aspect ratio and progressive scan are inherited independently.
 - Native Xbox start menu, load menu, pause/datapad screens, mod browser, and
   Options menu split into Controls, Video, and Audio submenus.
 - XInput controller support with remappable core actions, separate X/Y aim
@@ -167,6 +181,8 @@ Working in this port:
 
 Known limitations:
 
+- 720p output is disabled. The release supports dashboard-selected 4:3/16:9 at
+  480i or 480p.
 - The hardware world renderer is not enabled for shipping. It remains in the
   tree for future work, but the release build uses the known-good software
   renderer.
