@@ -18,6 +18,7 @@
 #include <TFE_System/system.h>
 #include <TFE_FileSystem/paths.h>
 #include <TFE_Game/saveSystem.h>
+#include "../version.h"
 
 #include <xtl.h>
 #include <d3d8.h>
@@ -2140,8 +2141,10 @@ namespace TFE_RenderBackend
         }
 
         footerDrawItem(XFT_A_SELECT, 28, 0xFF33D033u);
-        startDrawTextSprite(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, XST_VERSION,
-                            XBOX_OUTPUT_WIDTH - c_xboxStartText[XST_VERSION].width - 14, 450, 0xFF8E8B72u, false);
+        char versionText[32];
+        sprintf(versionText, "VER %s", c_gitVersion);
+        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, versionText,
+            XBOX_OUTPUT_WIDTH - loadTextWidth(versionText, 1) - 14, 450, 1, 0xFF8E8B72u);
     }
 
     // -----------------------------------------------------------------------

@@ -107,13 +107,6 @@ enum AppState
 
 using namespace TFE_Input;
 
-// ---------------------------------------------------------------------------
-// Version string (from gitVersion.h / version.h)
-// ---------------------------------------------------------------------------
-#ifndef c_gitVersion
-#define c_gitVersion "Xbox"
-#endif
-
 #define PROGRAM_ERROR   1
 #define PROGRAM_SUCCESS 0
 
