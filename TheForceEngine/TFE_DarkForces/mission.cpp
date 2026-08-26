@@ -31,6 +31,7 @@
 #include <TFE_Jedi/Renderer/screenDraw.h>
 #include <TFE_Jedi/Renderer/RClassic_Fixed/rclassicFixed.h>
 #include <TFE_RenderShared/texturePacker.h>
+#include <TFE_Jedi/Task/task.h>
 #include <TFE_Jedi/Serialization/serialization.h>
 #include <TFE_FrontEndUI/frontEndUi.h>
 #include <TFE_FrontEndUI/console.h>
@@ -940,6 +941,15 @@ namespace TFE_DarkForces
 		inf_createTriggerTask();
 		actor_createTask();
 		hitEffect_createTask();
+#ifdef _XBOX
+		TFE_System::logWrite(LOG_MSG, "TaskPool",
+			"mission-setup-tasks active=%d taskPool=%u/%u stackPool=%u/%u",
+			TFE_Jedi::task_getCount(),
+			TFE_Jedi::task_getPoolCount(),
+			TFE_Jedi::task_getPoolSize(),
+			TFE_Jedi::task_getStackPoolCount(),
+			TFE_Jedi::task_getStackPoolSize());
+#endif
 		level_clearData();
 		updateLogic_clearTask();
 		s_drawAutomap = JFALSE;

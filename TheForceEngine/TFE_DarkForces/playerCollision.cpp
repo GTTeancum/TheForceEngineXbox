@@ -2,6 +2,7 @@
 #include "playerCollision.h"
 #include "automap.h"
 #include "pickup.h"
+#include "agent.h"
 #include <TFE_System/system.h>
 #include <TFE_Jedi/Level/level.h>
 #include <TFE_Jedi/Level/rsector.h>
@@ -49,6 +50,19 @@ namespace TFE_DarkForces
 	// Internal State
 	///////////////////////////////////////////
 	static PlayerLogic* s_curPlayerLogic;
+
+#ifdef _XBOX
+	static bool xboxPlayerCollisionDebugEnabled()
+	{
+		const char* levelName = agent_getLevelName();
+		return levelName && strcasecmp(levelName, "SEWERS") == 0;
+	}
+
+	static s32 xboxFixedWhole(fixed16_16 value)
+	{
+		return value >> 16;
+	}
+#endif
 
 	///////////////////////////////////////////
 	// TODO: Move to collision
@@ -535,7 +549,27 @@ namespace TFE_DarkForces
 			{
 				if (!s_playerDying)
 				{
+#ifdef _XBOX
+					if (xboxPlayerCollisionDebugEnabled())
+					{
+						TFE_System::logWrite(LOG_MSG, "COLDBG",
+							"cross begin sector=%d wall=%d next=%d flags3=0x%08x pos=%d,%d,%d move=%d,%d",
+							player->sector ? player->sector->id : -1, wall->id,
+							adjoinSector ? adjoinSector->id : -1, wall->flags3,
+							xboxFixedWhole(player->posWS.x), xboxFixedWhole(player->posWS.y), xboxFixedWhole(player->posWS.z),
+							xboxFixedWhole(s_curPlayerLogic->move.x), xboxFixedWhole(s_curPlayerLogic->move.z));
+					}
+#endif
 					inf_triggerWallEvent(wall, s_playerObject, INF_EVENT_CROSS_LINE_FRONT);
+#ifdef _XBOX
+					if (xboxPlayerCollisionDebugEnabled())
+					{
+						TFE_System::logWrite(LOG_MSG, "COLDBG",
+							"cross after-inf sector=%d wall=%d next=%d",
+							player->sector ? player->sector->id : -1, wall->id,
+							adjoinSector ? adjoinSector->id : -1);
+					}
+#endif
 				}
 				nextSector = adjoinSector;
 				sector_getObjFloorAndCeilHeight(adjoinSector, player->posWS.y, &floorHeight, &ceilHeight);
@@ -589,6 +623,16 @@ namespace TFE_DarkForces
 						{
 							automap_setLayer(nextSector->layer);
 						}
+#ifdef _XBOX
+						if (xboxPlayerCollisionDebugEnabled())
+						{
+							TFE_System::logWrite(LOG_MSG, "COLDBG",
+								"sector change %d -> %d pos=%d,%d,%d floor=%d ceil=%d",
+								curSector ? curSector->id : -1, nextSector ? nextSector->id : -1,
+								xboxFixedWhole(player->posWS.x), xboxFixedWhole(player->posWS.y), xboxFixedWhole(player->posWS.z),
+								xboxFixedWhole(finalFloorHeight), xboxFixedWhole(finalCeilHeight));
+						}
+#endif
 						sector_addObject(nextSector, player);
 					}
 				}

@@ -39,8 +39,10 @@
 #include <TFE_Input/input.h>
 #include <TFE_Input/input_xbox.h>
 #include <TFE_Input/inputEnum.h>
+#include <TFE_FileSystem/paths.h>
 #include <TFE_System/system.h>
 #include <xtl.h>
+#include <stdio.h>
 #include <string.h>
 
 // ---------------------------------------------------------------------------
@@ -75,6 +77,10 @@
 // enough to feel responsive, slow enough to land on small buttons.
 #define XBOX_CURSOR_SPEED        6.0f
 
+#ifndef INVALID_FILE_ATTRIBUTES
+#define INVALID_FILE_ATTRIBUTES ((DWORD)-1)
+#endif
+
 namespace TFE_InputXbox
 {
     static XINPUT_STATE s_prevState;
@@ -105,6 +111,52 @@ namespace TFE_InputXbox
     // Initialized to screen center on init().
     static f32    s_cursorX         = 320.0f;
     static f32    s_cursorY         = 240.0f;
+
+    // Longplay trace controls. Drop tfe_input_record.txt next to the XBE to
+    // write UDATA\xbox_input_trace.bin. Drop tfe_input_playback.txt next to
+    // the XBE to feed that trace back through this same input mapper.
+    #define XBOX_INPUT_TRACE_FILE      "xbox_input_trace.bin"
+    #define XBOX_INPUT_RECORD_MARKER   "tfe_input_record.txt"
+    #define XBOX_INPUT_PLAYBACK_MARKER "tfe_input_playback.txt"
+    #define XBOX_INPUT_TRACE_VERSION   1
+    #define XBOX_INPUT_TRACE_HEARTBEAT 1200
+
+    enum XboxInputTraceMode
+    {
+        TRACE_OFF = 0,
+        TRACE_RECORD,
+        TRACE_PLAYBACK
+    };
+
+#pragma pack(push, 1)
+    struct XboxInputTraceHeader
+    {
+        char  magic[8];
+        u32   version;
+        u32   frameCount;
+        u32   reserved;
+    };
+
+    struct XboxInputTraceFrame
+    {
+        DWORD packetNumber;
+        WORD  buttons;
+        BYTE  analogButtons[8];
+        SHORT thumbLX;
+        SHORT thumbLY;
+        SHORT thumbRX;
+        SHORT thumbRY;
+    };
+#pragma pack(pop)
+
+    static const char       c_traceMagic[8] = { 'T', 'F', 'E', 'X', 'I', 'N', 'P', '1' };
+    static XboxInputTraceMode s_traceMode = TRACE_OFF;
+    static HANDLE          s_traceFile = INVALID_HANDLE_VALUE;
+    static u32             s_traceFramesWritten = 0;
+    static u32             s_traceFramesRead = 0;
+    static u32             s_traceFrameLimit = 0;
+    static bool            s_traceEofLogged = false;
+    static char            s_tracePath[TFE_MAX_PATH];
 
     // On the original Xbox, digital buttons (D-pad, Start, Back, thumbsticks)
     // are bitmask flags in wButtons.  Face buttons (A/B/X/Y) and Black/White
@@ -156,6 +208,246 @@ namespace TFE_InputXbox
         return 0.0f;
     }
 
+    static void buildTracePath(TFE_PathType pathType, const char* fileName, char* outPath)
+    {
+        const char* base = TFE_Paths::getPath(pathType);
+        if (!base) base = "";
+        snprintf(outPath, TFE_MAX_PATH, "%s%s", base, fileName);
+        outPath[TFE_MAX_PATH - 1] = 0;
+    }
+
+    static bool traceFileExists(const char* path)
+    {
+        if (!path || !path[0]) return false;
+        DWORD attr = GetFileAttributesA(path);
+        return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    }
+
+    static void closeTraceFile()
+    {
+        if (s_traceFile != INVALID_HANDLE_VALUE)
+        {
+            CloseHandle(s_traceFile);
+            s_traceFile = INVALID_HANDLE_VALUE;
+        }
+    }
+
+    static void shutdownTrace()
+    {
+        if (s_traceMode == TRACE_RECORD && s_traceFile != INVALID_HANDLE_VALUE)
+        {
+            DWORD bytesWritten = 0;
+            SetFilePointer(s_traceFile, 12, NULL, FILE_BEGIN);
+            WriteFile(s_traceFile, &s_traceFramesWritten, sizeof(s_traceFramesWritten), &bytesWritten, NULL);
+            TFE_XboxLogf("InputTrace", "record stop frames=%lu path=%s",
+                (unsigned long)s_traceFramesWritten, s_tracePath);
+        }
+        else if (s_traceMode == TRACE_PLAYBACK)
+        {
+            TFE_XboxLogf("InputTrace", "playback stop framesRead=%lu frameLimit=%lu path=%s",
+                (unsigned long)s_traceFramesRead, (unsigned long)s_traceFrameLimit, s_tracePath);
+        }
+
+        closeTraceFile();
+        s_traceMode = TRACE_OFF;
+        s_traceFramesWritten = 0;
+        s_traceFramesRead = 0;
+        s_traceFrameLimit = 0;
+        s_traceEofLogged = false;
+        s_tracePath[0] = 0;
+    }
+
+    static bool openTracePlaybackFile(const char* path)
+    {
+        HANDLE file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            return false;
+        }
+
+        XboxInputTraceHeader header;
+        DWORD bytesRead = 0;
+        memset(&header, 0, sizeof(header));
+        if (!ReadFile(file, &header, sizeof(header), &bytesRead, NULL) ||
+            bytesRead != sizeof(header) ||
+            memcmp(header.magic, c_traceMagic, sizeof(c_traceMagic)) != 0 ||
+            header.version != XBOX_INPUT_TRACE_VERSION)
+        {
+            TFE_XboxLogf("InputTrace", "invalid playback file path=%s bytes=%lu version=%lu",
+                path, (unsigned long)bytesRead, (unsigned long)header.version);
+            CloseHandle(file);
+            return false;
+        }
+
+        s_traceFile = file;
+        s_traceFrameLimit = header.frameCount;
+        s_traceFramesRead = 0;
+        s_traceMode = TRACE_PLAYBACK;
+        strncpy(s_tracePath, path, TFE_MAX_PATH - 1);
+        s_tracePath[TFE_MAX_PATH - 1] = 0;
+        TFE_XboxLogf("InputTrace", "playback start frames=%lu mode=raw-xinput-per-frame path=%s",
+            (unsigned long)s_traceFrameLimit, s_tracePath);
+        return true;
+    }
+
+    static void initTrace()
+    {
+        char recordMarker[TFE_MAX_PATH];
+        char playbackMarker[TFE_MAX_PATH];
+        char path[TFE_MAX_PATH];
+        buildTracePath(PATH_PROGRAM, XBOX_INPUT_RECORD_MARKER, recordMarker);
+        buildTracePath(PATH_PROGRAM, XBOX_INPUT_PLAYBACK_MARKER, playbackMarker);
+
+        const bool recordRequested = traceFileExists(recordMarker);
+        const bool playbackRequested = traceFileExists(playbackMarker);
+        if (recordRequested && playbackRequested)
+        {
+            TFE_XboxLogf("InputTrace", "both markers present; playback wins");
+        }
+
+        if (playbackRequested)
+        {
+            buildTracePath(PATH_PROGRAM, XBOX_INPUT_TRACE_FILE, path);
+            if (openTracePlaybackFile(path))
+            {
+                return;
+            }
+
+            buildTracePath(PATH_USER_DOCUMENTS, XBOX_INPUT_TRACE_FILE, path);
+            if (openTracePlaybackFile(path))
+            {
+                return;
+            }
+
+            TFE_XboxLogf("InputTrace", "playback requested but %s not found beside XBE or in UDATA",
+                XBOX_INPUT_TRACE_FILE);
+            return;
+        }
+
+        if (!recordRequested)
+        {
+            return;
+        }
+
+        buildTracePath(PATH_USER_DOCUMENTS, XBOX_INPUT_TRACE_FILE, path);
+        HANDLE file = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            TFE_XboxLogf("InputTrace", "record open failed path=%s err=%lu", path, GetLastError());
+            return;
+        }
+
+        XboxInputTraceHeader header;
+        DWORD bytesWritten = 0;
+        memset(&header, 0, sizeof(header));
+        memcpy(header.magic, c_traceMagic, sizeof(c_traceMagic));
+        header.version = XBOX_INPUT_TRACE_VERSION;
+        header.frameCount = 0;
+        header.reserved = 0;
+        if (!WriteFile(file, &header, sizeof(header), &bytesWritten, NULL) || bytesWritten != sizeof(header))
+        {
+            TFE_XboxLogf("InputTrace", "record header write failed path=%s err=%lu", path, GetLastError());
+            CloseHandle(file);
+            return;
+        }
+
+        s_traceFile = file;
+        s_traceMode = TRACE_RECORD;
+        s_traceFramesWritten = 0;
+        strncpy(s_tracePath, path, TFE_MAX_PATH - 1);
+        s_tracePath[TFE_MAX_PATH - 1] = 0;
+        TFE_XboxLogf("InputTrace", "record start mode=raw-xinput-per-frame path=%s", s_tracePath);
+    }
+
+    static void writeTraceFrame(const XINPUT_STATE& state)
+    {
+        if (s_traceMode != TRACE_RECORD || s_traceFile == INVALID_HANDLE_VALUE)
+        {
+            return;
+        }
+
+        XboxInputTraceFrame frame;
+        DWORD bytesWritten = 0;
+        memset(&frame, 0, sizeof(frame));
+        frame.packetNumber = state.dwPacketNumber;
+        frame.buttons = state.Gamepad.wButtons;
+        memcpy(frame.analogButtons, state.Gamepad.bAnalogButtons, sizeof(frame.analogButtons));
+        frame.thumbLX = state.Gamepad.sThumbLX;
+        frame.thumbLY = state.Gamepad.sThumbLY;
+        frame.thumbRX = state.Gamepad.sThumbRX;
+        frame.thumbRY = state.Gamepad.sThumbRY;
+
+        if (!WriteFile(s_traceFile, &frame, sizeof(frame), &bytesWritten, NULL) || bytesWritten != sizeof(frame))
+        {
+            TFE_XboxLogf("InputTrace", "record frame write failed frame=%lu err=%lu",
+                (unsigned long)s_traceFramesWritten, GetLastError());
+            closeTraceFile();
+            s_traceMode = TRACE_OFF;
+            return;
+        }
+
+        s_traceFramesWritten++;
+        if ((s_traceFramesWritten % XBOX_INPUT_TRACE_HEARTBEAT) == 0)
+        {
+            TFE_XboxLogf("InputTrace", "record status all-input-frames-captured=%lu seconds=%lu path=%s",
+                (unsigned long)s_traceFramesWritten,
+                (unsigned long)(s_traceFramesWritten / 60),
+                s_tracePath);
+        }
+    }
+
+    static bool readTraceFrame(XINPUT_STATE* state)
+    {
+        if (s_traceMode != TRACE_PLAYBACK || s_traceFile == INVALID_HANDLE_VALUE || !state)
+        {
+            return false;
+        }
+
+        if (s_traceFrameLimit > 0 && s_traceFramesRead >= s_traceFrameLimit)
+        {
+            if (!s_traceEofLogged)
+            {
+                TFE_XboxLogf("InputTrace", "playback reached frameLimit=%lu",
+                    (unsigned long)s_traceFrameLimit);
+                s_traceEofLogged = true;
+            }
+            return false;
+        }
+
+        XboxInputTraceFrame frame;
+        DWORD bytesRead = 0;
+        memset(&frame, 0, sizeof(frame));
+        if (!ReadFile(s_traceFile, &frame, sizeof(frame), &bytesRead, NULL) || bytesRead != sizeof(frame))
+        {
+            if (!s_traceEofLogged)
+            {
+                TFE_XboxLogf("InputTrace", "playback eof/short read framesRead=%lu bytes=%lu err=%lu",
+                    (unsigned long)s_traceFramesRead, (unsigned long)bytesRead, GetLastError());
+                s_traceEofLogged = true;
+            }
+            return false;
+        }
+
+        memset(state, 0, sizeof(*state));
+        state->dwPacketNumber = frame.packetNumber;
+        state->Gamepad.wButtons = frame.buttons;
+        memcpy(state->Gamepad.bAnalogButtons, frame.analogButtons, sizeof(frame.analogButtons));
+        state->Gamepad.sThumbLX = frame.thumbLX;
+        state->Gamepad.sThumbLY = frame.thumbLY;
+        state->Gamepad.sThumbRX = frame.thumbRX;
+        state->Gamepad.sThumbRY = frame.thumbRY;
+
+        s_traceFramesRead++;
+        if ((s_traceFramesRead % XBOX_INPUT_TRACE_HEARTBEAT) == 0)
+        {
+            TFE_XboxLogf("InputTrace", "playback status all-input-frames-fed=%lu seconds=%lu path=%s",
+                (unsigned long)s_traceFramesRead,
+                (unsigned long)(s_traceFramesRead / 60),
+                s_tracePath);
+        }
+        return true;
+    }
+
     void init()
     {
         memset(&s_prevState, 0, sizeof(s_prevState));
@@ -169,6 +461,7 @@ namespace TFE_InputXbox
         TFE_XboxLogf("InputXbox", "init sensitivityX=%d sensitivityY=%d rightDeadzonePct=%d invertY=%d trigger=%d",
             (int)(s_lookSensitivityX * 100.0f), (int)(s_lookSensitivityY * 100.0f),
             (int)(s_rightStickDeadzone * 100.0f), s_invertLookY ? 1 : 0, XINPUT_DEADZONE_TRIGGER);
+        initTrace();
     }
 
     // Helper: clear all input state when no controller is connected.
@@ -192,62 +485,75 @@ namespace TFE_InputXbox
     {
         s_pollCounter++;
 
-        // Lazy XInputOpen. XInitDevices kicks off USB enumeration
-        // asynchronously, so the very first poll can race the host stack and
-        // see no devices. Re-poll XGetDevices each frame (cheap), and
-        // XInputOpen once a device appears on PORT0.
-        if (s_hController == NULL)
-        {
-            DWORD mask = XGetDevices(XDEVICE_TYPE_GAMEPAD);
-            if (mask & XDEVICE_PORT0_MASK)
-            {
-                TFE_XboxLogf("InputXbox", "XGetDevices mask=0x%lx - opening port 0", mask);
-                s_hController = XInputOpen(XDEVICE_TYPE_GAMEPAD,
-                                           XDEVICE_PORT0,
-                                           XDEVICE_NO_SLOT,
-                                           NULL);
-                TFE_XboxLogf("InputXbox", "XInputOpen returned handle=%p", s_hController);
-            }
-            else if ((s_openRetryCounter++ % 60) == 0)
-            {
-                // Log once per second while waiting.
-                TFE_XboxLogf("InputXbox", "no gamepad on PORT0 (mask=0x%lx)", mask);
-            }
-        }
-
-        if (s_hController == NULL)
-        {
-            // No controller. Clear state once, then run silent.
-            if (s_prevStateValid) clearAllInput();
-            return;
-        }
-
         XINPUT_STATE state;
         memset(&state, 0, sizeof(state));
 
-        const DWORD result = XInputGetState(s_hController, &state);
-        if (result != ERROR_SUCCESS)
+        if (s_traceMode == TRACE_PLAYBACK)
         {
-            if (!s_loggedDisconnected)
+            if (!readTraceFrame(&state))
             {
-                TFE_XboxLogf("InputXbox", "controller disconnected result=%lu", result);
-                s_loggedDisconnected = true;
-                s_loggedConnected    = false;
+                if (s_prevStateValid) clearAllInput();
+                return;
             }
-            // Close and forget the handle so a re-plug can be picked up if
-            // the user wiggles the cord. We don't retry XInputOpen here
-            // because it can block.
-            XInputClose(s_hController);
-            s_hController      = NULL;
-            s_openRetryCounter = 0;
-            if (s_prevStateValid) clearAllInput();
-            return;
         }
-        if (!s_loggedConnected)
+        else
         {
-            TFE_XboxLogf("InputXbox", "controller connected packet=%lu", state.dwPacketNumber);
-            s_loggedConnected    = true;
-            s_loggedDisconnected = false;
+            // Lazy XInputOpen. XInitDevices kicks off USB enumeration
+            // asynchronously, so the very first poll can race the host stack and
+            // see no devices. Re-poll XGetDevices each frame (cheap), and
+            // XInputOpen once a device appears on PORT0.
+            if (s_hController == NULL)
+            {
+                DWORD mask = XGetDevices(XDEVICE_TYPE_GAMEPAD);
+                if (mask & XDEVICE_PORT0_MASK)
+                {
+                    TFE_XboxLogf("InputXbox", "XGetDevices mask=0x%lx - opening port 0", mask);
+                    s_hController = XInputOpen(XDEVICE_TYPE_GAMEPAD,
+                                               XDEVICE_PORT0,
+                                               XDEVICE_NO_SLOT,
+                                               NULL);
+                    TFE_XboxLogf("InputXbox", "XInputOpen returned handle=%p", s_hController);
+                }
+                else if ((s_openRetryCounter++ % 60) == 0)
+                {
+                    // Log once per second while waiting.
+                    TFE_XboxLogf("InputXbox", "no gamepad on PORT0 (mask=0x%lx)", mask);
+                }
+            }
+
+            if (s_hController == NULL)
+            {
+                // No controller. Clear state once, then run silent.
+                if (s_prevStateValid) clearAllInput();
+                return;
+            }
+
+            const DWORD result = XInputGetState(s_hController, &state);
+            if (result != ERROR_SUCCESS)
+            {
+                if (!s_loggedDisconnected)
+                {
+                    TFE_XboxLogf("InputXbox", "controller disconnected result=%lu", result);
+                    s_loggedDisconnected = true;
+                    s_loggedConnected    = false;
+                }
+                // Close and forget the handle so a re-plug can be picked up if
+                // the user wiggles the cord. We don't retry XInputOpen here
+                // because it can block.
+                XInputClose(s_hController);
+                s_hController      = NULL;
+                s_openRetryCounter = 0;
+                if (s_prevStateValid) clearAllInput();
+                return;
+            }
+            if (!s_loggedConnected)
+            {
+                TFE_XboxLogf("InputXbox", "controller connected packet=%lu", state.dwPacketNumber);
+                s_loggedConnected    = true;
+                s_loggedDisconnected = false;
+            }
+
+            writeTraceFrame(state);
         }
 
         const XINPUT_GAMEPAD& pad  = state.Gamepad;
@@ -400,6 +706,7 @@ namespace TFE_InputXbox
     void shutdown()
     {
         TFE_XboxLogf("InputXbox", "shutdown handle=%p", s_hController);
+        shutdownTrace();
         if (s_hController != NULL)
         {
             XInputClose(s_hController);

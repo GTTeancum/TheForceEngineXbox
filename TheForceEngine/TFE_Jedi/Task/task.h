@@ -76,6 +76,12 @@ namespace TFE_Jedi
 
 	void task_updateTime();
 	s32 task_getCount();
+#ifdef _XBOX
+	u32 task_getPoolSize();
+	u32 task_getPoolCount();
+	u32 task_getStackPoolSize();
+	u32 task_getStackPoolCount();
+#endif
 }
 ////////////////////////////////////////////////////////////////////////
 // Task Function API:

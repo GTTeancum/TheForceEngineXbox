@@ -67,6 +67,18 @@
 #ifdef _XBOX
 extern "C" void TFE_XboxReturnToStartMenu();
 extern "C" bool TFE_XboxSoakAutoAdvanceMissionComplete();
+
+	static void xboxLogTaskPoolSnapshot(const char* tag)
+	{
+		TFE_System::logWrite(LOG_MSG, "TaskPool",
+			"%s active=%d taskPool=%u/%u stackPool=%u/%u",
+			tag ? tag : "",
+			TFE_Jedi::task_getCount(),
+			TFE_Jedi::task_getPoolCount(),
+			TFE_Jedi::task_getPoolSize(),
+			TFE_Jedi::task_getStackPoolCount(),
+			TFE_Jedi::task_getStackPoolSize());
+	}
 #endif
 
 using namespace TFE_Memory;
@@ -921,7 +933,7 @@ namespace TFE_DarkForces
 						{
 							xboxMissionCompleteOpen();
 						}
-						TFE_System::logWrite(LOG_MSG, "MissionComplete", "soak auto-advance");
+						TFE_System::logWrite(LOG_MSG, "MissionComplete", "harness auto-advance");
 						TFE_RenderBackend::xboxSetMissionCompleteScreen(false, 0, 0, NULL);
 						s_xboxMissionCompleteOpen = false;
 					}
@@ -951,6 +963,9 @@ namespace TFE_DarkForces
 #endif
 
 				// We have returned from the mission tasks.
+#ifdef _XBOX
+				xboxLogTaskPoolSnapshot("mission-end-before-cleanup");
+#endif
 				renderer_reset();
 				gameMusic_stop();
 				sound_levelStop();
@@ -990,6 +1005,7 @@ namespace TFE_DarkForces
 				level_freeAllAssets();
 				bitmap_setAllocator(s_gameRegion);
 				game_resetLevelRegion("mission-transition");
+				xboxLogTaskPoolSnapshot("mission-end-after-level-reset");
 				TFE_A11Y::clearActiveCaptions();
 
 				if (xboxAbortToStart)
@@ -1137,6 +1153,7 @@ namespace TFE_DarkForces
 		case GMODE_MISSION:
 		{
 #ifdef _XBOX
+			xboxLogTaskPoolSnapshot("startNextMode-mission-entry");
 			if (s_verboseXboxModeTransitionLog)
 			{
 				TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode mission begin");
@@ -1161,6 +1178,9 @@ namespace TFE_DarkForces
 
 			task_reset();
 			inf_clearState();
+#ifdef _XBOX
+			xboxLogTaskPoolSnapshot("startNextMode-after-task-reset");
+#endif
 
 			TFE_Settings_Game* gameSettings = TFE_Settings::getGameSettings();
 
@@ -1179,6 +1199,7 @@ namespace TFE_DarkForces
 			s_sharedState.loadMissionTask = createTask("start mission", mission_startTaskFunc, JTRUE);
 			mission_setLoadMissionTask(s_sharedState.loadMissionTask);
 #ifdef _XBOX
+			xboxLogTaskPoolSnapshot("startNextMode-after-load-task");
 			if (s_verboseXboxModeTransitionLog)
 			{
 				TFE_System::logWrite(LOG_MSG, "DarkForces", "startNextMode loadMissionTask=%p", s_sharedState.loadMissionTask);
@@ -2090,6 +2111,9 @@ namespace TFE_DarkForces
 
 	void startMissionFromSave(s32 levelIndex)
 	{
+#ifdef _XBOX
+		xboxLogTaskPoolSnapshot("startMissionFromSave-entry");
+#endif
 		// We have returned from the mission tasks.
 		renderer_reset();
 		gameMusic_stop();
@@ -2115,6 +2139,9 @@ namespace TFE_DarkForces
 
 		task_reset();
 		inf_clearState();
+#ifdef _XBOX
+		xboxLogTaskPoolSnapshot("startMissionFromSave-after-task-reset");
+#endif
 		mission_setLoadingFromSave();	// This tells the mission system that this is loading from a save.
 		s_sharedState.loadMissionTask = createTask("start mission", mission_startTaskFunc, JTRUE);
 		mission_setLoadMissionTask(s_sharedState.loadMissionTask);
@@ -2122,6 +2149,9 @@ namespace TFE_DarkForces
 
 		s_runGameState.state = GSTATE_MISSION;
 		mission_setupTasks();
+#ifdef _XBOX
+		xboxLogTaskPoolSnapshot("startMissionFromSave-after-setup");
+#endif
 	}
 
 	bool serializeLoopState(Stream* stream, DarkForces* game)

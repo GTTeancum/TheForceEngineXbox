@@ -50,6 +50,12 @@ namespace TFE_Jedi
 
 	MessageAddress* message_getAddress(const char* name)
 	{
+		if (!name || !s_messageAddr || allocator_getCount(s_messageAddr) <= 0)
+		{
+			TFE_System::logWrite(LOG_ERROR, "INF", "Message_GetAddress: ADDRESS NOT FOUND: %s", name ? name : "<null>");
+			return nullptr;
+		}
+
 		MessageAddress* msgAddr = (MessageAddress*)allocator_getHead(s_messageAddr);
 		while (msgAddr)
 		{
@@ -96,6 +102,14 @@ namespace TFE_Jedi
 	// this iterates through the valid links and calls their msgFunc.
 	void message_sendToSector(RSector* sector, SecObject* entity, u32 evt, MessageType msgType)
 	{
+		if (!sector)
+		{
+			TFE_System::logWrite(LOG_WARNING, "INF",
+				"message_sendToSector skipped null sector msg=%d evt=0x%08x entity=%p",
+				(s32)msgType, evt, entity);
+			return;
+		}
+
 		// Was: inf_sendSectorMessage()
 		// Changed: inf_sendSectorMessageInternal() -> inf_sendSectorMessage()
 		inf_sendSectorMessage(sector, msgType);

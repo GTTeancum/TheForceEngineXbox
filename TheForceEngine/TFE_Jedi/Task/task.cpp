@@ -237,6 +237,28 @@ namespace TFE_Jedi
 		return s_curTask;
 	}
 
+#ifdef _XBOX
+	u32 task_getPoolSize()
+	{
+		return chunkedArraySize(s_tasks);
+	}
+
+	u32 task_getPoolCount()
+	{
+		return chunkedArrayCount(s_tasks);
+	}
+
+	u32 task_getStackPoolSize()
+	{
+		return chunkedArraySize(s_stackBlocks);
+	}
+
+	u32 task_getStackPoolCount()
+	{
+		return chunkedArrayCount(s_stackBlocks);
+	}
+#endif
+
 	void task_pause(JBool pause, Task* pauseRunTask)
 	{
 		s_taskSystemPaused = pause;

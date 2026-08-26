@@ -15,10 +15,32 @@ namespace TFE_System
 	static bool s_modMessagesLoaded = false;
 	static bool s_messagesLoaded = false;
 
+	static const char* s_tfeMessageFallback[TFE_MSG_COUNT] =
+	{
+		"Game Saved",
+		"Secret Found",
+		"Fly Mode",
+		"No Clip",
+		"Tester Mode",
+		"Extra Life",
+		"Cannot Add Life",
+		"Life Removed",
+		"Cat Mode",
+		"Die",
+		"One Hit Kill",
+		"Hardcore Mode",
+		"Fullbright",
+		"HD Assets",
+		"red",
+		"blue",
+		"yellow",
+		"%s key"
+	};
+
 	const char* getMessage(TFE_Message msg)
 	{
 		if (msg < TFE_MSG_SAVE || msg >= TFE_MSG_COUNT) { return nullptr; }
-		return s_tfeMessage[msg];
+		return s_tfeMessage[msg] ? s_tfeMessage[msg] : s_tfeMessageFallback[msg];
 	}
 
 	void freeMessages()

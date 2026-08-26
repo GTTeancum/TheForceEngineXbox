@@ -131,8 +131,8 @@ namespace TFE_Input
 		{ IAS_SYSTEM_MENU, ITYPE_CONTROLLER, { CONTROLLER_BUTTON_RIGHTSTICK }, KEYMOD_NONE },
 
 		{ IADF_JUMP,   ITYPE_CONTROLLER, { CONTROLLER_BUTTON_A }, KEYMOD_NONE },
-		{ IADF_CROUCH, ITYPE_CONTROLLER, { CONTROLLER_BUTTON_X }, KEYMOD_NONE },
-		{ IADF_USE,    ITYPE_CONTROLLER, { CONTROLLER_BUTTON_B }, KEYMOD_NONE },
+		{ IADF_CROUCH, ITYPE_CONTROLLER, { CONTROLLER_BUTTON_B }, KEYMOD_NONE },
+		{ IADF_USE,    ITYPE_CONTROLLER, { CONTROLLER_BUTTON_X }, KEYMOD_NONE },
 
 #ifdef _XBOX
 		// Original Xbox controller has no GUIDE button; bind the pause/
@@ -470,22 +470,22 @@ namespace TFE_Input
 		}
 
 		const bool oldDefaultFaceButtons =
-			inputMapping_hasControllerButton(IADF_CROUCH, CONTROLLER_BUTTON_B) &&
-			inputMapping_hasControllerButton(IADF_USE, CONTROLLER_BUTTON_X);
+			inputMapping_hasControllerButton(IADF_CROUCH, CONTROLLER_BUTTON_X) &&
+			inputMapping_hasControllerButton(IADF_USE, CONTROLLER_BUTTON_B);
 		if (oldDefaultFaceButtons)
 		{
-			inputMapping_setControllerBinding(IADF_CROUCH, ITYPE_CONTROLLER, CONTROLLER_BUTTON_X);
-			inputMapping_setControllerBinding(IADF_USE, ITYPE_CONTROLLER, CONTROLLER_BUTTON_B);
+			inputMapping_setControllerBinding(IADF_CROUCH, ITYPE_CONTROLLER, CONTROLLER_BUTTON_B);
+			inputMapping_setControllerBinding(IADF_USE, ITYPE_CONTROLLER, CONTROLLER_BUTTON_X);
 			return;
 		}
 
 		if (!inputMapping_hasControllerBinding(IADF_CROUCH))
 		{
-			inputMapping_setControllerBinding(IADF_CROUCH, ITYPE_CONTROLLER, CONTROLLER_BUTTON_X);
+			inputMapping_setControllerBinding(IADF_CROUCH, ITYPE_CONTROLLER, CONTROLLER_BUTTON_B);
 		}
 		if (!inputMapping_hasControllerBinding(IADF_USE))
 		{
-			inputMapping_setControllerBinding(IADF_USE, ITYPE_CONTROLLER, CONTROLLER_BUTTON_B);
+			inputMapping_setControllerBinding(IADF_USE, ITYPE_CONTROLLER, CONTROLLER_BUTTON_X);
 		}
 	}
 #endif

@@ -214,6 +214,11 @@ namespace TFE_RenderBackend
     static XboxMissionCompleteInfo s_missionCompleteInfo = { 0, 0, 0, 0 };
     static bool s_weaponWheelEnabled = false;
     static XboxWeaponWheelInfo s_weaponWheelInfo;
+    static u8   s_weaponWheelMask[MAX_VDISP_PIXELS];
+    static u32  s_weaponWheelMaskWidth = 0;
+    static u32  s_weaponWheelMaskHeight = 0;
+    static const u8 XWHEEL_MASK_EMPTY = 0xff;
+    static const u8 XWHEEL_MASK_EDGE  = 0x80;
 
     static const u32 XPAUSE_GREEN_DARK  = 0xFF003800u;
     static const u32 XPAUSE_GREEN_MID   = 0xFF00A000u;
@@ -697,25 +702,32 @@ namespace TFE_RenderBackend
         wheelDrawTextScaledTo(dst, width, height, text, x, baselineY, color, num, den);
     }
 
-    static void weaponWheelDrawSegment(s32 index, f32 centerDeg)
+    static u8 weaponWheelMaskValue(s32 index, bool edge)
+    {
+        return (u8)(index | (edge ? XWHEEL_MASK_EDGE : 0));
+    }
+
+    static void weaponWheelBuildMask()
     {
         const s32 width = (s32)s_vdispWidth;
         const s32 height = (s32)s_vdispHeight;
         if (width <= 0 || height <= 0) return;
+        if (s_weaponWheelMaskWidth == s_vdispWidth &&
+            s_weaponWheelMaskHeight == s_vdispHeight)
+        {
+            return;
+        }
+
+        memset(s_weaponWheelMask, XWHEEL_MASK_EMPTY, sizeof(s_weaponWheelMask));
+        s_weaponWheelMaskWidth = s_vdispWidth;
+        s_weaponWheelMaskHeight = s_vdispHeight;
 
         const f32 scale = (f32)height / 480.0f;
         const f32 cx = (f32)width * 0.5f;
         const f32 cy = (f32)height * 0.5f;
         const f32 inner = 56.0f * scale;
         const f32 outer = 116.0f * scale;
-        const f32 start = centerDeg - 12.0f;
-        const f32 end = centerDeg + 12.0f;
-        const bool selected = index == s_weaponWheelInfo.selected;
-        const bool current = index == s_weaponWheelInfo.current;
-        const bool available = s_weaponWheelInfo.available[index];
-        const u32 fill = !available ? (selected ? 0x77424242u : 0x55343434u) : (selected ? 0xCCBFC8C8u : (current ? 0xAA8DA6B8u : 0x99959B9Bu));
-        const u32 edge = !available ? (selected ? 0xFF777777u : 0xFF303030u) : (selected ? 0xFFE8F0F0u : 0xFF656B6Bu);
-
+        static const f32 centers[10] = { 120.0f, 150.0f, 180.0f, -150.0f, -120.0f, 60.0f, 30.0f, 0.0f, -30.0f, -60.0f };
         const s32 x0 = (s32)(cx - outer - 4);
         const s32 x1 = (s32)(cx + outer + 4);
         const s32 y0 = (s32)(cy - outer - 4);
@@ -731,31 +743,77 @@ namespace TFE_RenderBackend
                 const f32 r2 = dx * dx + dy * dy;
                 if (r2 < inner * inner || r2 > outer * outer) continue;
                 const f32 a = atan2f(dy, dx) * 57.2957795f;
-                if (!angleInRange(a, start, end)) continue;
 
                 const f32 r = sqrtf(r2);
-                const f32 startDelta = fabsf(wrapAngleDeg(a - start));
-                const f32 endDelta = fabsf(wrapAngleDeg(a - end));
-                const bool border = r < inner + 3.0f * scale || r > outer - 3.0f * scale ||
-                    startDelta < 1.5f || endDelta < 1.5f;
-                u32* pixel = s_expandBuf + y * width + x;
-                *pixel = pauseBlend(*pixel | 0xFF000000u, border ? edge : fill, border ? 210u : 145u);
+                const bool radiusEdge = r < inner + 3.0f * scale || r > outer - 3.0f * scale;
+                for (s32 i = 0; i < 10; i++)
+                {
+                    const f32 start = centers[i] - 12.0f;
+                    const f32 end = centers[i] + 12.0f;
+                    if (!angleInRange(a, start, end)) continue;
+                    const f32 startDelta = fabsf(wrapAngleDeg(a - start));
+                    const f32 endDelta = fabsf(wrapAngleDeg(a - end));
+                    const bool angleEdge = startDelta < 1.5f || endDelta < 1.5f;
+                    s_weaponWheelMask[y * width + x] = weaponWheelMaskValue(i, radiusEdge || angleEdge);
+                    break;
+                }
             }
         }
+    }
 
-        if (s_weaponWheelInfo.icons[index])
+    static void weaponWheelCompositeBase()
+    {
+        const s32 width = (s32)s_vdispWidth;
+        const s32 height = (s32)s_vdispHeight;
+        const u32 pixels = (u32)(width * height);
+        weaponWheelBuildMask();
+        for (u32 p = 0; p < pixels; p++)
         {
-            const f32 labelR = (inner + outer) * 0.5f;
-            const f32 rad = centerDeg * 0.0174532925f;
-            const s32 tx = (s32)(cx + cosf(rad) * labelR);
-            const s32 ty = (s32)(cy - sinf(rad) * labelR);
-            s32 iconSize = (s32)(44.0f * scale);
-            if (index == 3 || index == 7)
+            s_expandBuf[p] = pauseBlend(s_expandBuf[p] | 0xFF000000u, 0xFF10356Bu, 54u);
+
+            const u8 mask = s_weaponWheelMask[p];
+            if (mask == XWHEEL_MASK_EMPTY) continue;
+
+            const s32 index = mask & ~XWHEEL_MASK_EDGE;
+            if (index < 0 || index >= 10) continue;
+
+            const bool edgePixel = (mask & XWHEEL_MASK_EDGE) != 0;
+            const bool selected = index == s_weaponWheelInfo.selected;
+            const bool current = index == s_weaponWheelInfo.current;
+            const bool available = s_weaponWheelInfo.available[index];
+            const u32 fill = !available ? (selected ? 0x77424242u : 0x55343434u) : (selected ? 0xCCBFC8C8u : (current ? 0xAA8DA6B8u : 0x99959B9Bu));
+            const u32 edge = !available ? (selected ? 0xFF777777u : 0xFF303030u) : (selected ? 0xFFE8F0F0u : 0xFF656B6Bu);
+            s_expandBuf[p] = pauseBlend(s_expandBuf[p] | 0xFF000000u, edgePixel ? edge : fill, edgePixel ? 210u : 145u);
+        }
+    }
+
+    static void weaponWheelDrawIcons()
+    {
+        const s32 width = (s32)s_vdispWidth;
+        const s32 height = (s32)s_vdispHeight;
+        const f32 scale = (f32)height / 480.0f;
+        const f32 cx = (f32)width * 0.5f;
+        const f32 cy = (f32)height * 0.5f;
+        const f32 inner = 56.0f * scale;
+        const f32 outer = 116.0f * scale;
+        static const f32 centers[10] = { 120.0f, 150.0f, 180.0f, -150.0f, -120.0f, 60.0f, 30.0f, 0.0f, -30.0f, -60.0f };
+        for (s32 index = 0; index < 10; index++)
+        {
+            if (s_weaponWheelInfo.icons[index])
             {
-                iconSize = (iconSize * 7) / 10;
+                const f32 labelR = (inner + outer) * 0.5f;
+                const f32 rad = centers[index] * 0.0174532925f;
+                const s32 tx = (s32)(cx + cosf(rad) * labelR);
+                const s32 ty = (s32)(cy - sinf(rad) * labelR);
+                s32 iconSize = (s32)(44.0f * scale);
+                if (index == 3 || index == 7)
+                {
+                    iconSize = (iconSize * 7) / 10;
+                }
+                const bool available = s_weaponWheelInfo.available[index];
+                weaponWheelDrawIcon(s_weaponWheelInfo.icons[index], s_weaponWheelInfo.iconWidth, s_weaponWheelInfo.iconHeight, tx + 1, ty + 2, iconSize, iconSize, true, available);
+                weaponWheelDrawIcon(s_weaponWheelInfo.icons[index], s_weaponWheelInfo.iconWidth, s_weaponWheelInfo.iconHeight, tx, ty, iconSize, iconSize, false, available);
             }
-            weaponWheelDrawIcon(s_weaponWheelInfo.icons[index], s_weaponWheelInfo.iconWidth, s_weaponWheelInfo.iconHeight, tx + 1, ty + 2, iconSize, iconSize, true, available);
-            weaponWheelDrawIcon(s_weaponWheelInfo.icons[index], s_weaponWheelInfo.iconWidth, s_weaponWheelInfo.iconHeight, tx, ty, iconSize, iconSize, false, available);
         }
     }
 
@@ -764,17 +822,8 @@ namespace TFE_RenderBackend
         if (!s_weaponWheelEnabled || !s_vdispWidth || !s_vdispHeight) return;
         const s32 width = (s32)s_vdispWidth;
         const s32 height = (s32)s_vdispHeight;
-        const u32 pixels = (u32)(width * height);
-        for (u32 i = 0; i < pixels; i++)
-        {
-            s_expandBuf[i] = pauseBlend(s_expandBuf[i] | 0xFF000000u, 0xFF10356Bu, 54u);
-        }
-
-        static const f32 centers[10] = { 120.0f, 150.0f, 180.0f, -150.0f, -120.0f, 60.0f, 30.0f, 0.0f, -30.0f, -60.0f };
-        for (s32 i = 0; i < 10; i++)
-        {
-            weaponWheelDrawSegment(i, centers[i]);
-        }
+        weaponWheelCompositeBase();
+        weaponWheelDrawIcons();
         const s32 cx = width / 2;
         const s32 cy = height / 2;
         pauseFillRect(s_expandBuf, width, height, cx - 1, cy - 10, 2, 20, 0xFFE6E6E6u);
@@ -905,27 +954,39 @@ namespace TFE_RenderBackend
         startDrawTextSpriteRaw(dst, width, height, id, x, y, color, false);
     }
 
-    static void footerDrawTextRaw(XboxFooterTextId id, s32 x, s32 y, u32 primary, bool shadow)
+    static void footerDrawTextRawTo(u32* dst, s32 width, s32 height, XboxFooterTextId id, s32 x, s32 y, u32 primary, bool shadow)
     {
+        if (!dst) return;
         const XboxFooterTextSprite* s = &c_xboxFooterText[id];
         const s32 ox = shadow ? 2 : 0;
         const s32 oy = shadow ? 2 : 0;
         for (s32 py = 0; py < s->height; py++)
         {
             const s32 dy = y + oy + py;
-            if (dy < 0 || dy >= XBOX_OUTPUT_HEIGHT) continue;
+            if (dy < 0 || dy >= height) continue;
             for (s32 px = 0; px < s->width; px++)
             {
                 const u8 cov = s->data[py * s->width + px];
                 if (!cov) continue;
                 const s32 dx = x + ox + px;
-                if (dx < 0 || dx >= XBOX_OUTPUT_WIDTH) continue;
+                if (dx < 0 || dx >= width) continue;
                 const u32 src = shadow ? XPAUSE_BLACK : primary;
                 const u32 a = shadow ? (u32)(cov * 44) : (u32)(cov * 64);
-                u32* pixel = s_expandBuf + dy * XBOX_OUTPUT_WIDTH + dx;
+                u32* pixel = dst + dy * width + dx;
                 *pixel = pauseBlend(*pixel | 0xFF000000u, src, (u32)pauseClamp((s32)a, 0, 255));
             }
         }
+    }
+
+    static void footerDrawTextRaw(XboxFooterTextId id, s32 x, s32 y, u32 primary, bool shadow)
+    {
+        footerDrawTextRawTo(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, id, x, y, primary, shadow);
+    }
+
+    static void footerDrawTextTo(u32* dst, s32 width, s32 height, XboxFooterTextId id, s32 x, s32 y, u32 color)
+    {
+        footerDrawTextRawTo(dst, width, height, id, x, y, color, true);
+        footerDrawTextRawTo(dst, width, height, id, x, y, color, false);
     }
 
     static void footerDrawText(XboxFooterTextId id, s32 x, s32 y, u32 color)
@@ -1025,6 +1086,14 @@ namespace TFE_RenderBackend
         footerDrawText(id, x + dukeIconWidthForHeight(icon, iconH) + 8, 443, color);
     }
 
+    static void footerDrawItemTo(u32* dst, s32 width, s32 height, XboxFooterTextId id, s32 x, u32 color)
+    {
+        const s32 iconH = (id == XFT_DPAD_ADJUST) ? 19 : 18;
+        const XboxDukeButtonIconId icon = footerIconForItem(id);
+        dukeDrawIconTo(dst, width, height, icon, x, 441, iconH, 0xFFFFFFFFu);
+        footerDrawTextTo(dst, width, height, id, x + dukeIconWidthForHeight(icon, iconH) + 8, 443, color);
+    }
+
     static const char* loadGlyphRows(char c, s32 row)
     {
         static const char* sp[7] = { "00000","00000","00000","00000","00000","00000","00000" };
@@ -1033,6 +1102,7 @@ namespace TFE_RenderBackend
         static const char* apos[7]= { "01100","01100","00100","00000","00000","00000","00000" };
         static const char* slash[7]={"00001","00010","00010","00100","01000","01000","10000" };
         static const char* colon[7]={"00000","01100","01100","00000","01100","01100","00000" };
+        static const char* ques[7]= { "01110","10001","00001","00010","00100","00000","00100" };
         static const char* zero[7]={ "01110","10001","10011","10101","11001","10001","01110" };
         static const char* one[7] = { "00100","01100","00100","00100","00100","00100","01110" };
         static const char* two[7] = { "01110","10001","00001","00010","00100","01000","11111" };
@@ -1073,7 +1143,7 @@ namespace TFE_RenderBackend
         if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
         switch (c)
         {
-            case '-': glyph = dash; break; case '.': glyph = dot; break; case '\'': glyph = apos; break; case '/': glyph = slash; break; case ':': glyph = colon; break;
+            case '-': glyph = dash; break; case '.': glyph = dot; break; case '\'': glyph = apos; break; case '/': glyph = slash; break; case ':': glyph = colon; break; case '?': glyph = ques; break;
             case '0': glyph = zero; break; case '1': glyph = one; break; case '2': glyph = two; break; case '3': glyph = three; break; case '4': glyph = four; break;
             case '5': glyph = five; break; case '6': glyph = six; break; case '7': glyph = seven; break; case '8': glyph = eight; break; case '9': glyph = nine; break;
             case 'A': glyph = a; break; case 'B': glyph = b; break; case 'C': glyph = c_; break; case 'D': glyph = d; break; case 'E': glyph = e; break; case 'F': glyph = f; break;
@@ -1928,13 +1998,42 @@ namespace TFE_RenderBackend
         optionsDrawSafeAreaMarkers(pauseStyle);
     }
 
-    static void missionCompleteBuildFrame()
+    static void missionCompleteDrawStat(u32* dst, s32 width, s32 height, const char* label, const char* value, s32 centerX, s32 y)
     {
-        startDrawStarfield(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, s_missionCompleteFrame);
+        const s32 gap = 18;
+        const s32 labelW = loadTextWidth(label, 1);
+        const s32 valueW = loadTextWidth(value, 1);
+        const s32 totalW = labelW + gap + valueW;
+        const s32 x = centerX - totalW / 2;
+        loadDrawText(dst, width, height, label, x, y, 1, 0xFF33D033u);
+        loadDrawText(dst, width, height, value, x + labelW + gap, y, 1, 0xFF33FF33u);
 
-        loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "MISSION ACCOMPLISHED", XBOX_OUTPUT_WIDTH / 2, 120, 4, 0xFFFF3030u);
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 94, 156, 452, 2, 0xFFFF3030u);
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 94, 160, 452, 1, 0xFF661010u);
+        s32 underlineW = totalW;
+        if (underlineW < 100) underlineW = 100;
+        pauseFillRect(dst, width, height,
+            centerX - underlineW / 2, y + 18, underlineW, 1, 0xFF143814u);
+    }
+
+    static u32 missionCompleteCanvasWidth()
+    {
+        return s_outputWidescreen ? s_displayInfoWidth : XBOX_OUTPUT_WIDTH;
+    }
+
+    static u32 missionCompleteCanvasHeight()
+    {
+        return s_outputWidescreen ? s_displayInfoHeight : XBOX_OUTPUT_HEIGHT;
+    }
+
+    static void missionCompleteBuildFrame(u32 canvasW, u32 canvasH)
+    {
+        startDrawStarfield(s_expandBuf, canvasW, canvasH, s_missionCompleteFrame);
+
+        const s32 width = (s32)canvasW;
+        const s32 height = (s32)canvasH;
+        const s32 centerX = width / 2;
+        loadDrawTextCenter(s_expandBuf, width, height, "MISSION ACCOMPLISHED", centerX, 120, 4, 0xFFFF3030u);
+        pauseFillRect(s_expandBuf, width, height, centerX - 226, 156, 452, 2, 0xFFFF3030u);
+        pauseFillRect(s_expandBuf, width, height, centerX - 226, 160, 452, 1, 0xFF661010u);
 
         char timeText[16];
         char secretText[16];
@@ -1948,33 +2047,31 @@ namespace TFE_RenderBackend
         else if (s_missionCompleteInfo.difficulty >= 2) diffText = "HARD";
 
         const s32 statsY = 205;
-        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "TIME", 150, statsY, 1, 0xFF33D033u);
-        loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, timeText, 250, statsY, 1, 0xFF33FF33u);
-        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "SECRETS", 284, statsY, 1, 0xFF33D033u);
-        loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, secretText, 390, statsY, 1, 0xFF33FF33u);
-        loadDrawText(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "DIFFICULTY", 424, statsY, 1, 0xFF33D033u);
-        loadDrawTextRight(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, diffText, 526, statsY, 1, 0xFF33FF33u);
+        missionCompleteDrawStat(s_expandBuf, width, height, "TIME", timeText, centerX - 160, statsY);
+        missionCompleteDrawStat(s_expandBuf, width, height, "SECRETS", secretText, centerX, statsY);
+        missionCompleteDrawStat(s_expandBuf, width, height, "DIFFICULTY", diffText, centerX + 160, statsY);
 
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 150, statsY + 18, 100, 1, 0xFF143814u);
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 284, statsY + 18, 106, 1, 0xFF143814u);
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, 424, statsY + 18, 102, 1, 0xFF143814u);
+        loadDrawTextCenter(s_expandBuf, width, height, "SAVE GAME?", centerX, 280, 3, 0xFFFF3030u);
 
-        loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "SAVE GAME?", XBOX_OUTPUT_WIDTH / 2, 280, 3, 0xFFFF3030u);
-
-        const s32 yesX = 244;
-        const s32 noX = 360;
+        const s32 yesW = 84;
+        const s32 noW = 72;
+        const s32 buttonGap = 32;
+        const s32 buttonGroupW = yesW + buttonGap + noW;
+        const s32 yesX = centerX - buttonGroupW / 2;
+        const s32 noX = yesX + yesW + buttonGap;
         const s32 buttonY = 340;
         const bool yesSelected = s_missionCompleteSelection == 0;
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, yesX, buttonY, 84, 32, yesSelected ? 0xFF381010u : 0xFF201C12u);
-        loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, yesX, buttonY, 84, 32, yesSelected ? 0xFFFF3030u : 0xFF8E8B72u);
-        loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "YES", yesX + 42, buttonY + 10, 2, yesSelected ? 0xFFFF3030u : 0xFFE0D8B8u);
+        pauseFillRect(s_expandBuf, width, height, yesX, buttonY, yesW, 32, yesSelected ? 0xFF381010u : 0xFF201C12u);
+        loadStrokeRect(s_expandBuf, width, height, yesX, buttonY, yesW, 32, yesSelected ? 0xFFFF3030u : 0xFF8E8B72u);
+        loadDrawTextCenter(s_expandBuf, width, height, "YES", yesX + yesW / 2, buttonY + 10, 2, yesSelected ? 0xFFFF3030u : 0xFFE0D8B8u);
 
-        pauseFillRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, noX, buttonY, 72, 32, !yesSelected ? 0xFF381010u : 0xFF201C12u);
-        loadStrokeRect(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, noX, buttonY, 72, 32, !yesSelected ? 0xFFFF3030u : 0xFF8E8B72u);
-        loadDrawTextCenter(s_expandBuf, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, "NO", noX + 36, buttonY + 10, 2, !yesSelected ? 0xFFFF3030u : 0xFFE0D8B8u);
+        pauseFillRect(s_expandBuf, width, height, noX, buttonY, noW, 32, !yesSelected ? 0xFF381010u : 0xFF201C12u);
+        loadStrokeRect(s_expandBuf, width, height, noX, buttonY, noW, 32, !yesSelected ? 0xFFFF3030u : 0xFF8E8B72u);
+        loadDrawTextCenter(s_expandBuf, width, height, "NO", noX + noW / 2, buttonY + 10, 2, !yesSelected ? 0xFFFF3030u : 0xFFE0D8B8u);
 
-        footerDrawBar(0xFF3C2E10u);
-        footerDrawItem(XFT_A_CONFIRM, 28, 0xFF33D033u);
+        pauseFillRect(s_expandBuf, width, height, 0, 424, width, 56, XPAUSE_BLACK);
+        pauseFillRect(s_expandBuf, width, height, 0, 422, width, 1, 0xFF3C2E10u);
+        footerDrawItemTo(s_expandBuf, width, height, XFT_A_CONFIRM, 28, 0xFF33D033u);
     }
 
     static bool startUploadTexture(u32 width, u32 height)
@@ -2136,7 +2233,7 @@ namespace TFE_RenderBackend
         pp->SwapEffect                   = D3DSWAPEFFECT_DISCARD;
         pp->FullScreen_RefreshRateInHz   = D3DPRESENT_RATE_DEFAULT;
         pp->hDeviceWindow                = NULL;
-        pp->FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_ONE_OR_IMMEDIATE;
+        pp->FullScreen_PresentationInterval = s_vsync ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
         pp->Flags                        = xboxPresentFlags();
     }
 
@@ -2299,16 +2396,15 @@ namespace TFE_RenderBackend
         }
         s_d3d->SetPushBufferSize(1024 * 1024, 32 * 1024);
 
+        s_vsync = (state.flags & WINFLAG_VSYNC) != 0;
+
         // Keep the existing Xbox D3D8 setup, then vary only the present mode
         // fields needed for widescreen / HDTV experiments.
         D3DPRESENT_PARAMETERS pp;
         xboxFillPresentParameters(&pp);
 
-        // Record the requested vsync intent for reporting; the Xbox backend
-        // keeps its present interval fixed here.
-        s_vsync = (state.flags & WINFLAG_VSYNC) != 0;
-        TFE_XboxLogf("RenderBackend", "present interval=one-or-immediate flags=0x%08x output=%ux%u display=%ux%u",
-            pp.Flags, s_outputWidth, s_outputHeight, s_displayInfoWidth, s_displayInfoHeight);
+        TFE_XboxLogf("RenderBackend", "present interval=%d flags=0x%08x output=%ux%u display=%ux%u",
+            pp.FullScreen_PresentationInterval, pp.Flags, s_outputWidth, s_outputHeight, s_displayInfoWidth, s_displayInfoHeight);
 
         HRESULT hr = s_d3d->CreateDevice(
             D3DADAPTER_DEFAULT,
@@ -2854,10 +2950,12 @@ namespace TFE_RenderBackend
         }
         else if (s_missionCompleteScreenEnabled)
         {
-            missionCompleteBuildFrame();
-            if (startUploadTexture(XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT))
+            const u32 missionW = missionCompleteCanvasWidth();
+            const u32 missionH = missionCompleteCanvasHeight();
+            missionCompleteBuildFrame(missionW, missionH);
+            if (startUploadTexture(missionW, missionH))
             {
-                blitTextureQuad(s_startTex, XBOX_OUTPUT_WIDTH, XBOX_OUTPUT_HEIGHT, /*alphaTest*/false);
+                blitTextureQuad(s_startTex, missionW, missionH, /*alphaTest*/false);
             }
         }
         else if (s_loadScreenEnabled)

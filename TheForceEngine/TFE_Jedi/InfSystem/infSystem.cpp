@@ -104,6 +104,93 @@ namespace TFE_Jedi
 	void inf_elevatorTaskLocal(MessageType msg);
 	void inf_triggerTaskLocal(MessageType msg);
 
+#ifdef _XBOX
+	static s32 s_xboxInfTriggerDepth = 0;
+
+	static bool xboxInfDebugEnabled()
+	{
+		const char* levelName = TFE_DarkForces::agent_getLevelName();
+		return levelName && strcasecmp(levelName, "SEWERS") == 0;
+	}
+
+	static const char* xboxInfMessageName(MessageType msg)
+	{
+		switch (msg)
+		{
+			case MSG_FREE_TASK: return "FREE_TASK";
+			case MSG_RUN_TASK: return "RUN_TASK";
+			case MSG_FREE: return "FREE";
+			case MSG_TRIGGER: return "TRIGGER";
+			case MSG_NEXT_STOP: return "NEXT_STOP";
+			case MSG_PREV_STOP: return "PREV_STOP";
+			case MSG_GOTO_STOP: return "GOTO_STOP";
+			case MSG_SEQ_COMPLETE: return "SEQ_COMPLETE";
+			case MSG_DONE: return "DONE";
+			case MSG_MASTER_ON: return "MASTER_ON";
+			case MSG_MASTER_OFF: return "MASTER_OFF";
+			case MSG_SET_BITS: return "SET_BITS";
+			case MSG_CLEAR_BITS: return "CLEAR_BITS";
+			case MSG_COMPLETE: return "COMPLETE";
+			case MSG_LIGHTS: return "LIGHTS";
+			default: return "OTHER";
+		}
+	}
+
+	static const char* xboxInfTriggerTypeName(TriggerType type)
+	{
+		switch (type)
+		{
+			case ITRIGGER_WALL: return "wall";
+			case ITRIGGER_SECTOR: return "sector";
+			case ITRIGGER_SWITCH1: return "switch1";
+			case ITRIGGER_TOGGLE: return "toggle";
+			case ITRIGGER_SINGLE: return "single";
+			default: return "unknown";
+		}
+	}
+
+	static const char* xboxInfElevatorTypeName(InfElevatorType type)
+	{
+		switch (type)
+		{
+			case IELEV_MOVE_CEILING: return "move_ceiling";
+			case IELEV_MOVE_FLOOR: return "move_floor";
+			case IELEV_MOVE_OFFSET: return "move_offset";
+			case IELEV_MOVE_WALL: return "move_wall";
+			case IELEV_ROTATE_WALL: return "rotate_wall";
+			case IELEV_SCROLL_WALL: return "scroll_wall";
+			case IELEV_SCROLL_FLOOR: return "scroll_floor";
+			case IELEV_SCROLL_CEILING: return "scroll_ceiling";
+			case IELEV_CHANGE_LIGHT: return "change_light";
+			case IELEV_MOVE_FC: return "move_fc";
+			case IELEV_CHANGE_WALL_LIGHT: return "change_wall_light";
+			default: return "unknown";
+		}
+	}
+
+	static void xboxInfFormatParent(const InfTrigger* trigger, char* buffer, s32 bufferSize)
+	{
+		if (!trigger || !buffer || bufferSize <= 0)
+		{
+			return;
+		}
+
+		buffer[0] = 0;
+		if (trigger->type == ITRIGGER_SECTOR)
+		{
+			const RSector* sector = (const RSector*)trigger->parent;
+			snprintf(buffer, bufferSize, "sector=%d", sector ? sector->id : -1);
+		}
+		else
+		{
+			const RWall* wall = (const RWall*)trigger->parent;
+			snprintf(buffer, bufferSize, "sector=%d wall=%d",
+				(wall && wall->sector) ? wall->sector->id : -1,
+				wall ? wall->id : -1);
+		}
+	}
+#endif
+
 	/////////////////////////////////////////////////////
 	// API
 	/////////////////////////////////////////////////////
@@ -189,6 +276,36 @@ namespace TFE_Jedi
 		return stop;
 	}
 
+	static JBool inf_requireResolvedStop(InfElevator* elev, const char* context)
+	{
+		if (elev && elev->nextStop && elev->value)
+		{
+			return JTRUE;
+		}
+
+#ifdef _XBOX
+		if (xboxInfDebugEnabled())
+		{
+			TFE_System::logWrite(LOG_WARNING, "INFDBG",
+				"%s skipped unresolved stop elev=%p sector=%d type=%s value=%p nextStop=%p stops=%p count=%d",
+				context ? context : "elevator command",
+				elev,
+				elev && elev->sector ? elev->sector->id : -1,
+				elev ? xboxInfElevatorTypeName(elev->type) : "null",
+				elev ? elev->value : nullptr,
+				elev ? elev->nextStop : nullptr,
+				elev ? elev->stops : nullptr,
+				(elev && elev->stops) ? allocator_getCount(elev->stops) : 0);
+		}
+#endif
+		if (elev)
+		{
+			elev->updateFlags &= ~ELEV_MOVING;
+			elev->nextTick = DELAY_SLEEP;
+		}
+		return JFALSE;
+	}
+
 	Stop* allocateStop(InfElevator* elev)
 	{
 		if (!elev->stops)
@@ -224,6 +341,11 @@ namespace TFE_Jedi
 
 		elev->fixedStep = fixedStep;
 		elev->speed = speed;
+
+		if (!inf_requireResolvedStop(elev, "initial stop"))
+		{
+			return;
+		}
 
 		Stop* next = elev->nextStop;
 		Tick delay = next->delay;
@@ -598,6 +720,11 @@ namespace TFE_Jedi
 
 	void inf_getMessageTarget(const char* arg, RSector** sector, RWall** targetWall)
 	{
+#ifdef _XBOX
+		char originalArg[64];
+		strncpy(originalArg, arg ? arg : "", sizeof(originalArg) - 1);
+		originalArg[sizeof(originalArg) - 1] = 0;
+#endif
 		KEYWORD key = getKeywordIndex(arg);
 		if (key == KW_SYSTEM)
 		{
@@ -648,6 +775,14 @@ namespace TFE_Jedi
 
 		*sector = msgSector;
 		*targetWall = wall;
+#ifdef _XBOX
+		if (xboxInfDebugEnabled() && !msgSector && !wall)
+		{
+			TFE_System::logWrite(LOG_WARNING, "INFDBG",
+				"target unresolved arg='%s' mutated='%s' wallIndex=%d",
+				originalArg, arg ? arg : "", wallIndex);
+		}
+#endif
 	}
 
 	Stop* inf_getStopByIndex(InfElevator* elev, s32 index)
@@ -1472,6 +1607,19 @@ namespace TFE_Jedi
 
 	void inf_startElevator(InfElevator* elev)
 	{
+		if (!elev || !elev->value)
+		{
+#ifdef _XBOX
+			if (xboxInfDebugEnabled())
+			{
+				TFE_System::logWrite(LOG_WARNING, "INFDBG",
+					"inf_startElevator skipped invalid elev=%p value=%p",
+					elev, elev ? elev->value : nullptr);
+			}
+#endif
+			return;
+		}
+
 		if (!(elev->updateFlags & ELEV_MOVING))
 		{
 			// Figure out the source position for the sound effect.
@@ -1557,25 +1705,44 @@ namespace TFE_Jedi
 							}
 							else
 							{
-								u32 delay = taskCtx->nextStop->delay;
-								if (delay == IDELAY_HOLD)
+								if (!taskCtx->nextStop)
 								{
-									taskCtx->elev->nextTick = DELAY_SLEEP;
-								}
-								else if (delay == IDELAY_COMPLETE || delay == IDELAY_TERMINATE)
-								{
-									// delete the elevator, we're done here.
-									inf_deleteElevator(taskCtx->elev);
-									taskCtx->elevDeleted = 1;
-									if (delay == IDELAY_COMPLETE)
+#ifdef _XBOX
+									if (xboxInfDebugEnabled())
 									{
-										agent_levelComplete();
-										agent_createLevelEndTask();
+										TFE_System::logWrite(LOG_WARNING, "INFDBG",
+											"elevator reached null nextStop elev=%p sector=%d",
+											taskCtx->elev,
+											taskCtx->elev && taskCtx->elev->sector ? taskCtx->elev->sector->id : -1);
 									}
+#endif
+									taskCtx->elev->nextTick = DELAY_SLEEP;
+									taskCtx->elev->updateFlags &= ~ELEV_MOVING;
+									taskCtx->elevDeleted = 1;
 								}
-								else  // Timed
+
+								if (!taskCtx->elevDeleted)
 								{
-									taskCtx->elev->nextTick = s_curTick + taskCtx->nextStop->delay;
+									u32 delay = taskCtx->nextStop->delay;
+									if (delay == IDELAY_HOLD)
+									{
+										taskCtx->elev->nextTick = DELAY_SLEEP;
+									}
+									else if (delay == IDELAY_COMPLETE || delay == IDELAY_TERMINATE)
+									{
+										// delete the elevator, we're done here.
+										inf_deleteElevator(taskCtx->elev);
+										taskCtx->elevDeleted = 1;
+										if (delay == IDELAY_COMPLETE)
+										{
+											agent_levelComplete();
+											agent_createLevelEndTask();
+										}
+									}
+									else  // Timed
+									{
+										taskCtx->elev->nextTick = s_curTick + taskCtx->nextStop->delay;
+									}
 								}
 							}
 
@@ -1618,6 +1785,20 @@ namespace TFE_Jedi
 								
 								// Advance to the next stop.
 								taskCtx->elev->nextStop = inf_advanceStops(taskCtx->elev->stops, 0, 1);
+								if (!taskCtx->elev->nextStop)
+								{
+#ifdef _XBOX
+									if (xboxInfDebugEnabled())
+									{
+										TFE_System::logWrite(LOG_WARNING, "INFDBG",
+											"advance after stop returned null elev=%p sector=%d",
+											taskCtx->elev,
+											taskCtx->elev && taskCtx->elev->sector ? taskCtx->elev->sector->id : -1);
+									}
+#endif
+									taskCtx->elev->nextTick = DELAY_SLEEP;
+									taskCtx->elev->updateFlags &= ~ELEV_MOVING;
+								}
 								task_localBlockEnd;
 							} // (!elevDeleted)
 						}
@@ -2500,6 +2681,15 @@ namespace TFE_Jedi
 				s_msgEntity = entity;
 				s_msgTarget = link->target;
 				s_msgEvent = evt;
+#ifdef _XBOX
+				if (xboxInfDebugEnabled())
+				{
+					TFE_System::logWrite(LOG_MSG, "INFDBG",
+						"dispatch linkType=%d msg=%s(%d) evt=0x%08x mask=0x%08x target=%p task=%p",
+						(s32)link->type, xboxInfMessageName(msgType), (s32)msgType,
+						evt, link->eventMask, link->target, link->task);
+				}
+#endif
 
 				// Handle recursion gracefully.
 				void* iter = allocator_getIter(infLink);
@@ -2518,6 +2708,19 @@ namespace TFE_Jedi
 	// Returns JTRUE if the elevator has reached the next stop, else JFALSE.
 	JBool updateElevator(InfElevator* elev)
 	{
+		if (!elev || !elev->value)
+		{
+#ifdef _XBOX
+			if (xboxInfDebugEnabled())
+			{
+				TFE_System::logWrite(LOG_WARNING, "INFDBG",
+					"updateElevator skipped invalid elev=%p value=%p",
+					elev, elev ? elev->value : nullptr);
+			}
+#endif
+			return JFALSE;
+		}
+
 		fixed16_16* value = elev->value;
 		Stop* nextStop = elev->nextStop;
 
@@ -2609,6 +2812,19 @@ namespace TFE_Jedi
 
 	void inf_elevatorStart(InfElevator* elev)
 	{
+		if (!elev || !elev->value)
+		{
+#ifdef _XBOX
+			if (xboxInfDebugEnabled())
+			{
+				TFE_System::logWrite(LOG_WARNING, "INFDBG",
+					"inf_elevatorStart skipped invalid elev=%p value=%p",
+					elev, elev ? elev->value : nullptr);
+			}
+#endif
+			return;
+		}
+
 		if (!(elev->updateFlags & ELEV_MOVING))
 		{
 			if (elev->nextStop && *elev->value != elev->nextStop->value)
@@ -2633,7 +2849,7 @@ namespace TFE_Jedi
 			{
 				// Goto the last stop.
 				elev->nextStop = inf_advanceStops(elev->stops, -1, 0);
-				if (*elev->value != elev->nextStop->value)
+				if (inf_requireResolvedStop(elev, "trigger last") && *elev->value != elev->nextStop->value)
 				{
 					inf_elevatorStart(elev);
 				}
@@ -2645,7 +2861,10 @@ namespace TFE_Jedi
 					elev->nextStop = inf_advanceStops(elev->stops, 0, -1);
 				}
 				elev->nextStop = inf_advanceStops(elev->stops, 0, -1);
-				inf_elevatorStart(elev);
+				if (inf_requireResolvedStop(elev, "trigger prev"))
+				{
+					inf_elevatorStart(elev);
+				}
 			} break;
 			case TRIGMOVE_NEXT:
 			default:
@@ -2654,7 +2873,10 @@ namespace TFE_Jedi
 				{
 					elev->nextStop = inf_advanceStops(elev->stops, 0, 1);
 				}
-				inf_elevatorStart(elev);
+				if (inf_requireResolvedStop(elev, "trigger next"))
+				{
+					inf_elevatorStart(elev);
+				}
 			}
 		}
 
@@ -2677,6 +2899,34 @@ namespace TFE_Jedi
 			return;
 		}
 
+#ifdef _XBOX
+		s_xboxInfTriggerDepth++;
+		if (xboxInfDebugEnabled())
+		{
+			char parentInfo[64];
+			xboxInfFormatParent(trigger, parentInfo, sizeof(parentInfo));
+			TFE_System::logWrite(LOG_MSG, "INFDBG",
+				"trigger enter depth=%d type=%s %s cmd=%s(%d) event=0x%08x msgEvent=0x%08x targets=%d master=%d",
+				s_xboxInfTriggerDepth, xboxInfTriggerTypeName(trigger->type), parentInfo,
+				xboxInfMessageName(trigger->cmd), (s32)trigger->cmd,
+				trigger->event, s_msgEvent,
+				trigger->targets ? allocator_getCount(trigger->targets) : 0,
+				trigger->master ? 1 : 0);
+		}
+		if (s_xboxInfTriggerDepth > 32)
+		{
+			char parentInfo[64];
+			xboxInfFormatParent(trigger, parentInfo, sizeof(parentInfo));
+			TFE_System::logWrite(LOG_ERROR, "INFDBG",
+				"trigger recursion guard depth=%d type=%s %s cmd=%s(%d) event=0x%08x msgEvent=0x%08x",
+				s_xboxInfTriggerDepth, xboxInfTriggerTypeName(trigger->type), parentInfo,
+				xboxInfMessageName(trigger->cmd), (s32)trigger->cmd,
+				trigger->event, s_msgEvent);
+			s_xboxInfTriggerDepth--;
+			return;
+		}
+#endif
+
 		// Play trigger sound.
 		sound_play(trigger->soundId);
 
@@ -2689,6 +2939,24 @@ namespace TFE_Jedi
 			{
 				s_msgArg1 = trigger->arg0;
 				s_msgArg2 = trigger->arg1;
+#ifdef _XBOX
+				if (xboxInfDebugEnabled())
+				{
+					TFE_System::logWrite(LOG_MSG, "INFDBG",
+						"trigger target depth=%d targetSector=%d targetWallSector=%d targetWall=%d targetMask=0x%08x sendEvent=0x%08x cmd=%s(%d)",
+						s_xboxInfTriggerDepth,
+						target->sector ? target->sector->id : -1,
+						(target->wall && target->wall->sector) ? target->wall->sector->id : -1,
+						target->wall ? target->wall->id : -1,
+						target->eventMask, trigger->event,
+						xboxInfMessageName(trigger->cmd), (s32)trigger->cmd);
+					if (!target->sector && !target->wall)
+					{
+						TFE_System::logWrite(LOG_WARNING, "INFDBG",
+							"trigger target is null; legacy path will recurse current trigger");
+					}
+				}
+#endif
 
 				if (target->wall)
 				{
@@ -2758,20 +3026,49 @@ namespace TFE_Jedi
 				trigger->master = JFALSE;
 			} break;
 		}
+#ifdef _XBOX
+		if (xboxInfDebugEnabled())
+		{
+			char parentInfo[64];
+			xboxInfFormatParent(trigger, parentInfo, sizeof(parentInfo));
+			TFE_System::logWrite(LOG_MSG, "INFDBG",
+				"trigger exit depth=%d type=%s %s state=%d master=%d",
+				s_xboxInfTriggerDepth, xboxInfTriggerTypeName(trigger->type), parentInfo,
+				trigger->state, trigger->master ? 1 : 0);
+		}
+		s_xboxInfTriggerDepth--;
+#endif
 	}
 
 	void infElevatorMessageInternal(MessageType msgType)
 	{
 		u32 event = s_msgEvent;
 		InfElevator* elev = (InfElevator*)s_msgTarget;
-		if (elev->deleted) { return; }
+		if (!elev || elev->deleted) { return; }
 
 		SecObject* entity = (SecObject*)s_msgEntity;
 		RSector* sector = elev->sector;
 		u32 arg1 = s_msgArg1;
+#ifdef _XBOX
+		if (xboxInfDebugEnabled() && msgType != MSG_RUN_TASK)
+		{
+			TFE_System::logWrite(LOG_MSG, "INFDBG",
+				"elevator msg type=%s(%d) elevType=%s sector=%d event=0x%08x arg1=%u master=%d nextStop=%d",
+				xboxInfMessageName(msgType), (s32)msgType,
+				xboxInfElevatorTypeName(elev->type),
+				sector ? sector->id : -1,
+				event, arg1,
+				(elev->updateFlags & ELEV_MASTER_ON) ? 1 : 0,
+				elev->nextStop ? elev->nextStop->index : -1);
+		}
+#endif
 
 		if (entity && (entity->entityFlags&ETFLAG_SMART_OBJ))
 		{
+			if (!sector)
+			{
+				return;
+			}
 			if (sector->flags1 & SEC_FLAGS1_NO_SMART_OBJ)
 			{
 				return;
@@ -2880,7 +3177,10 @@ namespace TFE_Jedi
 				{
 					elev->nextStop = inf_advanceStops(elev->stops, 0, 1);
 				}
-				inf_startElevator(elev);
+				if (elev->nextStop)
+				{
+					inf_startElevator(elev);
+				}
 			} break;
 			case MSG_PREV_STOP:
 			{
@@ -2894,13 +3194,16 @@ namespace TFE_Jedi
 				}
 				// Back to the previous stop (see the note above on why this can happen twice).
 				elev->nextStop = inf_advanceStops(elev->stops, 0, -1);
-				inf_startElevator(elev);
+				if (elev->nextStop)
+				{
+					inf_startElevator(elev);
+				}
 			} break;
 			case MSG_GOTO_STOP:
 			if (elev->stops)
 			{
 				Stop* stop = inf_advanceStops(elev->stops, arg1, 0);
-				if (stop->value != *elev->value)
+				if (stop && elev->value && stop->value != *elev->value)
 				{
 					elev->nextStop = stop;
 					inf_startElevator(elev);
@@ -2923,7 +3226,7 @@ namespace TFE_Jedi
 			case MSG_CRUSH:
 			{
 				RSector* sector = elev->sector;
-				if (!(sector->flags1 & SEC_FLAGS1_CRUSHING))
+				if (sector && !(sector->flags1 & SEC_FLAGS1_CRUSHING))
 				{
 					if (elev->trigMove <= TRIGMOVE_CONT)
 					{
@@ -2972,7 +3275,10 @@ namespace TFE_Jedi
 					elev->nextStop = inf_advanceStops(elev->stops, arg1, 0);
 				}
 				// Play the sound effect, update the flags, update the next update time if NOT moving.
-				inf_elevatorStart(elev);
+				if (elev->nextStop)
+				{
+					inf_elevatorStart(elev);
+				}
 			} break;
 		}
 	}
@@ -2991,6 +3297,19 @@ namespace TFE_Jedi
 	{
 		InfTrigger* trigger = (InfTrigger*)s_msgTarget;
 		if (trigger->deleted) { return; }
+#ifdef _XBOX
+		if (xboxInfDebugEnabled())
+		{
+			char parentInfo[64];
+			xboxInfFormatParent(trigger, parentInfo, sizeof(parentInfo));
+			TFE_System::logWrite(LOG_MSG, "INFDBG",
+				"trigger msg type=%s(%d) triggerType=%s %s master=%d state=%d event=0x%08x msgEvent=0x%08x",
+				xboxInfMessageName(msgType), (s32)msgType,
+				xboxInfTriggerTypeName(trigger->type), parentInfo,
+				trigger->master ? 1 : 0, trigger->state,
+				trigger->event, s_msgEvent);
+		}
+#endif
 
 		switch (msgType)
 		{
@@ -3029,6 +3348,23 @@ namespace TFE_Jedi
 
 	void elevHandleStopDelay(InfElevator* elev)
 	{
+		if (!elev || !elev->nextStop)
+		{
+#ifdef _XBOX
+			if (xboxInfDebugEnabled())
+			{
+				TFE_System::logWrite(LOG_WARNING, "INFDBG",
+					"elevHandleStopDelay skipped elev=%p nextStop=%p",
+					elev, elev ? elev->nextStop : nullptr);
+			}
+#endif
+			if (elev)
+			{
+				elev->updateFlags &= ~ELEV_MOVING;
+			}
+			return;
+		}
+
 		Stop* nextStop = elev->nextStop;
 		if ((elev->updateFlags & ELEV_MOVING) && nextStop->delay)
 		{
@@ -3054,6 +3390,19 @@ namespace TFE_Jedi
 
 	Stop* inf_advanceStops(Allocator* stops, s32 absoluteStop, s32 relativeStop)
 	{
+		if (!stops || allocator_getCount(stops) <= 0)
+		{
+#ifdef _XBOX
+			if (xboxInfDebugEnabled())
+			{
+				TFE_System::logWrite(LOG_WARNING, "INFDBG",
+					"advanceStops failed stops=%p count=%d abs=%d rel=%d",
+					stops, allocator_getCount(stops), absoluteStop, relativeStop);
+			}
+#endif
+			return nullptr;
+		}
+
 		Stop* stop = nullptr;
 		// advance to a future stop
 		if (relativeStop > 0)
@@ -3245,6 +3594,19 @@ namespace TFE_Jedi
 
 	void inf_sendSectorMessage(RSector* sector, MessageType msgType)
 	{
+		if (!sector)
+		{
+#ifdef _XBOX
+			if (xboxInfDebugEnabled())
+			{
+				TFE_System::logWrite(LOG_WARNING, "INFDBG",
+					"inf_sendSectorMessage skipped null sector msg=%s(%d)",
+					xboxInfMessageName(msgType), (s32)msgType);
+			}
+#endif
+			return;
+		}
+
 		switch (msgType)
 		{
 			case MSG_WAKEUP:

@@ -36,6 +36,9 @@
 #include <TFE_Game/saveSystem.h>
 #include <TFE_Game/reticle.h>
 #include <TFE_Jedi/InfSystem/infSystem.h>
+#include <TFE_Jedi/InfSystem/message.h>
+#include <TFE_Jedi/Level/levelData.h>
+#include <TFE_Jedi/Level/rsector.h>
 #include <TFE_FileSystem/fileutil.h>
 #include <TFE_FileSystem/filestream.h>
 #include <TFE_FileSystem/paths.h>
@@ -199,6 +202,22 @@ static const bool s_frontendVerbose = false;
 static u32 s_frontendPresentPhase = 0;
 static AppState s_lastPresentedFrontendState = APP_STATE_UNINIT;
 static bool s_soakMode = false;
+static bool s_lvl3ReproMode = false;
+static bool s_missionCompleteTestMode = false;
+static u32  s_missionCompleteTestFrame = 0;
+static TFE_RenderBackend::XboxMissionCompleteInfo s_missionCompleteTestInfo = { 139, 0, 7, 0 };
+static bool s_lvl3ReproStarted = false;
+static bool s_lvl3ReproMissionReady = false;
+static bool s_lvl3ReproAwaitingLevelChange = false;
+static bool s_lvl3ReproDone = false;
+static u32  s_lvl3ReproStartMs = 0;
+static u32  s_lvl3ReproNextSummaryMs = 0;
+static u32  s_lvl3ReproNextActionMs = 0;
+static s32  s_lvl3ReproStage = 0;
+static s32  s_lvl3ReproPendingTargetIndex = -1;
+static char s_lvl3ReproLevelName[32] = "";
+static s32  s_lvl3ReproPanelPulse = 0;
+static s32  s_lvl3ReproSectorProbeStep = 0;
 static bool s_soakMissionReady = false;
 static bool s_soakLastSaveOk = false;
 static bool s_soakAwaitingLevelChange = false;
@@ -344,6 +363,18 @@ static bool xboxDetectSoakMode()
            xboxAbsoluteFileExists("tfe_soak.txt");
 }
 
+static bool xboxDetectLevel3ReproMode()
+{
+    return xboxAbsoluteFileExists("D:\\tfe_lvl3_repro.txt") ||
+           xboxAbsoluteFileExists("tfe_lvl3_repro.txt");
+}
+
+static bool xboxDetectMissionCompleteTestMode()
+{
+    return xboxAbsoluteFileExists("D:\\tfe_mission_complete_test.txt") ||
+           xboxAbsoluteFileExists("tfe_mission_complete_test.txt");
+}
+
 static bool xboxReadFileEquals(const char* path, const unsigned char* data, u32 size)
 {
     HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
@@ -456,6 +487,19 @@ static bool xboxTimeReached(u32 now, u32 deadline)
     return ((s32)(now - deadline)) >= 0;
 }
 
+static void updateXboxResourceHeartbeat()
+{
+    enum { RESOURCE_HEARTBEAT_MS = 20000 };
+    static u32 s_nextResourceHeartbeatMs = 0;
+
+    const u32 now = GetTickCount();
+    if (s_nextResourceHeartbeatMs == 0 || xboxTimeReached(now, s_nextResourceHeartbeatMs))
+    {
+        logXboxResourceSnapshot("heartbeat");
+        s_nextResourceHeartbeatMs = now + RESOURCE_HEARTBEAT_MS;
+    }
+}
+
 static const TFE_DarkForces::CheatID c_soakTransitionCheats[] =
 {
     TFE_DarkForces::CHEAT_LATALAY,
@@ -490,6 +534,18 @@ static const char* c_soakTransitionNames[] =
     "EXECUTOR",
     "ARC",
     "SECBASE"
+};
+
+static const TFE_DarkForces::CheatID c_lvl3ReproCheats[] =
+{
+    TFE_DarkForces::CHEAT_LATALAY,
+    TFE_DarkForces::CHEAT_LASEWERS
+};
+
+static const char* c_lvl3ReproNames[] =
+{
+    "TALAY",
+    "SEWERS"
 };
 
 static void xboxSoakCopyLevelName(char* out, u32 outSize)
@@ -697,8 +753,250 @@ static void updateXboxSoak()
         s_soakNextTransitionMs = now + 120000u;
     }
 }
+
+static void logXboxLevel3ReproSummary(const char* phase, u32 now)
+{
+    const u32 elapsedSec = s_lvl3ReproStartMs ? (now - s_lvl3ReproStartMs) / 1000u : 0u;
+    TFE_System::logWrite(LOG_MSG, "L3REPRO",
+        "summary t=%us phase=%s stage=%d panelPulse=%d probeStep=%d state=%d missionMode=%d level='%s' levelIndex=%d tasks=%d gamePtr=%p",
+        elapsedSec,
+        phase ? phase : "",
+        s_lvl3ReproStage,
+        s_lvl3ReproPanelPulse,
+        s_lvl3ReproSectorProbeStep,
+        (s32)s_curState,
+        (s32)TFE_DarkForces::s_missionMode,
+        xboxSoakCurrentLevelName(),
+        TFE_DarkForces::agent_getLevelIndex(),
+        TFE_Jedi::task_getCount(),
+        s_curGame);
+    logXboxResourceSnapshot(phase ? phase : "l3repro");
+}
+
+static void xboxLevel3ReproBeginLevel(u32 now, const char* levelName)
+{
+    if (s_lvl3ReproAwaitingLevelChange)
+    {
+        TFE_System::logWrite(LOG_MSG, "L3REPRO",
+            "level transition complete target='%s' arrived='%s' levelIndex=%d stage=%d",
+            (s_lvl3ReproPendingTargetIndex >= 0) ? c_lvl3ReproNames[s_lvl3ReproPendingTargetIndex] : "",
+            levelName ? levelName : "",
+            TFE_DarkForces::agent_getLevelIndex(),
+            s_lvl3ReproStage);
+        s_lvl3ReproPendingTargetIndex = -1;
+    }
+
+    xboxSoakCopyLevelName(s_lvl3ReproLevelName, sizeof(s_lvl3ReproLevelName));
+    s_lvl3ReproMissionReady = true;
+    s_lvl3ReproAwaitingLevelChange = false;
+    s_lvl3ReproNextSummaryMs = now + 20000u;
+    s_lvl3ReproNextActionMs = now + 5000u;
+
+    TFE_System::logWrite(LOG_MSG, "L3REPRO",
+        "level ready level='%s' levelIndex=%d stage=%d",
+        s_lvl3ReproLevelName,
+        TFE_DarkForces::agent_getLevelIndex(),
+        s_lvl3ReproStage);
+    logXboxLevel3ReproSummary("level-ready", now);
+}
+
+static RSector* xboxLevel3ReproFindSector(const char* name)
+{
+    MessageAddress* addr = TFE_Jedi::message_getAddress(name);
+    return addr ? addr->sector : NULL;
+}
+
+static bool xboxLevel3ReproPulsePanel(u32 now)
+{
+    enum { PANEL01_SECTOR_ID = 328, PANEL_PULSE_COUNT = 6 };
+
+    if (strcasecmp(xboxSoakCurrentLevelName(), "SEWERS") != 0)
+    {
+        return false;
+    }
+
+    if (s_lvl3ReproPanelPulse >= PANEL_PULSE_COUNT)
+    {
+        return true;
+    }
+
+    RSector* panel = xboxLevel3ReproFindSector("panel01");
+    if (!panel && TFE_Jedi::s_levelState.sectors && TFE_Jedi::s_levelState.sectorCount > PANEL01_SECTOR_ID)
+    {
+        panel = &TFE_Jedi::s_levelState.sectors[PANEL01_SECTOR_ID];
+    }
+    if (!panel)
+    {
+        TFE_System::logWrite(LOG_ERROR, "L3REPRO",
+            "panel01 trigger skipped: sector not found pulse=%d", s_lvl3ReproPanelPulse + 1);
+        s_lvl3ReproDone = true;
+        return false;
+    }
+
+    TFE_System::logWrite(LOG_MSG, "L3REPRO",
+        "panel01 trigger pulse=%d/%d sector=%d evt=0x%08x",
+        s_lvl3ReproPanelPulse + 1,
+        PANEL_PULSE_COUNT,
+        panel->id,
+        (u32)INF_EVENT_NUDGE_BACK);
+    TFE_Jedi::message_sendToSector(panel, TFE_DarkForces::s_playerObject, INF_EVENT_NUDGE_BACK, MSG_TRIGGER);
+    s_lvl3ReproPanelPulse++;
+    logXboxLevel3ReproSummary("after-panel-pulse", now);
+    s_lvl3ReproNextActionMs = now + 1000u;
+    return s_lvl3ReproPanelPulse >= PANEL_PULSE_COUNT;
+}
+
+static bool xboxLevel3ReproMovePlayerToSector(RSector* sector, fixed16_16 x, fixed16_16 z)
+{
+    if (!sector || !TFE_DarkForces::s_playerObject)
+    {
+        return false;
+    }
+
+    SecObject* player = TFE_DarkForces::s_playerObject;
+    player->posWS.x = x;
+    player->posWS.y = sector->floorHeight;
+    player->posWS.z = z;
+    TFE_DarkForces::s_playerYPos = player->posWS.y;
+    TFE_Jedi::sector_addObject(sector, player);
+    return player->sector == sector;
+}
+
+static bool xboxLevel3ReproProbeOpenedDoor(u32 now)
+{
+    RSector* sludge02 = xboxLevel3ReproFindSector("sludge02");
+    RSector* sludge03 = xboxLevel3ReproFindSector("sludge03");
+    if (!sludge02 || !sludge03 || !TFE_DarkForces::s_playerObject)
+    {
+        TFE_System::logWrite(LOG_ERROR, "L3REPRO",
+            "sludge03 probe skipped: sludge02=%p sludge03=%p player=%p",
+            sludge02, sludge03, TFE_DarkForces::s_playerObject);
+        s_lvl3ReproDone = true;
+        return false;
+    }
+
+    if (s_lvl3ReproSectorProbeStep == 0)
+    {
+        bool ok = xboxLevel3ReproMovePlayerToSector(sludge02, TFE_Jedi::floatToFixed16(254.0f), TFE_Jedi::floatToFixed16(192.0f));
+        TFE_System::logWrite(ok ? LOG_MSG : LOG_ERROR, "L3REPRO",
+            "sludge03 probe step=0 placed player in sludge02 ok=%d sector=%d pos=(254,192)",
+            ok ? 1 : 0,
+            TFE_DarkForces::s_playerObject->sector ? TFE_DarkForces::s_playerObject->sector->id : -1);
+        s_lvl3ReproSectorProbeStep = 1;
+        s_lvl3ReproNextActionMs = now + 500u;
+        return false;
+    }
+
+    if (s_lvl3ReproSectorProbeStep == 1)
+    {
+        bool ok = xboxLevel3ReproMovePlayerToSector(sludge03, TFE_Jedi::floatToFixed16(251.0f), TFE_Jedi::floatToFixed16(192.0f));
+        TFE_System::logWrite(ok ? LOG_MSG : LOG_ERROR, "L3REPRO",
+            "sludge03 probe step=1 crossed into sludge03 ok=%d sector=%d pos=(251,192)",
+            ok ? 1 : 0,
+            TFE_DarkForces::s_playerObject->sector ? TFE_DarkForces::s_playerObject->sector->id : -1);
+        logXboxLevel3ReproSummary("after-sludge03-probe", now);
+        s_lvl3ReproSectorProbeStep = 2;
+        s_lvl3ReproNextActionMs = now + 5000u;
+        return true;
+    }
+
+    return true;
+}
+
+static void updateXboxLevel3Repro()
+{
+    if (!s_lvl3ReproMode || s_lvl3ReproDone) return;
+
+    const u32 now = GetTickCount();
+    if (!s_lvl3ReproStarted)
+    {
+        s_lvl3ReproStarted = true;
+        s_lvl3ReproStartMs = now ? now : 1u;
+        s_lvl3ReproNextSummaryMs = now + 20000u;
+        s_lvl3ReproNextActionMs = now + 5000u;
+        TFE_System::logWrite(LOG_MSG, "L3REPRO", "begin no-save transition shortcut to SEWERS");
+        logXboxLevel3ReproSummary("begin", now);
+    }
+
+    if (!xboxSoakInActiveMission())
+    {
+        if (xboxTimeReached(now, s_lvl3ReproNextSummaryMs))
+        {
+            logXboxLevel3ReproSummary(s_lvl3ReproAwaitingLevelChange ? "loading-next" : "waiting-mission", now);
+            s_lvl3ReproNextSummaryMs = now + 20000u;
+        }
+        return;
+    }
+
+    const char* currentLevel = xboxSoakCurrentLevelName();
+    if (!s_lvl3ReproMissionReady || strcmp(currentLevel, s_lvl3ReproLevelName) != 0)
+    {
+        xboxLevel3ReproBeginLevel(now, currentLevel);
+        return;
+    }
+
+    if (xboxTimeReached(now, s_lvl3ReproNextSummaryMs))
+    {
+        logXboxLevel3ReproSummary("steady", now);
+        s_lvl3ReproNextSummaryMs = now + 20000u;
+    }
+
+    if (!xboxTimeReached(now, s_lvl3ReproNextActionMs))
+    {
+        return;
+    }
+
+    if (s_lvl3ReproStage < (s32)TFE_ARRAYSIZE(c_lvl3ReproCheats))
+    {
+        const s32 targetIndex = s_lvl3ReproStage;
+        s_lvl3ReproPendingTargetIndex = targetIndex;
+        TFE_System::logWrite(LOG_MSG, "L3REPRO",
+            "level transition begin from='%s' target='%s' cheat=%d stage=%d",
+            s_lvl3ReproLevelName,
+            c_lvl3ReproNames[targetIndex],
+            (s32)c_lvl3ReproCheats[targetIndex],
+            s_lvl3ReproStage);
+        logXboxLevel3ReproSummary("before-level-change", now);
+        TFE_DarkForces::executeCheat(c_lvl3ReproCheats[targetIndex]);
+        s_lvl3ReproAwaitingLevelChange = true;
+        s_lvl3ReproStage++;
+        s_lvl3ReproNextActionMs = now + 120000u;
+        return;
+    }
+
+    if (s_lvl3ReproStage == (s32)TFE_ARRAYSIZE(c_lvl3ReproCheats))
+    {
+        if (xboxLevel3ReproPulsePanel(now))
+        {
+            TFE_System::logWrite(LOG_MSG, "L3REPRO",
+                "panel01 sequence complete pulses=%d; probing opened sludge03 path",
+                s_lvl3ReproPanelPulse);
+            s_lvl3ReproStage++;
+            s_lvl3ReproNextActionMs = now + 2000u;
+        }
+        return;
+    }
+
+    if (s_lvl3ReproStage == (s32)TFE_ARRAYSIZE(c_lvl3ReproCheats) + 1)
+    {
+        if (xboxLevel3ReproProbeOpenedDoor(now))
+        {
+            s_lvl3ReproStage++;
+            s_lvl3ReproNextActionMs = now + 5000u;
+        }
+        return;
+    }
+
+    TFE_System::logWrite(LOG_MSG, "L3REPRO",
+        "SEWERS panel01/sludge03 repro complete level='%s' levelIndex=%d",
+        s_lvl3ReproLevelName,
+        TFE_DarkForces::agent_getLevelIndex());
+    logXboxLevel3ReproSummary("complete", now);
+    s_lvl3ReproDone = true;
+}
 #else
 static void updateXboxSoak() {}
+static void updateXboxLevel3Repro() {}
 #endif
 
 static bool isNativeFrontendState(AppState state)
@@ -753,7 +1051,7 @@ extern "C" void TFE_XboxReturnToStartMenu()
 
 extern "C" bool TFE_XboxSoakAutoAdvanceMissionComplete()
 {
-    return s_soakMode;
+    return s_soakMode || s_lvl3ReproMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -3084,7 +3382,9 @@ void __cdecl main()
     // Open the log file as the very first thing, before any other init,
     // so early-boot failures are captured. XEMU soak logs go to E:\ because
     // the staged ISO's D:\ root is read-only; normal Xbox logs stay on D:\.
-    s_soakMode = xboxDetectSoakMode();
+    s_missionCompleteTestMode = xboxDetectMissionCompleteTestMode();
+    s_lvl3ReproMode = !s_missionCompleteTestMode && xboxDetectLevel3ReproMode();
+    s_soakMode = !s_missionCompleteTestMode && !s_lvl3ReproMode && xboxDetectSoakMode();
     TFE_System::openRotatingLog(s_soakMode ? "E:\\tfe_xbox_soak_log.txt" : "tfe_xbox_log.txt");
     TFE_XboxLogf("Main", "XBE entry");
 
@@ -3277,7 +3577,20 @@ void __cdecl main()
     // intro does not replay every time.
     // -----------------------------------------------------------------------
     TFE_Input::enableRelativeMode(false);
-    if (s_soakMode)
+    if (s_missionCompleteTestMode)
+    {
+        s_curState = APP_STATE_MENU;
+        TFE_System::logWrite(LOG_MSG, "MissionComplete", "test marker present; rendering mission-complete preview");
+        TFE_RenderBackend::xboxSetStartScreen(false, 0, 0);
+        TFE_RenderBackend::xboxSetMissionCompleteScreen(true, 0, s_missionCompleteTestFrame++, &s_missionCompleteTestInfo);
+    }
+    else if (s_lvl3ReproMode)
+    {
+        const char* reproArgv[] = { "tfe_xbox", "-c0", "-lSECBASE" };
+        TFE_System::logWrite(LOG_MSG, "L3REPRO", "marker present; starting no-save transition shortcut at SECBASE");
+        startGame(3, reproArgv);
+    }
+    else if (s_soakMode)
     {
         const char* soakArgv[] = { "tfe_xbox", "-c0", "-lSECBASE" };
         TFE_System::logWrite(LOG_MSG, "SOAK", "marker present; starting campaign transition soak at SECBASE");
@@ -3309,6 +3622,19 @@ void __cdecl main()
             TFE_System::logWrite(LOG_MSG, "Main", "Start+Back held - quitting.");
             s_loop = false;
             break;
+        }
+
+        if (s_missionCompleteTestMode)
+        {
+            TFE_RenderBackend::xboxSetMissionCompleteScreen(true, 0, s_missionCompleteTestFrame++, &s_missionCompleteTestInfo);
+            TFE_System::update();
+            updateXboxResourceHeartbeat();
+            TFE_RenderBackend::swap(false);
+            pumpXboxAudio();
+            TFE_System::frameLimiter_end();
+            TFE_Input::endFrame();
+            inputMapping_endFrame();
+            continue;
         }
 
         if (s_curState == APP_STATE_MENU)
@@ -3344,6 +3670,7 @@ void __cdecl main()
         pumpXboxAudio();
 
         TFE_System::update();
+        updateXboxResourceHeartbeat();
 
         bool endInputFrame = true;
         if (s_curState == APP_STATE_GAME)
@@ -3398,6 +3725,7 @@ void __cdecl main()
                     else
                     {
                         const s32 taskRan = TFE_Jedi::task_run();
+                        updateXboxLevel3Repro();
                         updateXboxSoak();
                         endInputFrame = taskRan != 0;
                     }
