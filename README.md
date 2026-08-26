@@ -28,7 +28,7 @@ first, then extract this zip over it.
 ## Screenshots
 
 <p align="center">
-  <img src="docs/images/xemu-main-menu-v1.1.2-16x9.png" alt="The Force Engine Xbox v1.1.2 main menu in XEMU" width="75%">
+  <img src="docs/images/xemu-main-menu-v1.1.2-16x9.png" alt="The Force Engine Xbox main menu in XEMU" width="75%">
 </p>
 
 <p align="center">
@@ -40,18 +40,16 @@ The screenshots were captured with XEMU's native screenshot function. The
 gameplay pair uses the same build and game data; only the Xbox dashboard aspect
 ratio setting differs.
 
-## 1.1.2 Patch Notes
+## 1.2.1 Patch Notes
 
-- 4:3 and 16:9 now follow the Xbox dashboard aspect-ratio setting automatically.
-- 480i and 480p are selected independently from the dashboard's progressive-scan
-  setting and the connected AV pack's capabilities.
-- Removed the in-game forced output selector, saved output-mode override, and
-  `tfe_force_480p.txt`/`tfe_force_720p.txt` debug overrides.
-- Widescreen gameplay uses a wider horizontal field of view instead of stretching
-  the 4:3 picture.
-- Fixed widescreen datapad/pause transitions and background alignment.
-- 720p remains disabled in this release.
-- Updated the in-game main-menu version label to `VER 1.1.2`.
+- Fixed the mission-complete save prompt layout, including the missing question
+  mark in `SAVE GAME?` in both 4:3 and 16:9.
+- Updated the default Xbox controls so `X` is Use and `B` is Crouch.
+- Fixed locked-door feedback so doors ask for the required key.
+- Improved weapon-wheel input handling and logging around wheel activation.
+- Strengthened Xbox level-transition teardown and resource logging for the
+  reported cumulative level 3 crash path.
+- Updated the in-game version to `1.2.1`.
 
 ## Install
 
@@ -159,7 +157,7 @@ project or in the release zip.
 
 ## Current State
 
-This is the 1.1.2 release. The focus is hardware stability and a complete
+This is the 1.2.1 release. The focus is hardware stability and a complete
 couch-playable Dark Forces experience.
 
 Working in this port:
